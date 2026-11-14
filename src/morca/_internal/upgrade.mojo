@@ -12,6 +12,10 @@ when = "after"           # before | after (the default)
 run = "morca backfill --rerun mojo_retool @all"   # a morca command
 
 [[version.step]]
+id = "1.2.0-repos"       # a big re-run, throttled as fill runs (#465)
+run = "morca backfill --rerun --as-fill mojo_repos 2023-01-01..2026-11-13"
+
+[[version.step]]
 id = "1.1.0-egress-hf"
 when = "before"
 manual = "The console downloads its model from huggingface.co: allow outbound HTTPS."

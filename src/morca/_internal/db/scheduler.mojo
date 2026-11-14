@@ -281,7 +281,8 @@ def fail_dead(
 ) raises:
     """Fails `pipeline`'s runs whose process died with no retries left
     (over `retries` starts), that the scheduler doesn't retry, or that are
-    fill runs while fills are off (`fills`)."""
+    fill runs while fills are off (`fills`), but those of a fill request
+    (#465)."""
     _ = tx.execute(
         String(
             "UPDATE orca.runs SET status = 'failed', ended = now(),",
@@ -294,7 +295,7 @@ def fail_dead(
             dead,
             " AND (starts - deferrals > $3 OR NOT ",
             RETRIED,
-            " OR (trigger = 'fill' AND NOT $4))",
+            " OR (trigger = 'fill' AND fill_request IS NULL AND NOT $4))",
         ),
         Params()
         .text(pipeline)

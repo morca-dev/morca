@@ -329,7 +329,7 @@ def candidates(
         " r.pipeline"
         " WHERE r.status = 'queued' AND p.placement = $1 AND NOT p.paused"
         " AND p.binary_path IS NOT NULL AND (r.trigger <> 'fill' OR"
-        " p.fills = 'all') AND NOT "
+        " p.fills = 'all' OR r.fill_request IS NOT NULL) AND NOT "
         + behind_sql("r")
         + " ORDER BY r.pipeline, r.trigger = 'fill', r.id) AS c ORDER BY"
         " priority DESC, trigger = 'fill', id",

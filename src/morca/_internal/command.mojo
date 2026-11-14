@@ -94,6 +94,8 @@ from morca._internal.instances import (
 from morca._internal.dataset_config import read_datasets, record_datasets
 from morca._internal.pool_config import read_pools, record_pools
 from morca._internal.registering import register_pipeline
+from morca._internal.registered import Registered, registered
+from morca._internal.fill_requesting import cancel_fill, request_fill
 from morca._internal.scheduler import Scheduler
 from morca._internal.tick import tick
 from morca._internal.control import fetch_secret
@@ -140,11 +142,15 @@ comptime USAGE = """usage:
                 control: runs on the scheduler's own host, morca.control;
                 default: the scheduler's runner)
                 <pipeline binary> [...]
-  morca backfill [--rerun [--allow-append]] [--preview] <pipeline>
-                KEY[..KEY][,...]
+  morca backfill [--rerun [--allow-append]] [--preview|--as-fill]
+                <pipeline> KEY[..KEY][,...]
                 (keyed: NAME[,...]|@all|@file:<path>; --rerun: done ones too,
                 refused for steps that append unless --allow-append;
-                --preview: what it would queue, queueing nothing)
+                --preview: what it would queue, queueing nothing;
+                --as-fill: a fill request, which the scheduler runs as fill
+                runs within keys_per_run, fill_max_runs, fill_window and
+                fill_budget_per_day, after the other runs: morca-toml.md)
+  morca backfill --cancel <pipeline>  (its fill request, and its runs)
   morca start <pipeline> KEY[..KEY][,...]   (one run over them all)
   morca cancel <pipeline> KEY[..KEY][,...]|@all
                 (its queued, running and retrying runs over those keys)
@@ -226,19 +232,29 @@ comptime USAGE = """usage:
 
 def _backfill_flags(args: List[String]) -> Bool:
     """Whether `morca backfill` has its two arguments after flags it knows
-    here: `--rerun`, and `--allow-append` with it."""
+    here: `--rerun`, `--allow-append` with it, and `--as-fill`."""
     if len(args) < 4:
         return False
     var rerun = False
     var allow = False
+    var as_fill = False
     for i in range(2, len(args) - 2):
         if args[i] == "--rerun" and not rerun:
             rerun = True
         elif args[i] == "--allow-append" and not allow:
             allow = True
+        elif args[i] == "--as-fill" and not as_fill:
+            as_fill = True
         else:
             return False
     return rerun or not allow
+
+
+def _registered_one(mut db: State, name: String) raises -> Registered:
+    var ps = registered(db, name)
+    if len(ps) == 0:
+        raise Error("morca: pipeline ", name, " isn't registered")
+    return ps[0].copy()
 
 
 def _usage(msg: String = ""):
@@ -491,6 +507,25 @@ def _command(args: List[String], target: String) raises -> Int:
         return _register(url, args)
     if cmd == "config" and len(args) >= 3:
         return _config(url, args)
+    if cmd == "backfill" and len(args) == 4 and args[2] == "--cancel":
+        var db = State(url)
+        db.migrate()
+        print(cancel_fill(db, _registered_one(db, args[3])))
+        return 0
+    if cmd == "backfill" and _backfill_flags(args) and "--as-fill" in args:
+        # A fill request (#465): the scheduler runs its keys as fill runs.
+        var db = State(url)
+        db.migrate()
+        print(
+            request_fill(
+                db,
+                _registered_one(db, args[len(args) - 2]),
+                args[len(args) - 1],
+                "--rerun" in args,
+                "--allow-append" in args,
+            )
+        )
+        return 0
     if cmd == "backfill" and _backfill_flags(args):
         # --rerun queues keys that are done as well; a key in a queued or
         # running run is still left to it. --allow-append lets a rerun

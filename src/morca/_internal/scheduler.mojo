@@ -103,6 +103,8 @@ Postgres, so it can be stopped and restarted, or run twice, at any time:
   taken (`fill_status`), up to `fill_max_runs` beside `max_runs`, none
   while its other runs are queued, it's paused, outside `fill_window` or
   over `fill_budget_per_day`.
+  A fill request (`morca backfill --as-fill`, `morca._internal.fill_requests`)
+  is run the same way, before the range, with fills off too.
 - **Retries.** A scheduled, backfilled, sensed or fill run that failed is started again
   after the pipeline's `retry_seconds` (else `MORCA_RETRY_SECONDS`, default
   60) doubling with each start, at most its `max_retry_seconds` if set,

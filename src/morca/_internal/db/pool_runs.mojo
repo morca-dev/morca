@@ -14,8 +14,8 @@ def hold_fills(mut tx: Transaction, pipeline: String, why: String) raises:
     _ = tx.execute(
         (
             "UPDATE orca.runs SET held = $2 WHERE pipeline = $1 AND"
-            " status = 'queued' AND trigger = 'fill' AND held IS"
-            " DISTINCT FROM $2"
+            " status = 'queued' AND trigger = 'fill' AND fill_request IS"
+            " NULL AND held IS DISTINCT FROM $2"
         ),
         Params().text(pipeline).text(why),
     )
@@ -212,17 +212,25 @@ def queue_fill(
     registry_hash: String,
     key: String,
     held: String,
+    request: Int64 = 0,
 ) raises -> Int64:
     """A new fill run of `pipeline` over `key`, queued for the pool and
-    saying `held`."""
+    saying `held`, of the fill request `request` (0 for the fill's
+    range)."""
     return (
         tx.query(
             (
                 "INSERT INTO orca.runs (pipeline, registry_hash,"
-                " partitions, trigger, status, held) VALUES ($1, $2,"
-                " $3, 'fill', 'queued', $4) RETURNING id"
+                " partitions, trigger, status, held, fill_request) VALUES"
+                " ($1, $2, $3, 'fill', 'queued', $4, NULLIF($5, 0))"
+                " RETURNING id"
             ),
-            Params().text(pipeline).text(registry_hash).text(key).text(held),
+            Params()
+            .text(pipeline)
+            .text(registry_hash)
+            .text(key)
+            .text(held)
+            .int64(request),
         )
         .row(0)
         .int64("id")

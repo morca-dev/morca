@@ -23,6 +23,7 @@ from morca._internal.fill import (
     FillStatus,
     fill_status,
 )
+from morca._internal.fill_requests import end_finished
 from morca._internal.system import system_now
 from morca._internal.db.batches import mark_batch
 import morca._internal.db.starting as starting_db
@@ -196,6 +197,7 @@ def _start(
             p.run_retries,
         )
         free = 0 if settling or hold else status.value().slots
+        end_finished(tx, status.value().request)
     var need = 0
     if control:
         need = 0  # no instance: nothing of the budget
@@ -324,10 +326,13 @@ def _start(
         if status:
             # New fill runs, over the partitions nothing has filled.
             ref next = status.value().next_keys
+            ref of = status.value().next_request
             var filled = List[Int64]()
             for i in range(min(free - len(ids), len(next))):
                 ids.append(
-                    starting_db.queue_fill(tx, p.name, p.registry_hash, next[i])
+                    starting_db.queue_fill(
+                        tx, p.name, p.registry_hash, next[i], of[i]
+                    )
                 )
                 new_code.append(False)
                 filled.append(ids[len(ids) - 1])

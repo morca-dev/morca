@@ -280,6 +280,10 @@ def _fill_html(mut h: Html, s: FillStatus):
     else:
         h.text(", no budget")
     h.raw(' <span class="muted">(estimated)</span>')
+    if s.request:
+        # morca backfill --as-fill (#465): cancelled with --cancel.
+        h.raw("<br>")
+        h.text(s.request.value().text())
     if s.idle:
         h.raw('<br><span class="muted">Idle: ')
         h.text(s.idle)

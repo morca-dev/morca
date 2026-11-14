@@ -6,6 +6,7 @@ instances, and fill runs queued for the pool.
 from postgres import Transaction
 from morca._internal.db.batches import mark_batch
 from morca._internal.fill import fill_status
+from morca._internal.fill_requests import end_finished
 import morca._internal.db.audit as audit_db
 import morca._internal.db.pool_runs as pool_runs_db
 import morca._internal.db.starting as starting_db
@@ -167,6 +168,7 @@ def _fill_for_workers(
     # the tick's passes run a moment apart, and either may see them first.
     var lost = _requeue_lost(self, tx, p, dead, waiting)
     var status = fill_status(tx, fill_pipeline(p), now, p.run_retries)
+    end_finished(tx, status.request)
     var free = status.slots
     var again = 0
     if free > 0:
@@ -178,7 +180,12 @@ def _fill_for_workers(
     for i in range(min(free - again, len(next))):
         ids.append(
             pool_runs_db.queue_fill(
-                tx, p.name, p.registry_hash, next[i], waiting
+                tx,
+                p.name,
+                p.registry_hash,
+                next[i],
+                waiting,
+                status.next_request[i],
             )
         )
     mark_batch(tx, ids)

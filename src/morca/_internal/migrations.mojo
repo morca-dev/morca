@@ -876,6 +876,28 @@ def _migrations() -> List[List[String]]:
             "ALTER TABLE orca.workers ADD COLUMN room_cpus integer",
             "ALTER TABLE orca.workers ADD COLUMN room_memory_mb bigint",
         ],
+        # Fill requests (#465, `morca backfill --as-fill`): keys the
+        # scheduler runs as fill runs, within the fill's limits, and the
+        # request a fill run was queued for. Additive: an older binary
+        # neither reads nor writes them.
+        [
+            (
+                "CREATE TABLE orca.fill_requests (id bigserial PRIMARY KEY,"
+                " pipeline text NOT NULL, keys text NOT NULL, spec text NOT"
+                " NULL, rerun boolean NOT NULL DEFAULT true, requested_by"
+                " text, created timestamptz NOT NULL DEFAULT now(), ended"
+                " timestamptz, cancelled timestamptz)"
+            ),
+            (
+                "CREATE UNIQUE INDEX fill_requests_open ON orca.fill_requests"
+                " (pipeline) WHERE ended IS NULL"
+            ),
+            "ALTER TABLE orca.runs ADD COLUMN fill_request bigint",
+            (
+                "CREATE INDEX runs_fill_request ON orca.runs (fill_request)"
+                " WHERE fill_request IS NOT NULL"
+            ),
+        ],
     ]
 
 
@@ -919,6 +941,10 @@ def _floor_raisers() -> List[Int]:
     as it was.
     61 (`workers.room_cpus`, `room_memory_mb`, #462) is additive: nullable
     columns the binaries before it neither read nor write.
+    62 (`orca.fill_requests`, `runs.fill_request`, #465) is additive: a new
+    table and a nullable column the binaries before it neither read nor
+    write. A request's queued fill runs wait under one of them while fills
+    are off, as a fill's did, until a newer one leads again.
     """
     return [1, 24]
 

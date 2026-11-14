@@ -659,6 +659,21 @@ when = "before"
 manual = "The console downloads its model from huggingface.co: allow outbound HTTPS."
 ```
 
+A re-run too big to queue at once goes as a fill request (#465): the
+scheduler runs it within the pipeline's fill limits (`keys_per_run`,
+`fill_max_runs`, `fill_window`), after its other runs, and goes on across
+restarts and later deploys
+([A backfill as a fill](morca-toml.md#a-backfill-as-a-fill)):
+
+```toml
+[[version.step]]
+id = "1.3.0-repos"
+run = "morca backfill --rerun --as-fill mojo_repos 2023-01-01..2026-11-13"
+```
+
+`morca status <pipeline>` shows its progress, and `morca backfill --cancel
+<pipeline>` stops it.
+
 `morca upgrade --from <deployed> --to <new>` prints the steps of every version
 after `--from` up to `--to`, a line each:
 `step<TAB><id><TAB><before|after><TAB><run|manual><TAB><command or text>`.
