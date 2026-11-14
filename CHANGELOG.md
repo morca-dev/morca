@@ -2,9 +2,8 @@
 
 ## 0.31.0 - 2026-11-14
 
-- **Image builds retry the git download:** the runtime image fetches git's source tarball with retries from three kernel.org mirrors and checks its sha256. (#470)
-
-- **`morca backfill --dry-run`:** makes every check a backfill or a fill request makes and writes nothing, printing what it would do or exiting non-zero with the real refusal. (#475)
+- **Reliable git download in image builds:** retries across three kernel.org mirrors, sha256 checked. (#470)
+- **`morca backfill --dry-run`:** runs every check, writes nothing, and prints the plan or the refusal. (#475)
 
 ## 0.30.0 - 2026-11-14
 
