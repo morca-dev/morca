@@ -16,7 +16,7 @@ from morca._internal.recommend import (
     recommend,
     resolve_request,
 )
-from morca._internal.resources import Request
+from morca._internal.resources import Request, Room, admit
 
 comptime MB = 1048576.0
 
@@ -199,6 +199,70 @@ def test_learned_cpus_fit_the_host() raises:
     assert_equal(resolve_request(declared, rec, True, 1).request.cpus_min, 2)
 
 
+def test_learned_memory_fits_the_host() raises:
+    # #462: one run of 2046 MB × 1.15 learns 2.5 GB; a host that grants a
+    # run at most 2.2 GB caps it there, so the run starts, saying so.
+    var auto = Request.of("", "auto..4")
+    var rec = recommend(_runs([2046, 2046, 2046]), 0, auto)
+    assert_equal(rec.memory_mb, 2560)
+    var r = resolve_request(auto, rec, True, 0, 2253)
+    assert_equal(r.source, LEARNED)
+    assert_equal(r.request.memory_min_mb, 2253)
+    assert_equal(r.request.memory_max_mb, 2253)
+    assert_equal(r.learned_mb, 2560)
+    assert_equal(
+        r.cap_text(), "learned 2.5 GB, capped at 2.2 GB, this host's most"
+    )
+    # It fits what the host grants: admitted, granted the cap.
+    var fit = admit(r.request, Room(4, 2253, 4, 2253), 0, 0, 1)
+    assert_equal(len(fit[0]), 1)
+    assert_equal(fit[0][0].memory_mb, 2253)
+    # Under the cap: as learned, up to auto..4's maximum, nothing said.
+    var roomy = resolve_request(auto, rec, True, 0, 8192)
+    assert_equal(roomy.request.memory_min_mb, 2560)
+    assert_equal(roomy.request.memory_max_mb, 4096)
+    assert_equal(roomy.cap_text(), "")
+    # Within the host's most: auto..4's maximum, at most the host's.
+    var tight = resolve_request(auto, rec, True, 0, 3072)
+    assert_equal(tight.request.memory_min_mb, 2560)
+    assert_equal(tight.request.memory_max_mb, 3072)
+    # A pool's: its largest worker's, named.
+    var pool = resolve_request(
+        auto, rec, True, 0, 2048, "the most a worker of pool g grants"
+    )
+    assert_equal(
+        pool.cap_text(),
+        "learned 2.5 GB, capped at 2 GB, the most a worker of pool g grants",
+    )
+    # Shown with the recommendation once the scheduler keeps it.
+    rec.capped = r.capped
+    assert_equal(
+        rec.text(),
+        (
+            "learned from 3 runs: 2.5 GB, 2 CPUs, capped at 2.2 GB, this host's"
+            " most"
+        ),
+    )
+    assert_true('"capped": "capped at 2.2 GB, this host' in rec.json())
+
+
+def test_declared_over_the_host_is_not_capped() raises:
+    # A fixed request over what the host grants stays as asked, and
+    # admission refuses it as before.
+    var fixed = Request.of("", "5")
+    var rec = recommend(_runs([2046, 2046, 2046]), 0, fixed)
+    var r = resolve_request(fixed, rec, True, 0, 1024)
+    assert_equal(r.source, DECLARED)
+    assert_equal(r.request.memory_min_mb, 5120)
+    assert_equal(r.cap_text(), "")
+    var fit = admit(r.request, Room(4, 1024, 4, 1024), 0, 0, 1)
+    assert_equal(len(fit[0]), 0)
+    assert_equal(
+        fit[1],
+        "waiting: needs 5 GB, more than the 1 GB this host grants at most",
+    )
+
+
 def test_auto_falls_back() raises:
     var auto = Request.of("", "auto")
     # Too few runs: no request, as without memory_gb.
@@ -229,14 +293,14 @@ def test_auto_falls_back() raises:
     assert_equal(none.source, DEFAULT)
     assert_true("peak cores" in none.why)
     # The cache's recommendation (runs, memory, CPUs) resolves the same.
-    var cached = Recommendation(3, 0, 1280, 0, "", "", False)
+    var cached = Recommendation(3, 0, 1280, 0, "", "", False, "")
     assert_equal(
         resolve_request(auto, cached, True).request.memory_min_mb, 1280
     )
     assert_true(
         "2 of the 3"
         in resolve_request(
-            auto, Recommendation(2, 0, 0, 0, "", "", False), True
+            auto, Recommendation(2, 0, 0, 0, "", "", False, ""), True
         ).why
     )
 
@@ -244,7 +308,7 @@ def test_auto_falls_back() raises:
 def test_declared_is_as_it_is() raises:
     var req = Request.of("1..4", "2..8")
     var r = resolve_request(
-        req, Recommendation(20, 20, 1024, 1, "", "", False), True
+        req, Recommendation(20, 20, 1024, 1, "", "", False, ""), True
     )
     assert_equal(r.source, DECLARED)
     assert_equal(r.request.memory_min_mb, 2048)

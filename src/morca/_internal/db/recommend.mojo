@@ -63,3 +63,29 @@ def raised_mb(mut conn: Connection, pipeline: String) raises -> Int:
         Params().text(pipeline),
     )
     return Int(raised.row(0).int64("raised")) if len(raised) else 0
+
+
+def capped(mut conn: Connection, pipeline: String) raises -> String:
+    """What `pipeline`'s learned memory was last capped at, empty for
+    nothing (`orca.pipelines.learned`'s `capped`)."""
+    var rows = conn.query(
+        (
+            "SELECT coalesce(learned->>'capped', '') AS capped FROM"
+            " orca.pipelines WHERE name = $1"
+        ),
+        Params().text(pipeline),
+    )
+    return rows.row(0).text("capped") if len(rows) else String()
+
+
+def keep_capped(mut conn: Connection, pipeline: String, capped: String) raises:
+    """Sets `capped` in `pipeline`'s `learned`, or with `capped` empty
+    removes it. Additive in the JSON: a binary before #462 ignores it."""
+    _ = conn.execute(
+        (
+            "UPDATE orca.pipelines SET learned = CASE WHEN $2 = '' THEN"
+            " learned - 'capped' ELSE coalesce(learned, '{}'::jsonb) ||"
+            " jsonb_build_object('capped', $2::text) END WHERE name = $1"
+        ),
+        Params().text(pipeline).text(capped),
+    )

@@ -64,7 +64,10 @@ def test_start_limit_mb() raises:
 
 
 def test_ceiling_mb() raises:
-    assert_equal(ceiling_mb(8192, 6000, 0), 8192)
+    # At most what the host grants: a raise past it would wait forever.
+    assert_equal(ceiling_mb(8192, 6000, 0), 6000)
+    assert_equal(ceiling_mb(4096, 6000, 0), 4096)
+    assert_equal(ceiling_mb(8192, 0, 0), 8192)
     assert_equal(ceiling_mb(0, 6000, 0), 6000)
     assert_equal(ceiling_mb(8192, 6000, 1024), 1024)
     assert_equal(ceiling_mb(0, 0, 1024), 1024)

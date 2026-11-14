@@ -45,7 +45,7 @@ import morca._internal.db.recommend as recommend_db
 from morca._internal.db.recommend import RunPeaks
 
 from morca._internal.json import quote
-from morca._internal.resources import Request, gb_hundredths
+from morca._internal.resources import Request, gb_hundredths, gb_text
 from morca._internal.state import State
 
 comptime DECLARED = "declared"
@@ -92,10 +92,14 @@ struct Recommendation(Copyable, Movable):
     """Which of the declared range's ends it was clamped to, or empty."""
     var applied: Bool
     """Whether runs start with it: the pipeline asks for `auto` and learns."""
+    var capped: String
+    """What the scheduler or a worker capped its memory at, as
+    `RunRequest.capped` says it (`capped at 2.2 GB, this host's most`), or
+    empty (`orca.pipelines.learned`'s `capped`, #462)."""
 
     @staticmethod
     def none() -> Recommendation:
-        return Recommendation(0, 0, 0, 0, "", "", False)
+        return Recommendation(0, 0, 0, 0, "", "", False, "")
 
     def any(self) -> Bool:
         return self.memory_mb > 0 or self.cpus > 0
@@ -124,6 +128,8 @@ struct Recommendation(Copyable, Movable):
         )
         if self.clamped:
             out.write(" (clamped to ", self.clamped, ")")
+        if self.capped:
+            out.write(", ", self.capped)
         return out^
 
     def json(self) -> String:
@@ -145,7 +151,9 @@ struct Recommendation(Copyable, Movable):
         out.write(', "text": ', quote(self.text()))
         out.write(', "source": ', quote(self.source), ', "clamped": ')
         out.write(quote(self.clamped) if self.clamped else String("null"))
-        out.write(', "applied": ', "true" if self.applied else "false", "}")
+        out.write(', "applied": ', "true" if self.applied else "false")
+        out.write(', "capped": ')
+        out.write(quote(self.capped) if self.capped else String("null"), "}")
         return out^
 
 
@@ -179,7 +187,7 @@ def recommend(
             mem.append(p.peak_rss_bytes)
             if p.peak_cpus >= 0:
                 cores.append(p.peak_cpus)
-    var r = Recommendation(len(mem), len(cores), 0, 0, "", "", False)
+    var r = Recommendation(len(mem), len(cores), 0, 0, "", "", False, "")
     if len(mem) < MIN_RUNS:
         r.source = String(
             "not learned yet: ",
@@ -243,7 +251,16 @@ def learned(
     each empty for none)."""
     var peaks = recommend_db.peaks(db.conn, name, LEARN_RUNS)
     var raised_mb = recommend_db.raised_mb(db.conn, name)
-    return recommend(peaks, raised_mb, Request.of(cpus, memory_gb))
+    var r = recommend(peaks, raised_mb, Request.of(cpus, memory_gb))
+    r.capped = recommend_db.capped(db.conn, name)
+    return r^
+
+
+def keep_capped(mut db: State, name: String, capped: String) raises:
+    """Keeps on pipeline `name` what its learned memory is capped at now
+    (`RunRequest.capped`, empty for nothing), for `morca config show` and
+    its page."""
+    recommend_db.keep_capped(db.conn, name, capped)
 
 
 @fieldwise_init
@@ -260,6 +277,24 @@ struct RunRequest(Copyable, Movable):
     """Learned, how many runs it's from; else 0."""
     var why: String
     """For `DEFAULT`, why it isn't learned."""
+    var learned_mb: Int
+    """Learned memory over what the host or pool grants a run at most, the
+    learned value before it was capped; else 0."""
+    var capped: String
+    """Then what it was capped at: `capped at 2.2 GB, this host's most`."""
+
+    @staticmethod
+    def none() -> RunRequest:
+        """No request: as for a placement admission doesn't weigh."""
+        return RunRequest(Request(0, 0, 0, 0), "", 0, "", 0, "")
+
+    def cap_text(self) -> String:
+        """`learned 2.5 GB, capped at 2.2 GB, this host's most`, or empty."""
+        if not self.capped:
+            return String()
+        return String(
+            "learned ", gb_text(self.learned_mb), " GB, ", self.capped
+        )
 
     def cpus_text(self) -> String:
         return self.request.cpus_text()
@@ -281,7 +316,12 @@ struct RunRequest(Copyable, Movable):
 
 
 def resolve_request(
-    declared: Request, rec: Recommendation, learn: Bool, most_cpus: Int = 0
+    declared: Request,
+    rec: Recommendation,
+    learn: Bool,
+    most_cpus: Int = 0,
+    most_mb: Int = 0,
+    most_of: String = "this host's most",
 ) -> RunRequest:
     """The request a start of a pipeline asking for `declared` gets, given
     what its runs suggest (`rec`) and whether it learns: `declared` as it
@@ -289,7 +329,11 @@ def resolve_request(
     to `auto..MAX`'s maximum, which `rec` is already within), or with none
     or learning off, not asked for. Learned CPUs are at most `most_cpus`
     (what the host grants a run, 0 for no limit): a run asking for more
-    would wait forever, and fewer cores only make it slower."""
+    would wait forever, and fewer cores only make it slower. Learned memory
+    is at most `most_mb` the same way (#462), within `auto..MAX`; capped,
+    the request says so (`learned_mb`, `capped`, with `most_of` naming
+    whose most it is). A declared request isn't capped: that's the
+    pipeline's ask, which admission refuses as it is."""
     var out = RunRequest(
         Request(
             declared.cpus_min,
@@ -300,16 +344,27 @@ def resolve_request(
         String(DECLARED) if declared.any() else String(),
         0,
         String(),
+        0,
+        String(),
     )
     if not declared.auto():
         return out^
     var any = False
     if declared.memory_auto:
         if learn and rec.memory_mb > 0:
-            out.request.memory_min_mb = rec.memory_mb
-            out.request.memory_max_mb = max(
-                declared.memory_max_mb, rec.memory_mb
-            )
+            var mb = rec.memory_mb
+            if most_mb > 0 and mb > most_mb:
+                mb = most_mb
+                out.learned_mb = rec.memory_mb
+                out.capped = String(
+                    "capped at ", gb_text(most_mb), " GB, ", most_of
+                )
+            out.request.memory_min_mb = mb
+            out.request.memory_max_mb = max(declared.memory_max_mb, mb)
+            if most_mb > 0:
+                out.request.memory_max_mb = min(
+                    out.request.memory_max_mb, most_mb
+                )
             any = True
         else:
             out.request.memory_min_mb = 0

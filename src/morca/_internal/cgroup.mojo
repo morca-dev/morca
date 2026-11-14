@@ -114,9 +114,13 @@ def start_limit_mb(
 
 
 def ceiling_mb(request_max_mb: Int, room_mb: Int, cap_mb: Int) -> Int:
-    """The most a retry may ask for: the request's maximum, else what the
-    host can grant; at most `cap_mb` when that's over 0."""
+    """The most a retry may ask for: the request's maximum, at most what
+    the host can grant (`room_mb`, when over 0: more would wait forever,
+    #462), else what the host can grant; at most `cap_mb` when that's over
+    0."""
     var mb = request_max_mb if request_max_mb > 0 else room_mb
+    if request_max_mb > 0 and room_mb > 0:
+        mb = min(mb, room_mb)
     if cap_mb > 0:
         mb = min(mb, cap_mb) if mb > 0 else cap_mb
     return mb

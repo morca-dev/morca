@@ -32,6 +32,7 @@ scheduler that overrides it.
 | | share | the percent of its ended attempts that failed is over... | 50 | `MORCA_WATCHDOG_FAILED_PERCENT` | |
 | | | ...once at least this many have ended | 10 | `MORCA_WATCHDOG_FAILED_MIN` | |
 | `stuck` | stuck | a running run on sampled instances has no attempt start or end, no instance launched or ended, and no host over `MORCA_WATCHDOG_STUCK_CPU` (5) percent CPU, for this many minutes (at most 30) | 30 | `MORCA_WATCHDOG_STUCK_MINUTES` | that run's pipeline |
+| `unmet` | waiting | a queued run has waited this many minutes for a request more than this host, or any worker of its pool, can grant at most ([requests and grants](morca-toml.md#requests-and-grants)): it would wait forever | 10 | `MORCA_WATCHDOG_UNMET_MINUTES` | that run's pipeline |
 | `control` | memory | the control host's newest minute has memory over this percent | 90 | `MORCA_WATCHDOG_MEMORY` | all pipelines |
 | | disk | or its fullest disk over this percent | 85 | `MORCA_WATCHDOG_DISK` | |
 

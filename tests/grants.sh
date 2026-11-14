@@ -13,11 +13,12 @@
 #   recorded on the run, its page and its JSON;
 # - plain, with no request, is started as before: with no check, no grant,
 #   while wide waits for more memory than the host has, which the
-#   pipeline's page, the run's and their JSON say;
+#   pipeline's page, the run's, their JSON and `morca status` say;
 # - max_runs = "auto" runs as many at once as fit (4 of 2 GB in 8 GB), and
 #   with no request to weigh, one at a time;
 # - a remote worker (`morca worker`) admits a run against its own host the
-#   same way, and passes the grant.
+#   same way, and passes the grant; one more than any worker of the pool
+#   grants waits saying so.
 #
 # Needs MORCA_DATABASE_URL (pixi run test-grants starts a throwaway server),
 # curl and jq.
@@ -221,6 +222,11 @@ json /pipelines/plain | jq -e '.pipeline.request == null and .pipeline.waiting =
 curl -fsS "$base/pipelines/wide" | grep -q 'needs 5 GB, more than the 1 GB this host grants at most' \
     || fail "wide's page doesn't say why its run waits"
 curl -fsS "$base/runs/$w3" | grep -q 'needs 5 GB, more than the 1 GB' || fail "wide's run's page doesn't say why it waits"
+# And `morca status`, under the pipeline's line (#462).
+./build/morca status > build/grants-status.out 2>&1 || fail "morca status"
+grep -A1 '^wide ' build/grants-status.out | grep -qx "  $want" || fail "morca status: $(cat build/grants-status.out)"
+./build/morca status wide > build/grants-status.out 2>&1 || fail "morca status wide"
+grep -q "^  $w3 queued .* ($want)\$" build/grants-status.out || fail "morca status wide: $(cat build/grants-status.out)"
 if curl -fsS "$base/pipelines/plain" | grep -q 'Requested<span'; then fail "plain's page shows a request"; fi
 q "UPDATE orca.runs SET status = 'cancelled', ended = now() WHERE id = $w3" > /dev/null
 stop_sched
@@ -326,7 +332,7 @@ small=$!
 pids="$pids $small"
 # 4 GB less the worker's 512 MB reserve.
 until_ 20 "the small worker didn't hold wide's run: $(q "SELECT status, held FROM orca.runs WHERE id = $w4")" \
-    is "SELECT held FROM orca.runs WHERE id = $w4" "waiting: needs 5 GB, more than the 3.5 GB worker small grants at most"
+    is "SELECT held FROM orca.runs WHERE id = $w4" "waiting: needs 5 GB, more than the 3.5 GB a worker of pool g grants at most"
 kill "$small" 2> /dev/null || true
 wait "$small" 2> /dev/null || true
 env -u MORCA_DATABASE_URL MORCA_WORKER_TOKEN="$tok" \

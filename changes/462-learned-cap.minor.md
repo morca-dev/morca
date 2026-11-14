@@ -1,0 +1,1 @@
+- **Learned memory fits the host:** a learned `memory_gb` is capped at what the host or pool can grant, so its runs start instead of waiting forever; `morca status` shows why queued runs wait, and a run that can never start trips the watchdog's new `unmet` rule. (#462)

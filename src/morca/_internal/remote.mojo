@@ -668,6 +668,18 @@ def _status_line(p: Value) raises -> String:
     return line^
 
 
+def waiting_line(p: Value) raises -> String:
+    """A pipeline's queued runs' waiting reason under its `morca status`
+    line (#462): `  waiting: needs 5 GB, more than the 1 GB this host
+    grants at most`; empty when none of its queued runs waits for room."""
+    if _int_of(p, "queued") == 0 or String("waiting") not in p:
+        return ""
+    var w = p["waiting"]
+    if not w.is_string() or not w.string_value():
+        return ""
+    return String("  ", w.string_value())
+
+
 def pressure_status(v: Value) raises -> String:
     """`morca status`'s line for the scheduler's host's memory pressure
     (`memory_pressure` in `/`'s JSON, `morca._internal.admission`), or empty for
@@ -733,6 +745,9 @@ def print_status(json: String, one: Bool) raises:
             print(cpu)
     for p in ps:
         print(_status_line(p))
+        var why = waiting_line(p)
+        if why:
+            print(why)
         var se = p["sense_error"]
         if not se.is_null():
             print(
@@ -762,6 +777,12 @@ def print_status(json: String, one: Bool) raises:
             and r["status"].string_value() == "running"
         ):
             line.write(" (cancelling)")
+        if (
+            r["status"].string_value() == "queued"
+            and String("held") in r
+            and r["held"].is_string()
+        ):
+            line.write(" (", r["held"].string_value(), ")")
         if String("outdated") in r and r["outdated"].is_string():
             line.write(" (outdated: ", r["outdated"].string_value(), ")")
         if String("usage") in r:

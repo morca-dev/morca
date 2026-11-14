@@ -28,6 +28,7 @@ from morca._internal.resources import Request
 from morca._internal.recommend import (
     Recommendation,
     RunRequest,
+    keep_capped,
     learned,
     resolve_request,
 )
@@ -103,7 +104,8 @@ struct Registered(Copyable, Movable):
     yet), its out-of-memory bump and its declared request; else empty."""
     var learned: Recommendation
     """The learned request cached in `orca.pipelines.learned` (its runs,
-    memory and CPUs), learned from `learned_key`."""
+    memory and CPUs), learned from `learned_key`, and what its memory was
+    last capped at (`capped`)."""
     var learned_key: String
     var max_runs_auto: Bool
     """`max_runs = "auto"` (#266): as many runs at once as this host has
@@ -131,24 +133,52 @@ def recorded_memory_gb(p: Registered, sized: RunRequest) -> String:
 
 
 def run_request(
-    mut db: State, p: Registered, most_cpus: Int = 0
+    mut db: State,
+    p: Registered,
+    most_cpus: Int = 0,
+    most_mb: Int = 0,
+    most_of: String = "this host's most",
 ) raises -> RunRequest:
     """The request a start of `p` gets now (`morca._internal.recommend`'s
     `resolve_request`): as declared, or for `auto` what its runs suggest. That is cached on the
     pipeline (`orca.pipelines.learned`) and learned again only when what it
     was learned from (`learn_key`) has changed, so a start doesn't query
-    its runs' peaks each tick. Learned CPUs are at most `most_cpus`, what
-    the host grants a run."""
+    its runs' peaks each tick. Learned CPUs and memory are at most
+    `most_cpus` and `most_mb`, what the host (or the pool's largest worker,
+    `most_of`) grants a run."""
     var declared = p.request()
     if not declared.auto() or not p.learn:
         return resolve_request(declared, Recommendation.none(), p.learn)
     if p.learned_key == p.learn_key:
-        return resolve_request(declared, p.learned, True, most_cpus)
+        return resolve_request(
+            declared, p.learned, True, most_cpus, most_mb, most_of
+        )
     var rec = learned(db, p.name, p.cpus, p.memory_gb)
     registered_db.keep_learned(
         db.conn, p.name, p.learn_key, rec.runs, rec.memory_mb, rec.cpus
     )
-    return resolve_request(declared, rec, True, most_cpus)
+    return resolve_request(declared, rec, True, most_cpus, most_mb, most_of)
+
+
+def with_cap(hold: String, sized: RunRequest) -> String:
+    """`hold`, with what capped the learned memory, if something did:
+    "waiting: needs 2.2 GB, 1 GB free of grants (learned 2.5 GB, capped at
+    2.2 GB, this host's most)"."""
+    if not hold or not sized.capped:
+        return hold
+    return String(hold, " (", sized.cap_text(), ")")
+
+
+def say_capped(mut db: State, p: Registered, sized: RunRequest) raises:
+    """Logs it once when what caps `p`'s learned memory changes (#462), and
+    keeps it on the pipeline for `morca config show` and its page."""
+    if sized.capped == p.learned.capped:
+        return
+    if sized.capped:
+        print("morca: pipeline", p.name, "memory:", sized.cap_text())
+    else:
+        print("morca: pipeline", p.name, "memory: no longer capped")
+    keep_capped(db, p.name, sized.capped)
 
 
 def _ec2_spec(p: Registered, run: Int, start: Int, new_code: Bool) -> Ec2Spec:
@@ -277,6 +307,7 @@ def registered(mut db: State, only: String = "") raises -> List[Registered]:
                     "",
                     "",
                     False,
+                    r.learned_capped,
                 ),
                 r.learned_key,
                 r.max_runs_auto,

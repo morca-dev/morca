@@ -13,6 +13,7 @@ each from Postgres only (never object storage), with the thresholds below
 | `idle` | at least `MORCA_WATCHDOG_IDLE_WORKERS` (4) workers, up for `MORCA_WATCHDOG_IDLE_MINUTES` (10, at most 30) minutes, averaged under `MORCA_WATCHDOG_IDLE_CPU` (15) percent CPU over them (pooled idle and draining workers aren't counted) | the pipelines owning those workers |
 | `failing` | a pipeline had more than `MORCA_WATCHDOG_FAILED` (20) failed attempts in the last hour, or at least `MORCA_WATCHDOG_FAILED_MIN` (10) attempts ended and more than `MORCA_WATCHDOG_FAILED_PERCENT` (50) percent failed | each such pipeline |
 | `stuck` | a run with a running attempt, on instances that are sampled, has had no attempt start or end, no instance launched or ended and no sampled host over `MORCA_WATCHDOG_STUCK_CPU` (5) percent CPU for `MORCA_WATCHDOG_STUCK_MINUTES` (30, at most 30, since samples are kept that long) minutes | that run's pipeline |
+| `unmet` | a run has waited `MORCA_WATCHDOG_UNMET_MINUTES` (10) minutes for a request more than this host, or any worker of its pool, can grant at most (`morca._internal.resources`, #462): it would wait forever | that run's pipeline |
 | `control` | the control instance's newest minute has memory over `MORCA_WATCHDOG_MEMORY` (90) percent or its fullest disk over `MORCA_WATCHDOG_DISK` (85) | all pipelines |
 
 A tripped rule **pauses** its scope through `morca._internal.pause.set_paused`
@@ -41,7 +42,7 @@ from std.os import getenv
 from json import Value, loads
 import morca._internal.db.pipelines as pipelines_db
 import morca._internal.db.watchdog as watchdog_db
-from morca._internal.db.watchdog import Counts, Lease, Quiet
+from morca._internal.db.watchdog import Counts, Lease, Quiet, Unmet
 
 from morca._internal.auth import audit
 from morca._internal.fleet import hourly_price
@@ -63,6 +64,7 @@ def rule_names() -> List[String]:
         String("idle"),
         String("failing"),
         String("stuck"),
+        String("unmet"),
         String("control"),
     ]
 
@@ -101,6 +103,9 @@ struct Config(Copyable, Movable):
     var fixed_price: Bool
     """The runner launches no instances (`MORCA_RUNNER=local`), so the cost
     rule has nothing to price: it reads "fixed price" and never trips."""
+    var unmet_minutes: Int
+    """How long a run waits for a request no host can grant before `unmet`
+    trips."""
 
 
 def default_config() -> Config:
@@ -122,6 +127,7 @@ def default_config() -> Config:
         85.0,
         0.0,
         False,
+        10,
     )
 
 
@@ -165,6 +171,9 @@ def config() raises -> Config:
         SAMPLE_MINUTES,
     )
     c.stuck_cpu = _number("MORCA_WATCHDOG_STUCK_CPU", c.stuck_cpu)
+    c.unmet_minutes = Int(
+        _number("MORCA_WATCHDOG_UNMET_MINUTES", Float64(c.unmet_minutes))
+    )
     c.memory = _number("MORCA_WATCHDOG_MEMORY", c.memory)
     c.disk = _number("MORCA_WATCHDOG_DISK", c.disk)
     var control = getenv("MORCA_CONTROL_TYPE")
@@ -257,6 +266,17 @@ def limits(c: Config, rule: String) -> List[Check]:
                 "quiet",
                 -1.0,
                 Float64(c.stuck_minutes),
+                " min",
+                "at least",
+                False,
+            )
+        )
+    elif rule == "unmet":
+        out.append(
+            Check(
+                "waiting",
+                -1.0,
+                Float64(c.unmet_minutes),
                 " min",
                 "at least",
                 False,
@@ -574,6 +594,41 @@ def eval_stuck(c: Config, runs: List[Quiet]) -> Reading:
     )
 
 
+def eval_unmet(c: Config, runs: List[Unmet]) -> Reading:
+    """Runs waiting for a request no host can grant (`Unmet`), for at
+    least `unmet_minutes`: their pipelines."""
+    var worst = 0.0
+    var detail = String()
+    var out = List[String]()
+    for r in runs:
+        worst = max(worst, r.minutes)
+        if r.minutes >= Float64(c.unmet_minutes):
+            var seen = False
+            for p in out:
+                if p == r.pipeline:
+                    seen = True
+            if not seen:
+                out.append(r.pipeline)
+            detail.write(
+                ", " if detail else "",
+                r.pipeline,
+                " run ",
+                r.run,
+                " ",
+                r.held,
+                ", for ",
+                _fx(r.minutes, 0),
+                " minutes",
+            )
+    var k = limits(c, "unmet")
+    _see(k, 0, worst, worst >= Float64(c.unmet_minutes))
+    if len(out) == 0:
+        return _ok("unmet", worst, Float64(c.unmet_minutes), k^)
+    return Reading(
+        "unmet", worst, Float64(c.unmet_minutes), True, detail, out^, k^
+    )
+
+
 def eval_control(
     c: Config, have: Bool, mem: Float64, disk: Float64, everything: List[String]
 ) -> Reading:
@@ -644,6 +699,10 @@ def gather_stuck(mut db: State, c: Config) raises -> List[Quiet]:
     return watchdog_db.quiet_runs(db.conn, c.stuck_cpu)
 
 
+def gather_unmet(mut db: State) raises -> List[Unmet]:
+    return watchdog_db.unmet_runs(db.conn)
+
+
 def evaluate(mut db: State, c: Config) raises -> List[Reading]:
     """Every rule's reading now."""
     var everything = all_pipelines(db)
@@ -654,6 +713,7 @@ def evaluate(mut db: State, c: Config) raises -> List[Reading]:
     out.append(eval_idle(c, idle[0], idle[1], idle[2]))
     out.append(eval_failing(c, gather_failing(db)))
     out.append(eval_stuck(c, gather_stuck(db, c)))
+    out.append(eval_unmet(c, gather_unmet(db)))
     var now = system_now(db)
     if now and not now.value().stale():
         ref n = now.value()
@@ -973,6 +1033,8 @@ def _limit(c: Config, rule: String) -> Float64:
         return Float64(c.failed)
     if rule == "stuck":
         return Float64(c.stuck_minutes)
+    if rule == "unmet":
+        return Float64(c.unmet_minutes)
     return c.memory
 
 
@@ -987,6 +1049,8 @@ def unit_of(rule: String) -> String:
         return " failed attempts/h"
     if rule == "stuck":
         return " minutes quiet"
+    if rule == "unmet":
+        return " minutes waiting"
     return " %"
 
 

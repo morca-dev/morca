@@ -177,13 +177,17 @@ def set_seen(
     cpus: Int,
     memory_mb: Int,
     running: String,
+    room_cpus: Int = -1,
+    room_memory_mb: Int = -1,
 ) raises:
-    """Keeps what worker `id` says of itself (empty or 0 for unsaid)."""
+    """Keeps what worker `id` says of itself (empty or 0 for unsaid; -1
+    for the room it can grant a run)."""
     _ = conn.execute(
         (
             "UPDATE orca.workers SET name = nullif($2, ''), image ="
             " nullif($3, ''), cpus = nullif($4, 0), memory_mb = nullif($5, 0),"
-            " running = nullif($6, '') WHERE id = $1"
+            " running = nullif($6, ''), room_cpus = nullif($7, -1),"
+            " room_memory_mb = nullif($8, -1) WHERE id = $1"
         ),
         Params()
         .int64(Int64(id))
@@ -191,8 +195,28 @@ def set_seen(
         .text(image)
         .int32(Int32(cpus))
         .int64(Int64(memory_mb))
-        .text(running),
+        .text(running)
+        .int32(Int32(room_cpus))
+        .int64(Int64(room_memory_mb)),
     )
+
+
+def pool_room(
+    mut conn: Connection, pool: String, seconds: Int
+) raises -> Tuple[Int, Int]:
+    """The most CPUs and MB of memory a worker of `pool` seen in the last
+    `seconds` said it can grant a run; 0 for none said."""
+    var rows = conn.query(
+        (
+            "SELECT coalesce(max(room_cpus), 0)::bigint AS cpus,"
+            " coalesce(max(room_memory_mb), 0)::bigint AS mb FROM"
+            " orca.workers WHERE pool = $1 AND revoked IS NULL AND expires >"
+            " now() AND last_seen > now() - make_interval(secs => $2)"
+        ),
+        Params().text(pool).float64(Float64(seconds)),
+    )
+    var r = rows.row(0)
+    return (Int(r.int64("cpus")), Int(r.int64("mb")))
 
 
 def hold_for_pressure(
