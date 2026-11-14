@@ -1,5 +1,5 @@
 name = "morca-mojo"
-version = "0.30.0"
+version = "0.31.0"
 description = "Orchestration for Mojo data pipelines: DAGs checked at compile time, cron and keyed partitions, sensors and lineage over Iceberg, runs recorded in Postgres or a SQLite file, each run on its own dista cluster locally, on Kubernetes or on EC2, and a web UI"
 tags = ["orchestration", "pipelines", "scheduler", "dag", "iceberg", "kubernetes", "aws", "magmalake"]
 # other tins this one depends on; omit if none

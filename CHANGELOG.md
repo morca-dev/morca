@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.31.0 - 2026-11-14
+
+- **Reliable git download in image builds:** retries across three kernel.org mirrors, sha256 checked. (#470)
+- **`morca backfill --dry-run`:** runs every check, writes nothing, and prints the plan or the refusal. (#475)
+
 ## 0.30.0 - 2026-11-14
 
 - **Backfills as fills:** `morca backfill --rerun --as-fill` runs a big re-run in chunks, under the fill settings, and resumes across restarts; `--cancel` stops it. (#467)
