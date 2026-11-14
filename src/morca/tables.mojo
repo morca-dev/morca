@@ -639,6 +639,18 @@ struct TableScan(Copyable, Movable):
         s.columns = columns^
         return s^
 
+    def snapshot_id(self) -> Int64:
+        """The id of the snapshot the scan reads, or -1 when it reads none
+        (a table without snapshots, or one a step pinned empty): what
+        iceberg's `scan.snapshot().snapshot_id` is."""
+        if self.snapshot == SNAP_NONE:
+            return -1
+        if self.snapshot >= 0:
+            return self.snapshot
+        if self.table.metadata.has_current_snapshot:
+            return self.table.metadata.current_snapshot_id
+        return -1
+
     def has_any_snapshot(self) -> Bool:
         if self.snapshot == SNAP_NONE:
             return False

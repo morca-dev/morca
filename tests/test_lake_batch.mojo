@@ -161,10 +161,12 @@ def test_batch_reader() raises:
     )
     var t = Table.load_local(String(root, "/db/t"))
     # No snapshot yet: nothing to read.
+    assert_equal(t.scan().snapshot_id(), -1)
     var empty = t.scan().to_batch_reader()
     assert_true(not empty.next_batch())
     _ = t.append([_rows(3)^.build()])
     _ = t.append([_rows(2)^.build()])
+    assert_equal(t.scan().snapshot_id(), t.metadata.current_snapshot_id)
     var reader = t.scan().select(["id"]).to_batch_reader()
     var n = 0
     var batches = 0
