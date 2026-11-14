@@ -76,6 +76,11 @@ from std.os import getenv
 from postgres import Transaction
 
 import morca._internal.db.fill as fill_db
+from morca._internal.fill_requests import (
+    RequestProgress,
+    request_json,
+    request_progress,
+)
 
 from morca.civil import Civil
 from morca._internal.fleet import hourly_price
@@ -506,6 +511,11 @@ struct FillStatus(Copyable, Movable):
     """When `lag_key` becomes fillable, UTC seconds; 0 for none."""
     var lag: Int
     """`fill_lag`, seconds."""
+    var request: Optional[RequestProgress]
+    """Its open fill request (`morca backfill --as-fill`, #465), if any."""
+    var next_request: List[Int64]
+    """For each of `next_keys`, the request it's of, or 0 for the fill's
+    range."""
 
     def __init__(out self):
         self.on = False
@@ -530,6 +540,8 @@ struct FillStatus(Copyable, Movable):
         self.lag_key = String()
         self.lag_until = 0
         self.lag = 0
+        self.request = None
+        self.next_request = List[Int64]()
 
 
 def fill_status(
@@ -564,6 +576,7 @@ def fill_status(
             given_up[r.key] = True
         elif r.again:
             retrying[r.key] = True
+    s.request = request_progress(tx, p.name, run_retries, live, done)
     var todo = List[String]()
     for k in keys:
         if k in done:
@@ -577,8 +590,16 @@ def fill_status(
         elif k not in filled:
             todo.append(k)
     s.left = len(todo)
+    if not s.on:
+        todo.clear()  # only a request's keys
     if p.fill.newest_first:
         todo.reverse()
+    # A request's keys go before the range's, each list in `fill_order`.
+    var asked = List[String]()
+    if s.request:
+        asked = s.request.value().todo.copy()
+        if p.fill.newest_first:
+            asked.reverse()
 
     var stale = stale_limit()
     var dead = dead_sql(String("$2"), start_grace(stale))
@@ -627,11 +648,21 @@ def fill_status(
     var others = fill_db.queued_others(tx, p.name)
     var hour = Int((now % 86400) // 3600)
     var paid = p.placed == "ec2" or p.placed == "kubernetes"
-    if not s.on:
+    var req_going = 0
+    if s.request:
+        ref r = s.request.value()
+        req_going = r.running + r.retrying + r.waiting
+    if not s.on and not s.request:
         s.idle = String("off: fills is ", SINCE_REGISTRATION)
-    elif len(todo) == 0 and s.retrying == 0:
+    elif not s.on and len(asked) == 0:
         s.idle = String(
-            "complete" if s.live == 0 else "the last partitions are running"
+            "the fill request's last runs are going" if req_going
+            > 0 else "the fill request is complete"
+        )
+    elif len(todo) == 0 and len(asked) == 0 and s.retrying == 0:
+        s.idle = String(
+            "complete" if s.live == 0
+            and req_going == 0 else "the last partitions are running"
         )
         if s.failed > 0:
             s.idle.write(
@@ -712,21 +743,39 @@ def fill_status(
             var one = COST_MARGIN * s.hourly * Float64(expected) / 3600.0
             var room = s.budget - s.spent - s.next_cost
             s.slots = min(s.slots, 1 + Int(room / one))
-        var k = max(p.keys_per_run, 1)
+    var k = max(p.keys_per_run, 1)
+    if len(asked) > 0:
+        s.request.value().next = _batch(asked, 0, k, p.fill.newest_first)
+    if not s.idle:
+        var id = s.request.value().id if s.request else Int64(0)
         var i = 0
+        while len(s.next_keys) < s.slots and i < len(asked):
+            s.next_keys.append(_batch(asked, i, k, p.fill.newest_first))
+            s.next_request.append(id)
+            i += k
+        i = 0
         while len(s.next_keys) < s.slots and i < len(todo):
-            var batch = List[String]()
-            while i < len(todo) and len(batch) < k:
-                batch.append(todo[i])
-                i += 1
-            # Keys of one kind order as text; a run's are kept ascending.
-            if p.fill.newest_first:
-                batch.reverse()
-            var joined = String()
-            for j in range(len(batch)):
-                joined.write("," if j else "", batch[j])
-            s.next_keys.append(joined^)
+            s.next_keys.append(_batch(todo, i, k, p.fill.newest_first))
+            s.next_request.append(0)
+            i += k
     return s^
+
+
+def _batch(keys: List[String], i: Int, k: Int, reversed: Bool) -> String:
+    """`keys[i:i+k]` as one run's keys, comma-separated: ascending, since
+    keys of one kind order as text, so reversed when `keys` is newest
+    first."""
+    var batch = List[String]()
+    var j = i
+    while j < len(keys) and len(batch) < k:
+        batch.append(keys[j])
+        j += 1
+    if reversed:
+        batch.reverse()
+    var joined = String()
+    for n in range(len(batch)):
+        joined.write("," if n else "", batch[n])
+    return joined^
 
 
 def lag_note(s: FillStatus) -> String:
@@ -811,6 +860,11 @@ def status_json(s: FillStatus) -> String:
             quote(String(Civil.of(s.lag_until), "Z")),
             "}",
         )
+    else:
+        out.write("null")
+    out.write(', "request": ')
+    if s.request:
+        out.write(request_json(s.request.value()))
     else:
         out.write("null")
     out.write(', "idle": ')

@@ -24,6 +24,7 @@ from morca.cron import CronExpr
 from morca._internal.fill import FillStatus, fill_status
 from morca._internal.follow import Follow, follow
 from morca._internal.lineage import SnapshotRef
+from morca._internal.db.fill_requests import requested
 from morca._internal.db.live import live_runs
 from morca._internal.recommend import Recommendation
 from morca.schedule import Schedule
@@ -204,7 +205,9 @@ def fill_of(mut db: State, name: String) raises -> Optional[FillStatus]:
     if len(regs) == 0:
         return None
     if not regs[0].fill.all:
-        if not pipelines_db.has_fill_runs(db.conn, name):
+        if not pipelines_db.has_fill_runs(db.conn, name) and name not in (
+            requested(db.conn)
+        ):
             return None
     var tx = db.conn.begin()
     var s = fill_status(tx, fill_pipeline(regs[0]), now(), regs[0].run_retries)

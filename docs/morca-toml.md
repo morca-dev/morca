@@ -759,7 +759,7 @@ On every tick, after the other runs of every pipeline of its [priority](#priorit
 
 - **The range** is the pipeline's first partition through the last one that has ended on its schedule's wall clock (UTC without a schedule), at least `fill_lag` ago: yesterday for a daily pipeline, last month for a monthly one. The partition still going is the schedule's. See [The lag](#the-lag).
 - **`keys_per_run` partitions per fill run** (one by default), in `fill_order`; a run's own partitions are in ascending order. The run's trigger is `fill` (`orca.runs.trigger`), so the runs page can filter for them.
-- **A partition is taken** when it's done in a run of any of the pipeline's code, when a live run has it, or when a fill run of it was ever queued. A fill never runs a partition twice. A fill run that fails is retried like a scheduled run, up to `run_retries`. A partition whose fill run failed past its retries, or was cancelled, is left to a person: `morca backfill`, or resume in the UI. Running done partitions again stays `morca backfill --rerun`.
+- **A partition is taken** when it's done in a run of any of the pipeline's code, when a live run has it, or when a fill run of it was ever queued. A fill never runs a partition twice. A fill run that fails is retried like a scheduled run, up to `run_retries`. A partition whose fill run failed past its retries, or was cancelled, is left to a person: `morca backfill`, or resume in the UI. Running done partitions again stays `morca backfill --rerun`, or [as a fill](#a-backfill-as-a-fill) with `--as-fill`.
 - **Fill runs don't count against `max_runs`.** At most `fill_max_runs` fill runs are going, beside up to `max_runs` other runs.
 - **On a worker pool** (`placement = "worker:<pool>"`) the scheduler queues the fill runs the same way and leaves them for a worker of the pool to claim. `fill_max_runs` caps the fill runs going across the whole pool, the queued ones included; each worker's `--max-runs` caps what one machine takes. See [Fills on a pool](workers.md#fills-on-a-pool).
 - **Fill runs never starve scheduled runs.** While any of the pipeline's scheduled, backfill or other runs are queued, no fill run starts. Fill runs still take room in the stack-wide limits (`MORCA_VCPU_BUDGET`, the control instance's slots) once they're going.
@@ -813,6 +813,51 @@ The pipeline page has a **Fill** line: partitions done of the range's total, fil
 ```
 
 `morca config show` lists the `fill*` keys, with their defaults, for a pipeline that fills, and `cpus` and `memory_gb` for one with a request.
+
+### A backfill as a fill
+
+`morca backfill --as-fill <pipeline> KEYS` (#465) asks for `KEYS` to be run
+as fill runs instead of queueing a run for each, so a long re-run is
+throttled, chunked and resumable with no one driving it:
+
+```text
+morca backfill --rerun --as-fill mojo_repos 2023-01-01..2026-11-13
+fill request 4 of mojo_repos: 1048 keys, as fill runs (keys_per_run 31, fill_max_runs 1, 22:00–06:00 UTC); morca backfill --cancel mojo_repos stops it
+```
+
+- **What it records.** A fill request (`orca.fill_requests`): the keys,
+  and whether it reruns done ones. It queues nothing. `--rerun` and
+  `--allow-append` are checked as for a plain backfill; without `--rerun`
+  a key that is done by its turn is skipped.
+- **How it runs.** On each tick, the fill pass takes the request's keys
+  before the range's, with the pipeline's fill limits: `keys_per_run` keys
+  a run, in `fill_order`, at most `fill_max_runs` fill runs going, inside
+  `fill_window` and `fill_budget_per_day`, only while none of its other
+  runs are queued, and after the pipelines of higher `priority`. It does
+  so with `fills = "since_registration"` too. Its runs are fill runs
+  (trigger `fill`), retried as fill runs are, with `orca.runs.fill_request`
+  naming the request. A key in another live run waits for it.
+- **Durable.** The request is in the database, so it goes on after a
+  restart or an [overlapping deploy](overlap.md): only the leading
+  scheduler runs the fill pass, and it takes keys under the pipeline's
+  lock.
+- **One at a time.** A pipeline has one open request. Another adds the
+  keys it doesn't have (`added 31 keys to fill request 4 ...`), and one
+  that differs in `--rerun` is refused, naming the open one.
+- **Progress.** The pipeline's Fill line, `morca status <pipeline>`
+  (`fill request 4 (2023-01-01..2026-11-13, rerun): 62 of 1048 done, 31
+  running, 955 left; next: 2023-03-04,...`) and `fill.request` in
+  `/api/pipelines/<name>` (`total`, `done`, `skipped`, `running`,
+  `retrying`, `failed`, `waiting`, `left`, `next`). Once every key has run
+  (or failed past its retries), the request ends.
+- **Cancelling.** `morca backfill --cancel <pipeline>` ends the request
+  and cancels its runs as `morca cancel` does: queued, running and those
+  due to be retried.
+
+Both run where the database is, on the scheduler's host or as a
+release's [upgrade step](hetzner.md#a-releases-upgrade-steps), not over
+`--remote`. An older morca ignores a request; its queued runs wait while
+fills are off.
 
 ### Keyed pipelines and sensors don't fill
 

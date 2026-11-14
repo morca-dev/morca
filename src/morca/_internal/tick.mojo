@@ -8,6 +8,7 @@ from std.time import perf_counter_ns
 from std.os import remove
 import morca._internal.db.scheduler as scheduler_db
 import morca._internal.db.starting as starting_db
+from morca._internal.db.fill_requests import requested
 from morca._internal.alerts import failed_runs
 from morca._internal.notify import configured as notify_configured
 from morca._internal.logs import publish
@@ -216,6 +217,11 @@ def tick(mut self: Scheduler, now: Int64) raises:
                 _ = failed_runs(self.db, p.name, p.run_retries, _RETRIED)
             except e:
                 print("morca: can't alert on", p.name, "failures:", e)
+    # A pipeline with a fill request (#465) has a fill pass with fills
+    # off too.
+    var asked = Dict[String, Bool]()
+    for name in requested(self.db.conn):
+        asked[name] = True
     var i = 0
     while i < len(ps):
         var j = i
@@ -224,7 +230,7 @@ def tick(mut self: Scheduler, now: Int64) raises:
         for k in range(i, j):
             _start_again(self, ps[k], now)
         for k in range(i, j):
-            if ps[k].fill.all:
+            if ps[k].fill.all or ps[k].name in asked:
                 _start_again(self, ps[k], now, fill=True)
         i = j
 
