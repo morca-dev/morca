@@ -90,8 +90,14 @@ comptime CommitFn = def(Int, Int, Int, Int, Int, Int, Int) thin abi(
 ) -> Int64
 comptime WriteFilesFn = def(Int, Int, Int, Int, Int, Int) thin abi("C") -> Int32
 comptime WriterNewFn = def(Int, Int) thin abi("C") -> Int
-comptime WriterWriteFn = def(Int, Int, Int, Int, Int) thin abi("C") -> Int32
-comptime WriterFinishFn = def(Int, Int) thin abi("C") -> None
+comptime WriterWriteFn = def(Int, Int, Int, Int, Int, Int, Int, Int) thin abi(
+    "C"
+) -> Int32
+comptime WriterOptionsFn = def(Int, Int) thin abi("C") -> None
+comptime WriterFinishFn = def(Int, Int, Int) thin abi("C") -> Int32
+comptime Call4Fn = def(Int, Int, Int, Int) thin abi("C") -> Int32
+"""A call of four integers and a status: `lake_reader_next`,
+`lake_schema_fields`, `lake_table_exists`, `lake_delete_file`."""
 comptime FilesInfoFn = def(Int, Int, Int, Int) thin abi("C") -> Int32
 comptime ConcatFn = def(Int, Int, Int, Int, Int, Int) thin abi("C") -> Int32
 comptime DecodeFn = def(Int, Int, Int, Int, Int) thin abi("C") -> Int32
@@ -154,6 +160,15 @@ struct Api(Copyable, Movable):
     var files_info: FilesInfoFn
     var files_concat: ConcatFn
     var files_decode: DecodeFn
+    var reader_open: ScanFn
+    var reader_next: Call4Fn
+    var reader_free: FreeFn
+    var schema_fields: Call4Fn
+    var table_exists: Call4Fn
+    var read_file: ScanFn
+    var delete_file: Call4Fn
+    var writer_options: WriterOptionsFn
+    var writer_close: StatusFn
 
     @staticmethod
     def from_library(lib: OwnedDLHandle) raises -> Self:
@@ -185,6 +200,15 @@ struct Api(Copyable, Movable):
             files_info=_sym[FilesInfoFn](lib, "lake_files_info"),
             files_concat=_sym[ConcatFn](lib, "lake_files_concat"),
             files_decode=_sym[DecodeFn](lib, "lake_files_decode"),
+            reader_open=_sym[ScanFn](lib, "lake_reader_open"),
+            reader_next=_sym[Call4Fn](lib, "lake_reader_next"),
+            reader_free=_sym[FreeFn](lib, "lake_reader_free"),
+            schema_fields=_sym[Call4Fn](lib, "lake_schema_fields"),
+            table_exists=_sym[Call4Fn](lib, "lake_table_exists"),
+            read_file=_sym[ScanFn](lib, "lake_read_file"),
+            delete_file=_sym[Call4Fn](lib, "lake_delete_file"),
+            writer_options=_sym[WriterOptionsFn](lib, "lake_writer_options"),
+            writer_close=_sym[StatusFn](lib, "lake_writer_close"),
         )
 
     def __init__(
@@ -217,6 +241,15 @@ struct Api(Copyable, Movable):
         files_info: FilesInfoFn,
         files_concat: ConcatFn,
         files_decode: DecodeFn,
+        reader_open: ScanFn,
+        reader_next: Call4Fn,
+        reader_free: FreeFn,
+        schema_fields: Call4Fn,
+        table_exists: Call4Fn,
+        read_file: ScanFn,
+        delete_file: Call4Fn,
+        writer_options: WriterOptionsFn,
+        writer_close: StatusFn,
     ):
         self.free_text = free_text
         self.load = load
@@ -245,6 +278,15 @@ struct Api(Copyable, Movable):
         self.files_info = files_info
         self.files_concat = files_concat
         self.files_decode = files_decode
+        self.reader_open = reader_open
+        self.reader_next = reader_next
+        self.reader_free = reader_free
+        self.schema_fields = schema_fields
+        self.table_exists = table_exists
+        self.read_file = read_file
+        self.delete_file = delete_file
+        self.writer_options = writer_options
+        self.writer_close = writer_close
 
 
 struct _Loaded(Movable):
@@ -336,6 +378,15 @@ def api() raises -> Api:
             files_info=lib.lake_files_info,
             files_concat=lib.lake_files_concat,
             files_decode=lib.lake_files_decode,
+            reader_open=lib.lake_reader_open,
+            reader_next=lib.lake_reader_next,
+            reader_free=lib.lake_reader_free,
+            schema_fields=lib.lake_schema_fields,
+            table_exists=lib.lake_table_exists,
+            read_file=lib.lake_read_file,
+            delete_file=lib.lake_delete_file,
+            writer_options=lib.lake_writer_options,
+            writer_close=lib.lake_writer_close,
         )
     else:
         var p = _get_global["MORCA_LAKE_LIB", _init, _keep]()

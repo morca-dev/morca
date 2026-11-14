@@ -1,0 +1,1 @@
+- **More of iceberg in `morca.tables`:** `TableScan.to_batch_reader`, a data file's `partition` values, `Schema.find_by_name`/`has_field`, `FileWriter.write_row_group` and `options`, `Table.read_file`/`delete_file`, and `table_exists`. (#466)

@@ -7,13 +7,15 @@ what CI compares against). They carry no `@export` here: that would compile
 them into every program that imports the module.
 
 **Handles.** A table is the address of a heap `Table` (`lake_table_free`),
-a file writer of a heap `FileWriter`. Written files cross as bytes, iceberg's
+a file writer of a heap `FileWriter`, a batch reader of a heap
+`BatchReader` (`lake_reader_free`). Written files cross as bytes, iceberg's
 `encode_data_files`, which is also how a dista task carries them.
 
 The ABI (`morca._lake.abi`) says how text, maps, out blocks, errors and the
 host block cross; each function's doc says what its failure value is.
 """
 
+from std.memory import bitcast
 from std.memory.alloc import unsafe_alloc
 
 from arrow_mlake import AT_STRUCT, ArrayArena, ArrayData, ArrowType
@@ -26,11 +28,13 @@ from iceberg.io import FileIO
 from iceberg.json import parse_json
 from iceberg.manifest import DataFile, decode_data_files, encode_data_files
 from iceberg.nested import concat_tree, empty_tree
-from iceberg.scan import TableScan
+from iceberg.scan import BatchReader, TableScan
 from iceberg.schema import Schema
 from iceberg.transforms import PartitionSpec
-from iceberg.write import _partition_key
-from parquet import RecordBatch
+from iceberg.values import Datum
+from iceberg.write import WriteOptions, _partition_key
+from parquet import ParquetReader, RecordBatch
+from parquet_full import AllCodecs
 
 from morca._lake.abi import (
     ABI_VERSION,
@@ -123,6 +127,49 @@ def _files_of(addr: Int, n: Int) raises -> List[DataFile]:
     var buf = bytes_of(addr, n)
     var pos = 0
     return decode_data_files(Span(buf), pos)
+
+
+def _partition_values(mut e: Enc, values: List[Datum]):
+    """A file's partition values, as `morca.tables.PartitionValue` reads
+    them: valid, kind, i, f's bits, s, b."""
+    e.int(Int64(len(values)))
+    for d in values:
+        e.bool(d.valid)
+        e.int(Int64(d.kind))
+        e.int(d.i)
+        e.int(bitcast[DType.int64](d.f))
+        e.str(d.s)
+        e.bytes(Span(d.b))
+
+
+def _reader(h: Int) -> Pointer[BatchReader, MutAnyOrigin]:
+    return Pointer[BatchReader, MutAnyOrigin](unsafe_from_address=h)
+
+
+def _options(o: WriteOptions) -> Enc:
+    """`WriteOptions`, as `morca.tables.WriteOptions` reads them."""
+    var e = Enc()
+    e.str(o.codec)
+    e.int(Int64(o.row_group_rows))
+    e.int(Int64(o.page_size))
+    e.int(Int64(o.compression_level))
+    e.bool(o.use_dictionary)
+    e.int(Int64(o.truncate))
+    e.int(Int64(o.num_workers))
+    return e^
+
+
+def _options_of(addr: Int, n: Int) raises -> WriteOptions:
+    var d = Dec(addr, n)
+    var o = WriteOptions()
+    o.codec = d.str()
+    o.row_group_rows = Int(d.int())
+    o.page_size = Int(d.int())
+    o.compression_level = Int(d.int())
+    o.use_dictionary = d.bool()
+    o.truncate = Int(d.int())
+    o.num_workers = Int(d.int())
+    return o^
 
 
 def _give_files(out_block: Int, files: List[DataFile]):
@@ -377,6 +424,7 @@ def lake_plan_files(
             e.int(f.file_size_in_bytes)
             e.int(Int64(task.spec_id))
             e.str(_partition_key(f.partition))
+            _partition_values(e, f.partition)
             e.str(task.residual)
             e.int(task.start)
             e.int(task.length)
@@ -461,6 +509,132 @@ def lake_concat(
         var pair = ex.into_raw()
         put_int(out_array, 0, pair[0])
         put_int(out_schema, 0, pair[1])
+        return 0
+    except e:
+        _fail(err, e)
+        return 1
+
+
+def lake_reader_open(
+    h: Int, opts: Int, opts_n: Int, out_reader: Int, err: Int
+) abi("C") -> Int32:
+    """`TableScan.to_batch_reader`: a reader of the scan's batches, planned
+    here, its handle to `out_reader` (0 when the scan has nothing to read);
+    1 on error."""
+    try:
+        var o = _ScanOpts(opts, opts_n)
+        put_int(out_reader, 0, 0)
+        if o.snapshot == SNAP_NONE:
+            return 0
+        ref t = _table(h)[]
+        if not t.metadata.has_current_snapshot and o.snapshot < 0:
+            return 0
+        var r = _scan_of(t, o).to_batch_reader()
+        var p = unsafe_alloc[BatchReader](1)
+        p.unsafe_write(r^)
+        put_int(out_reader, 0, Int(p))
+        return 0
+    except e:
+        _fail(err, e)
+        return 1
+
+
+def lake_reader_next(
+    r: Int, out_array: Int, out_schema: Int, err: Int
+) abi("C") -> Int32:
+    """The reader's next batch, as one C struct array to the out slots
+    (both 0 once the scan is done); 1 on error."""
+    try:
+        put_int(out_array, 0, 0)
+        put_int(out_schema, 0, 0)
+        var b = _reader(r)[].next_batch()
+        if not b:
+            return 0
+        var ex = _export_batch(b.take())
+        var pair = ex.into_raw()
+        put_int(out_array, 0, pair[0])
+        put_int(out_schema, 0, pair[1])
+        return 0
+    except e:
+        _fail(err, e)
+        return 1
+
+
+def lake_reader_free(r: Int) abi("C"):
+    if r != 0:
+        var p = _reader(r)
+        p.unsafe_deinit_pointee()
+        p.unsafe_free()
+
+
+def lake_schema_fields(
+    schema: Int, schema_n: Int, out_block: Int, err: Int
+) abi("C") -> Int32:
+    """Every field of an Iceberg schema (JSON), nested ones included, as
+    `morca.tables.SchemaField` reads them: id, dotted name, type JSON,
+    required, the parent's id (-1 for a top-level column). 1 on error."""
+    try:
+        var s = Schema.parse(text_of(schema, schema_n))
+        var e = Enc()
+        e.int(Int64(len(s.flat)))
+        for f in s.flat:
+            e.int(Int64(f.id))
+            e.str(f.name)
+            e.str(s.store.type_json(f.type))
+            e.bool(f.required)
+            e.int(Int64(s.flat[f.parent].id) if f.parent >= 0 else -1)
+        give(out_block, Span(e.buf))
+        return 0
+    except e:
+        _fail(err, e)
+        return 1
+
+
+def lake_table_exists(
+    ds: Int, n: Int, out_yes: Int, err: Int
+) abi("C") -> Int32:
+    """Whether the warehouse has the dataset's table, 1 or 0 to `out_yes`;
+    1 on error (no warehouse)."""
+    try:
+        put_int(out_yes, 0, 1 if tables.table_exists(text_of(ds, n)) else 0)
+        return 0
+    except e:
+        _fail(err, e)
+        return 1
+
+
+def lake_read_file(
+    h: Int, path: Int, path_n: Int, out_stream: Int, err: Int
+) abi("C") -> Int32:
+    """The rows of one Parquet file, read through the table's IO (a file
+    written and not yet committed, which no scan sees), as an
+    `ArrowArrayStream` to `out_stream` (0 when it has no batches); 1 on
+    error."""
+    try:
+        put_int(out_stream, 0, 0)
+        ref t = _table(h)[]
+        var reader = ParquetReader[AllCodecs](
+            t.io.read_all(text_of(path, path_n))
+        )
+        var got = reader.read_table()
+        var batches = List[RecordBatch]()
+        for ref b in got.batches:
+            batches.append(b.copy())
+        var exported = _export_all(batches^)
+        if len(exported) > 0:
+            put_int(out_stream, 0, export_stream_of(exported^))
+        return 0
+    except e:
+        _fail(err, e)
+        return 1
+
+
+def lake_delete_file(
+    h: Int, path: Int, path_n: Int, err: Int
+) abi("C") -> Int32:
+    """Deletes a file through the table's IO; 1 on error."""
+    try:
+        _table(h)[].io.delete(text_of(path, path_n))
         return 0
     except e:
         _fail(err, e)
@@ -569,26 +743,67 @@ def lake_writer_new(h: Int, err: Int) abi("C") -> Int:
         return 0
 
 
+def lake_writer_options(w: Int, out_block: Int) abi("C"):
+    """The writer's `WriteOptions`, encoded, to `out_block`."""
+    var e = _options(_writer(w)[].options)
+    give(out_block, Span(e.buf))
+
+
 def lake_writer_write(
-    w: Int, n: Int, arrays: Int, schemas: Int, err: Int
+    w: Int,
+    opts: Int,
+    opts_n: Int,
+    n: Int,
+    arrays: Int,
+    schemas: Int,
+    row_group: Int,
+    err: Int,
 ) abi("C") -> Int32:
-    """`FileWriter.write` of `n` C batches moved here; 1 on error."""
+    """`FileWriter.write` of `n` C batches moved here, or with `row_group`
+    1, `write_row_group` of each; with `opts_n` > 0 the writer's options
+    are those first. 1 on error."""
     try:
         ref fw = _writer(w)[]
-        fw.write(_batches(n, arrays, schemas))
+        var bs = _batches(n, arrays, schemas)
+        if opts_n > 0:
+            fw.options = _options_of(opts, opts_n)
+        if row_group != 0:
+            for ref b in bs:
+                fw.write_row_group(b)
+        else:
+            fw.write(bs)
         return 0
     except e:
         _fail(err, e)
         return 1
 
 
-def lake_writer_finish(w: Int, out_block: Int) abi("C"):
-    """The writer's entries, encoded, to `out_block`; frees the writer."""
+def lake_writer_close(w: Int, err: Int) abi("C") -> Int32:
+    """`FileWriter.close_files`; 1 on error."""
+    try:
+        _writer(w)[].close_files()
+        return 0
+    except e:
+        _fail(err, e)
+        return 1
+
+
+def lake_writer_finish(w: Int, out_block: Int, err: Int) abi("C") -> Int32:
+    """The writer's entries, its open files ended first, encoded, to
+    `out_block`; 1 on error. Frees the writer either way."""
     var p = _writer(w)
+    try:
+        p[].close_files()
+    except e:
+        p.unsafe_deinit_pointee()
+        p.unsafe_free()
+        _fail(err, e)
+        return 1
     var files = p[].files.files.copy()
     p.unsafe_deinit_pointee()
     p.unsafe_free()
     _give_files(out_block, files)
+    return 0
 
 
 def lake_writer_free(w: Int) abi("C"):
@@ -615,6 +830,7 @@ def lake_files_info(
             e.int(f.record_count)
             e.int(f.file_size_in_bytes)
             e.str(_partition_key(f.partition))
+            _partition_values(e, f.partition)
         give(out_block, Span(e.buf))
         return 0
     except e:

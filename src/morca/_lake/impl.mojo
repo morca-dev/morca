@@ -8,6 +8,7 @@ morca's own tools that need iceberg's types (`morca_maintain`, the data
 view) import this directly; pipelines go through `morca.tables`.
 """
 
+from std.memory.alloc import unsafe_alloc
 from std.random import random_float64
 from std.time import sleep
 
@@ -37,8 +38,29 @@ from iceberg.update_schema import (
 )
 from iceberg.util import now_ms
 from iceberg.values import Datum, compare, datum_from_bytes_prim
-from iceberg.write import WriteOptions, _partition_key, write_data_files
-from parquet import RecordBatch
+from iceberg.nested import filter_tree, find_struct_path, flatten_leaf
+from iceberg.read import _extract
+from iceberg.util import uuid4, zero_pad
+from iceberg.io import join_path
+from iceberg.write import (
+    WriteOptions,
+    _Aligned,
+    _align,
+    _partition_key,
+    codec_value,
+    data_file_from_footer,
+    partition_path,
+    write_data_files,
+)
+from parquet import (
+    ListSink,
+    ParquetWriter,
+    RecordBatch,
+    WriterOptions,
+    WrittenFile,
+)
+from parquet.arrow import ArrayArena, ArrayData
+from parquet_full import AllCodecs
 
 from morca._lake.host import Host
 from morca._lake.names import (
@@ -133,6 +155,13 @@ def load_dataset(dataset: String) raises -> Table:
         return _catalog().load_table(name[0], name[1])
     except e:
         raise Error("morca: can't load ", dataset, ": ", e)
+
+
+def table_exists(dataset: String) raises -> Bool:
+    """Whether the warehouse has `dataset`'s table. Raises only when there's
+    no warehouse to look in."""
+    var name = _split(dataset)
+    return _catalog().table_exists(name[0], name[1])
 
 
 def table(mut ctx: Host, dataset: String) raises -> Table:
@@ -417,10 +446,139 @@ struct DataFiles(Codec, Copyable, Movable, Sized):
         return Self(decode_data_files(buf, pos))
 
 
+struct _OpenFile(Movable):
+    """A data file `FileWriter.write_row_group` is still adding row groups
+    to: its writer, the bytes written so far, and its partition."""
+
+    var writer: ParquetWriter[AllCodecs]
+    var sink: ListSink
+    var values: List[Datum]
+
+    def __init__(
+        out self, options: WriteOptions, schema: Schema, var values: List[Datum]
+    ) raises:
+        var opts = WriterOptions()
+        opts.codec = codec_value(options.codec)
+        opts.row_group_size = options.row_group_rows
+        opts.data_page_size = options.page_size
+        opts.compression_level = options.compression_level
+        opts.use_dictionary = options.use_dictionary
+        opts.num_workers = options.num_workers
+        self.writer = ParquetWriter[AllCodecs](opts^)
+        self.writer.add_metadata("iceberg.schema", schema.to_json())
+        self.sink = ListSink()
+        self.values = values^
+
+    def finish(deinit self) raises -> Tuple[WrittenFile, List[UInt8]]:
+        """The footer written and the file's bytes."""
+        var sink = self.sink^
+        var written = self.writer^.finish_to(sink)
+        var out = List[UInt8]()
+        swap(out, sink.bytes)
+        return (written^, out^)
+
+
+comptime _OpenPtr = Pointer[_OpenFile, MutUntrackedOrigin]
+
+
+struct _Groups(Movable):
+    """A batch's rows by partition, in the order each partition first
+    appears: `keep[g]` marks group `g`'s rows."""
+
+    var keys: List[String]
+    var values: List[List[Datum]]
+    var keep: List[List[Bool]]
+    var count: List[Int]
+
+    def __init__(out self):
+        self.keys = List[String]()
+        self.values = List[List[Datum]]()
+        self.keep = List[List[Bool]]()
+        self.count = List[Int]()
+
+
+def _group_rows(
+    batch: RecordBatch, aligned: _Aligned, schema: Schema, spec: PartitionSpec
+) raises -> _Groups:
+    """Which partition each row of `batch` (aligned to `schema` as
+    `aligned`) falls in, as iceberg's `write_data_files` works it out."""
+    var out = _Groups()
+    var n = batch.num_rows
+    if len(spec.fields) == 0:
+        out.keys.append(String(""))
+        out.values.append(List[Datum]())
+        out.keep.append(List[Bool](length=n, fill=True))
+        out.count.append(n)
+        return out^
+    var cols = schema.columns()
+    var source_arrays = List[ArrayData]()
+    var source_types = List[Int]()
+    for f in range(len(spec.fields)):
+        var src_id = spec.fields[f].source_id
+        var top = schema.top_ancestor_id(src_id)
+        var slot = -1
+        for k in range(len(cols)):
+            if cols[k].id == top:
+                slot = k
+                break
+        if slot < 0:
+            raise Error(
+                "morca: partition field '",
+                spec.fields[f].name,
+                "' has no source column in the schema",
+            )
+        var path = List[Int]()
+        if src_id != top and not find_struct_path(
+            schema.store, cols[slot].type, src_id, path
+        ):
+            raise Error(
+                "morca: partition field '",
+                spec.fields[f].name,
+                "' is inside a list or a map",
+            )
+        if aligned.borrowed[slot]:
+            source_arrays.append(
+                flatten_leaf(batch.arena, aligned.roots[slot], path)
+            )
+        else:
+            source_arrays.append(
+                flatten_leaf(aligned.own, aligned.roots[slot], path)
+            )
+        source_types.append(schema.find_field(src_id).type)
+    var groups = Dict[String, Int]()
+    for r in range(n):
+        var values = List[Datum]()
+        for f in range(len(spec.fields)):
+            ref t = schema.store.nodes[source_types[f]]
+            var v = _extract(
+                source_arrays[f], r, t.prim, t.precision, t.scale, t.length
+            )
+            values.append(spec.fields[f].transform.apply(v))
+        var key = _partition_key(values)
+        if key in groups:
+            var g = groups[key]
+            out.keep[g][r] = True
+            out.count[g] += 1
+        else:
+            groups[key] = len(out.keys)
+            out.keys.append(key)
+            out.values.append(values^)
+            var keep = List[Bool](length=n, fill=False)
+            keep[r] = True
+            out.keep.append(keep^)
+            out.count.append(1)
+    return out^
+
+
 struct FileWriter(Movable):
     """Writes batches into a table's data files as they come, without
     committing them, and keeps their entries. For a worker that produces a
     table's rows a batch at a time; `write_files` writes a list at once.
+
+    `write` writes a file per partition of each call. `write_row_group`
+    instead adds each partition's rows as a row group of a file per
+    partition that stays open, so a file is written a slice at a time;
+    `close_files` (or `finish`) ends those files.
 
     It holds the table's schema, spec, sort order and write properties as
     they were when it was made: a schema change committed meanwhile isn't
@@ -436,6 +594,10 @@ struct FileWriter(Movable):
     var files: DataFiles
     var rows: Int
     """The rows written so far."""
+    var _open_keys: Dict[String, Int]
+    var _open: List[Int]
+    """`_OpenFile`s on the heap, in the order their partitions came."""
+    var _counter: Int
 
     def __init__(out self, table: Table) raises:
         self.io = table.io.copy()
@@ -446,6 +608,25 @@ struct FileWriter(Movable):
         self.options = WriteOptions.from_properties(table.metadata.properties)
         self.files = DataFiles()
         self.rows = 0
+        self._open_keys = Dict[String, Int]()
+        self._open = List[Int]()
+        self._counter = 0
+
+    def __deinit__(deinit self):
+        """Files still open are dropped unwritten."""
+        for a in self._open:
+            var p = _OpenPtr(unsafe_from_address=a)
+            p.unsafe_deinit_pointee()
+            p.unsafe_free()
+
+    def _name(self) -> String:
+        try:
+            var name = dataset_of(self.location)
+            if name:
+                return name^
+        except:
+            pass
+        return self.location
 
     def write(mut self, batches: List[RecordBatch]) raises:
         """Writes `batches`: a file per partition they hold."""
@@ -463,12 +644,8 @@ struct FileWriter(Movable):
                 self.options,
             )
         except e:
-            var name = dataset_of(self.location)
             raise Error(
-                "morca: can't write data files for ",
-                name if name else self.location,
-                ": ",
-                e,
+                "morca: can't write data files for ", self._name(), ": ", e
             )
         for i in range(len(written)):
             self.files.files.append(written[i].copy())
@@ -479,8 +656,120 @@ struct FileWriter(Movable):
         one.append(batch^)
         self.write(one)
 
-    def finish(deinit self) -> DataFiles:
-        """The entries of every file written."""
+    def write_row_group(mut self, batch: RecordBatch) raises:
+        """Adds `batch`'s rows to the open file of the partition they fall
+        in, as a row group (more than one past `options.row_group_rows`),
+        opening the file on the partition's first rows. Rows of several
+        partitions make a row group in each one's file."""
+        var n = batch.num_rows
+        if n == 0:
+            return
+        try:
+            var aligned = _align(batch, self.schema)
+            var groups = _group_rows(batch, aligned, self.schema, self.spec)
+            for g in range(len(groups.keys)):
+                var at: Int
+                if groups.keys[g] in self._open_keys:
+                    at = self._open[self._open_keys[groups.keys[g]]]
+                else:
+                    var p = unsafe_alloc[_OpenFile](1)
+                    p.unsafe_write(
+                        _OpenFile(
+                            self.options, self.schema, groups.values[g].copy()
+                        )
+                    )
+                    at = Int(p)
+                    self._open_keys[groups.keys[g]] = len(self._open)
+                    self._open.append(at)
+                ref f = _OpenPtr(unsafe_from_address=at)[]
+                if groups.count[g] == n:
+                    if (
+                        not aligned.all_borrowed()
+                        and not aligned.none_borrowed()
+                    ):
+                        aligned.adopt_borrowed(batch)
+                    if aligned.all_borrowed():
+                        f.writer.write_batch_to(
+                            batch.arena, aligned.roots, f.sink
+                        )
+                    else:
+                        f.writer.write_batch_to(
+                            aligned.own, aligned.roots, f.sink
+                        )
+                    continue
+                var arena = ArrayArena()
+                var roots = List[Int]()
+                for k in range(len(aligned.roots)):
+                    if aligned.borrowed[k]:
+                        roots.append(
+                            filter_tree(
+                                batch.arena,
+                                aligned.roots[k],
+                                groups.keep[g],
+                                groups.count[g],
+                                arena,
+                            )
+                        )
+                    else:
+                        roots.append(
+                            filter_tree(
+                                aligned.own,
+                                aligned.roots[k],
+                                groups.keep[g],
+                                groups.count[g],
+                                arena,
+                            )
+                        )
+                f.writer.write_batch_to(arena, roots, f.sink)
+        except e:
+            raise Error(
+                "morca: can't write a row group for ", self._name(), ": ", e
+            )
+        self.rows += n
+
+    def close_files(mut self) raises:
+        """Ends the files `write_row_group` has open, in the order their
+        partitions came, and keeps their entries."""
+        var open = self._open^
+        self._open = List[Int]()
+        self._open_keys = Dict[String, Int]()
+        try:
+            for a in open:
+                var p = _OpenPtr(unsafe_from_address=a)
+                var f = p.unsafe_take_pointee()
+                p.unsafe_free()
+                var values = f.values.copy()
+                var done = f^.finish()
+                ref written = done[0]
+                var dir = join_path(self.location, "data")
+                var rel = partition_path(self.spec, values)
+                if rel != "":
+                    dir = join_path(dir, rel)
+                var path = join_path(
+                    dir, uuid4() + "-" + zero_pad(self._counter, 5) + ".parquet"
+                )
+                self._counter += 1
+                self.io.write_all(path, Span(done[1]))
+                self.files.files.append(
+                    data_file_from_footer(
+                        written.metadata,
+                        written.file_size,
+                        path,
+                        self.schema,
+                        self.spec,
+                        values,
+                        self.sort_order_id,
+                        self.options,
+                    )
+                )
+        except e:
+            raise Error(
+                "morca: can't write data files for ", self._name(), ": ", e
+            )
+
+    def finish(deinit self) raises -> DataFiles:
+        """The entries of every file written, the open ones ended first."""
+        self.close_files()
         return self.files^
 
 

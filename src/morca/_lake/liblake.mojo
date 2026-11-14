@@ -103,6 +103,53 @@ def lake_count(
     return lib.lake_count(h, opts, opts_n, out_n, err)
 
 
+@export("lake_reader_open")
+def lake_reader_open(
+    h: Int, opts: Int, opts_n: Int, out_reader: Int, err: Int
+) abi("C") -> Int32:
+    return lib.lake_reader_open(h, opts, opts_n, out_reader, err)
+
+
+@export("lake_reader_next")
+def lake_reader_next(
+    r: Int, out_array: Int, out_schema: Int, err: Int
+) abi("C") -> Int32:
+    return lib.lake_reader_next(r, out_array, out_schema, err)
+
+
+@export("lake_reader_free")
+def lake_reader_free(r: Int) abi("C"):
+    lib.lake_reader_free(r)
+
+
+@export("lake_schema_fields")
+def lake_schema_fields(
+    schema: Int, schema_n: Int, out_block: Int, err: Int
+) abi("C") -> Int32:
+    return lib.lake_schema_fields(schema, schema_n, out_block, err)
+
+
+@export("lake_table_exists")
+def lake_table_exists(
+    ds: Int, n: Int, out_yes: Int, err: Int
+) abi("C") -> Int32:
+    return lib.lake_table_exists(ds, n, out_yes, err)
+
+
+@export("lake_read_file")
+def lake_read_file(
+    h: Int, path: Int, path_n: Int, out_stream: Int, err: Int
+) abi("C") -> Int32:
+    return lib.lake_read_file(h, path, path_n, out_stream, err)
+
+
+@export("lake_delete_file")
+def lake_delete_file(
+    h: Int, path: Int, path_n: Int, err: Int
+) abi("C") -> Int32:
+    return lib.lake_delete_file(h, path, path_n, err)
+
+
 @export("lake_empty_batch")
 def lake_empty_batch(
     schema: Int, schema_n: Int, out_array: Int, out_schema: Int, err: Int
@@ -161,16 +208,35 @@ def lake_writer_new(h: Int, err: Int) abi("C") -> Int:
     return lib.lake_writer_new(h, err)
 
 
+@export("lake_writer_options")
+def lake_writer_options(w: Int, out_block: Int) abi("C"):
+    lib.lake_writer_options(w, out_block)
+
+
 @export("lake_writer_write")
 def lake_writer_write(
-    w: Int, n: Int, arrays: Int, schemas: Int, err: Int
+    w: Int,
+    opts: Int,
+    opts_n: Int,
+    n: Int,
+    arrays: Int,
+    schemas: Int,
+    row_group: Int,
+    err: Int,
 ) abi("C") -> Int32:
-    return lib.lake_writer_write(w, n, arrays, schemas, err)
+    return lib.lake_writer_write(
+        w, opts, opts_n, n, arrays, schemas, row_group, err
+    )
+
+
+@export("lake_writer_close")
+def lake_writer_close(w: Int, err: Int) abi("C") -> Int32:
+    return lib.lake_writer_close(w, err)
 
 
 @export("lake_writer_finish")
-def lake_writer_finish(w: Int, out_block: Int) abi("C"):
-    lib.lake_writer_finish(w, out_block)
+def lake_writer_finish(w: Int, out_block: Int, err: Int) abi("C") -> Int32:
+    return lib.lake_writer_finish(w, out_block, err)
 
 
 @export("lake_writer_free")
