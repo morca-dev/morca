@@ -152,13 +152,14 @@ the next ask.
 
 ## A pipeline's page
 
-Three tabs, each its own page, so links and the back button work:
+Four tabs, each its own page, so links and the back button work:
 
 | Tab | Link | What it has |
 |---|---|---|
 | Overview | `/pipelines/<name>` | the cards below, Steps, keys, snapshots not run, Next runs |
 | Runs | `?tab=runs` | its runs and versions |
 | Operate | `?tab=operate` | Coverage (the calendar of done, failed and open days), Start runs, Stop runs |
+| Data | `?tab=data` | Each dataset it writes: its current snapshot and first 20 rows, read as the dataset's Data tab reads them, and a link to that tab |
 
 The name, Pause and the Progress card are on every tab. Links to
 `#coverage`, `#start` or `#stop` open Operate.

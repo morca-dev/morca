@@ -36,6 +36,7 @@ from morca._internal.ui.layout import (
     page_html,
 )
 from morca._internal.dataset_config import private_datasets
+from morca._internal.ui.pipeline_data import pipeline_data_html
 from morca._internal.ui.parts import (
     CPU_HELP,
     PEAK_HELP,
@@ -436,7 +437,7 @@ def pipeline_progress_here(name: String, tab: String) -> String:
     pipeline's page, on `tab` (as the poll URL gives it) if that is one of
     its tabs other than the overview."""
     var base = String("/pipelines/", url_encode(name))
-    if tab == "runs" or tab == "operate":
+    if tab in ["runs", "operate", "data"]:
         return String(base, "?tab=", tab)
     return base
 
@@ -702,11 +703,13 @@ def _steps_html(
 
 
 def pipeline_html(
-    mut db: State, v: PipelineView, ask: PipelineAsk
+    mut db: State, v: PipelineView, ask: PipelineAsk, user: String = ""
 ) raises -> String:
-    """A pipeline's page, the tab `ask` names (`overview`, `runs` or
-    `operate`): the Overview's cards and steps, the Runs tab's page of runs
-    and versions, or Operate's coverage, Start runs and controls."""
+    """A pipeline's page, the tab `ask` names (`overview`, `runs`,
+    `operate` or `data`): the Overview's cards and steps, the Runs tab's
+    page of runs and versions, Operate's coverage, Start runs and controls,
+    or the data of what it writes (`morca._internal.ui.pipeline_data`,
+    as `user` may see it)."""
     ref p = v.pipeline
     var tab = ask.shown_tab()
     var h = Html()
@@ -800,6 +803,8 @@ def pipeline_html(
             if len(v.versions) > 0:
                 repo = web_url(v.versions[0].source)
             config_html(h, v.configs[0], repo, links.pipeline.url)
+    elif tab == "data":
+        pipeline_data_html(db, h, v.steps, user)
     elif tab == "operate":
         if is_time_kind(p.kind):
             coverage_html(
@@ -885,6 +890,7 @@ def _tabs_html(mut h: Html, base: String, tab: String):
         ("overview", "Overview"),
         ("runs", "Runs"),
         ("operate", "Operate"),
+        ("data", "Data"),
     ]:
         h.raw('<a class="ptabs__tab" href="')
         h.text(base if t[0] == "overview" else String(base, "?tab=", t[0]))

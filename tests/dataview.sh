@@ -19,6 +19,8 @@
 #   together, with the same rows as a read from the start; the manifests
 #   and the partitions are kept in MORCA_DATA_CACHE, so the next read
 #   fetches none; and a Data link marks the page as loading once clicked;
+# - a pipeline's Data tab: the first rows of each dataset it writes, through
+#   the same reader, linked to the dataset's Data tab;
 # - [datasets."lake.obs"] public = false hides the data from visitors not
 #   logged in once login is on (401), not from those logged in, and not the
 #   dataset's overview; config check accepts the table and refuses a bad one.
@@ -172,6 +174,16 @@ run=$(psql "$MORCA_DATABASE_URL" -Atc "SELECT max(id) FROM orca.runs WHERE pipel
 curl -fsS "$base/runs/$run" | grep -qF "href=\"/datasets/lake.obs?tab=data&amp;snapshot=$S2\"" || fail "the run page's link to the data it wrote"
 echo "ok   home, the pipeline page, the steps, the datasets list and the run page link to the data"
 
+# A pipeline's Data tab: what it writes, a few rows each.
+page=$(curl -fsS "$base/pipelines/obs?tab=data")
+echo "$page" | grep -qF 'href="/pipelines/obs?tab=data" aria-current="page">Data</a>' || fail "the pipeline's Data tab"
+echo "$page" | grep -qF '<section class="card pdata" id="data-0"><h2><a href="/datasets/lake.obs">lake.obs</a></h2>' || fail "lake.obs's card"
+echo "$page" | grep -qF "Snapshot $S2 · 300 rows · 6 files" || fail "lake.obs's snapshot line: $(echo "$page" | grep -o 'Snapshot [^<]*')"
+echo "$page" | grep -qF '<a class="data-link" href="/datasets/lake.obs?tab=data">All its data</a>' || fail "the link to lake.obs's Data tab"
+[ "$(echo "$page" | grep -o '<td class="num">' | wc -l | tr -d ' ')" -ge 20 ] || fail "lake.obs's rows on the pipeline's Data tab"
+[ "$(echo "$page" | grep -o '<tr>' | wc -l | tr -d ' ')" -eq 21 ] || fail "not 20 rows and a header: $(echo "$page" | grep -o '<tr>' | wc -l)"
+echo "ok   the pipeline's Data tab: lake.obs's snapshot and first 20 rows, linked to its Data tab"
+
 # The download: capped, with why.
 hdr=build/dataview/csv.hdr
 curl -fsS -D "$hdr" -o build/dataview/obs.csv "$base/datasets/lake.obs/data.csv?f=month:eq:2024-01" || fail "the download"
@@ -252,10 +264,14 @@ for path in / /datasets /pipelines/obs; do
         || fail "$path doesn't mark lake.obs's data link private for a visitor"
 done
 [ "$(code "$base/datasets/lake.obs")" = 200 ] || fail "the overview is hidden too"
+[ "$(code "$base/pipelines/obs?tab=data")" = 200 ] && grep -qF 'Its data is shown to those logged in' build/dataview/body \
+    && ! grep -q '<td class="num">' build/dataview/body || fail "the pipeline's Data tab shows hidden data to a visitor"
 jar=build/dataview/cookies.txt
 rm -f "$jar"
 [ "$(code -c "$jar" -H "Origin: $base" -d 'name=alice&password=correct+horse+battery' "$base/login")" = 303 ] || fail "log in"
 [ "$(code -b "$jar" "$base/datasets/lake.obs/data.json")" = 200 ] || fail "hidden from alice"
+[ "$(code -b "$jar" "$base/pipelines/obs?tab=data")" = 200 ] && grep -q '<td class="num">' build/dataview/body \
+    || fail "the pipeline's Data tab hides lake.obs from alice"
 printf '[pipelines.obs]\n' > "$conf"
 MORCA_CONFIG=$conf ./build/morca register ./build/dv-obs > build/dataview/reg.out 2>&1 || fail "register without [datasets]"
 grep -qx 'dataset lake.obs settings removed: its data is public' build/dataview/reg.out || fail "register's line: $(cat build/dataview/reg.out)"

@@ -321,7 +321,7 @@ def _pipeline(mut db: State, call: Call) raises -> Page:
     return Page(
         200,
         pipeline_json(v.value(), ask),
-        pipeline_html(db, v.value(), ask),
+        pipeline_html(db, v.value(), ask, call.user),
     )
 
 

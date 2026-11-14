@@ -246,9 +246,9 @@ struct PipelineAsk(Copyable, Movable):
     var url: String
 
     def shown_tab(self) -> String:
-        """`overview`, `runs` or `operate`: as asked, or Operate for a
-        preview or a coverage month that names no tab."""
-        if self.tab == "runs" or self.tab == "operate":
+        """`overview`, `runs`, `operate` or `data`: as asked, or Operate
+        for a preview or a coverage month that names no tab."""
+        if self.tab in ["runs", "operate", "data"]:
             return self.tab
         if not self.tab and (
             self.preview or self.cal or self.cov or self.partitions
