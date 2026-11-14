@@ -29,7 +29,7 @@ wait
 wait
 
 out=$(LAKE_LIB="$PWD/build/libfake_lake.$ext" ./build/lake-load-one a.b)
-echo "$out" | grep -q "has ABI version 999, and this morca speaks 2" \
+echo "$out" | grep -q "has ABI version 999, and this morca speaks 3" \
     || fail "a library of another ABI version wasn't refused: $out"
 out=$(LAKE_LIB="$PWD/build/no-such-liblake.$ext" ./build/lake-load-one a.b)
 echo "$out" | grep -q "can't load $PWD/build/no-such-liblake.$ext" \
