@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.30.0 - 2026-11-14
+
+- **Backfills as fills:** `morca backfill --rerun --as-fill` runs a big re-run in chunks, under the fill settings, and resumes across restarts; `--cancel` stops it. (#467)
+- **Learned memory fits the host:** learned requests are capped at what the host can grant; `morca status` shows why runs wait, and a new watchdog rule, `unmet`, catches runs that can never start. (#463)
+- **More of `morca.tables` on liblake:** a batch reader, typed partition values, schema lookup, row-group writing and `table_exists` (liblake ABI 3). (#466)
+
 ## 0.29.0 - 2026-11-14
 
 - **liblake, the first lib-tin:** `morca.tables` runs in a prebuilt shared library shipped with the package, so pipelines no longer compile iceberg and parquet. Build batches with `morca.tables.BatchBuilder` instead of `iceberg.batch`; `-D MORCA_LAKE_SOURCE=1` builds the old way. (#457)
