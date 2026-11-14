@@ -853,8 +853,30 @@ fill request 4 of mojo_repos: 1048 keys, as fill runs (keys_per_run 31, fill_max
 - **Cancelling.** `morca backfill --cancel <pipeline>` ends the request
   and cancels its runs as `morca cancel` does: queued, running and those
   due to be retried.
+- **Checking first.** `morca backfill --dry-run` (#475), with the same
+  flags and arguments, makes every check the real command makes and
+  writes nothing: no runs, no request (it does migrate the schema, as
+  every morca command on the database does). It prints what it would do, and
+  exits 0, or prints the refusal the real command would and exits
+  non-zero. It's the same code with writing turned off, so the two can't
+  disagree:
 
-Both run where the database is, on the scheduler's host or as a
+  ```text
+  morca backfill --dry-run --rerun --as-fill mojo_repos 2023-01-01..2026-11-13
+  dry run: would record a fill request of mojo_repos: 1048 keys, as fill runs (keys_per_run 31, fill_max_runs 1, 22:00–06:00 UTC); nothing recorded
+  morca backfill --dry-run mojo_repos 2026-11-01..2026-11-13
+  dry run: would queue 1 runs over 13 keys of mojo_repos (keys_per_run 31); nothing queued
+  ```
+
+  The checks are the pipeline's (registered, not retired), the keys'
+  (the range, or a keyed pipeline's names), `--rerun`'s refusal for steps
+  that append and `--allow-append`, and for `--as-fill` an open request
+  that differs in `--rerun`; one that doesn't, it would add to (`dry run:
+  would add 31 keys to fill request 4 ...`). Keys a backfill would skip,
+  done or in live runs, go to stderr as they do for a real one.
+  `--dry-run` with `--cancel` or `--preview` is refused.
+
+All three run where the database is, on the scheduler's host or as a
 release's [upgrade step](hetzner.md#a-releases-upgrade-steps), not over
 `--remote`. An older morca ignores a request; its queued runs wait while
 fills are off.

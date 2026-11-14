@@ -1,0 +1,1 @@
+- **`morca backfill --dry-run`:** makes every check a backfill or a fill request makes and writes nothing, printing what it would do or exiting non-zero with the real refusal. (#475)

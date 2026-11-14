@@ -418,18 +418,27 @@ def backfill(
     keys: String,
     rerun: Bool = False,
     allow_append: Bool = False,
+    dry: Bool = False,
 ) raises -> Queued:
     """Queues runs for the keys in `keys` that aren't done and aren't in a
     live run, `keys_per_run` to a run; returns the runs it queued and the
     keys it left. With `rerun` (`morca backfill --rerun`) the done ones are
     queued again too, as for a day whose source has changed since; unless
     `allow_append`, that's refused for a pipeline whose steps append to
-    what they write (`rerun_refusal`)."""
+    what they write (`rerun_refusal`). With `dry` (`morca backfill
+    --dry-run`, the Start runs preview), the same checks and the same
+    count, in a transaction it rolls back, queueing nothing."""
     if rerun and not allow_append:
         var why = rerun_refusal(db, p, keys)
         if why:
             raise Error(why)
-    return queue_keys(db, p, partition_keys(p, keys), "backfill", rerun)
+    var texts = partition_keys(p, keys)
+    if not dry:
+        return queue_keys(db, p, texts, "backfill", rerun)
+    var tx = db.conn.begin()
+    var got = _queue(tx, p, texts, "backfill", rerun, dry=True)
+    tx.rollback()
+    return got^
 
 
 def preview_backfill(
@@ -441,15 +450,7 @@ def preview_backfill(
 ) raises -> Queued:
     """What `backfill` would queue now, queueing nothing: the keys, how many
     runs they make, and the keys it would leave and why; or its refusal."""
-    if rerun and not allow_append:
-        var why = rerun_refusal(db, p, keys)
-        if why:
-            raise Error(why)
-    var texts = partition_keys(p, keys)
-    var tx = db.conn.begin()
-    var got = _queue(tx, p, texts, "backfill", rerun, dry=True)
-    tx.rollback()
-    return got^
+    return backfill(db, p, keys, rerun, allow_append, dry=True)
 
 
 def _last_line(path: String) -> String:

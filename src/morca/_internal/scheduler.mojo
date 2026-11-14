@@ -1248,10 +1248,11 @@ struct Scheduler(Movable):
         keys: String,
         rerun: Bool = False,
         allow_append: Bool = False,
+        dry: Bool = False,
     ) raises -> Queued:
-        """Queues a run for each partition in `keys` that has none; see
-        `backfill`."""
+        """Queues a run for each partition in `keys` that has none, or with
+        `dry` says what it would queue; see `backfill`."""
         var ps = registered(self.db, pipeline)
         if len(ps) == 0:
             raise Error("morca: pipeline ", pipeline, " isn't registered")
-        return backfill(self.db, ps[0], keys, rerun, allow_append)
+        return backfill(self.db, ps[0], keys, rerun, allow_append, dry)

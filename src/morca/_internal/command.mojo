@@ -143,10 +143,12 @@ comptime USAGE = """usage:
                 default: the scheduler's runner)
                 <pipeline binary> [...]
   morca backfill [--rerun [--allow-append]] [--preview|--as-fill]
-                <pipeline> KEY[..KEY][,...]
+                [--dry-run] <pipeline> KEY[..KEY][,...]
                 (keyed: NAME[,...]|@all|@file:<path>; --rerun: done ones too,
                 refused for steps that append unless --allow-append;
                 --preview: what it would queue, queueing nothing;
+                --dry-run: every check, refusals exit non-zero, and what it
+                would queue or request, writing nothing; not with --preview;
                 --as-fill: a fill request, which the scheduler runs as fill
                 runs within keys_per_run, fill_max_runs, fill_window and
                 fill_budget_per_day, after the other runs: morca-toml.md)
@@ -232,12 +234,14 @@ comptime USAGE = """usage:
 
 def _backfill_flags(args: List[String]) -> Bool:
     """Whether `morca backfill` has its two arguments after flags it knows
-    here: `--rerun`, `--allow-append` with it, and `--as-fill`."""
+    here: `--rerun`, `--allow-append` with it, `--as-fill` and
+    `--dry-run`."""
     if len(args) < 4:
         return False
     var rerun = False
     var allow = False
     var as_fill = False
+    var dry = False
     for i in range(2, len(args) - 2):
         if args[i] == "--rerun" and not rerun:
             rerun = True
@@ -245,6 +249,8 @@ def _backfill_flags(args: List[String]) -> Bool:
             allow = True
         elif args[i] == "--as-fill" and not as_fill:
             as_fill = True
+        elif args[i] == "--dry-run" and not dry:
+            dry = True
         else:
             return False
     return rerun or not allow
@@ -449,6 +455,18 @@ def _command(args: List[String], target: String) raises -> Int:
     if not url:
         _usage("morca needs MORCA_DATABASE_URL")
     var cmd = args[1]
+    if cmd == "backfill" and "--dry-run" in args:
+        # A dry run checks a backfill or a fill request; --cancel and
+        # --preview (the UI's preview, over the API) aren't one.
+        for flag in ["--cancel", "--preview"]:
+            if flag in args:
+                raise Error(
+                    (
+                        "morca: backfill --dry-run checks a backfill or a fill"
+                        " request (--as-fill); it can't be combined with "
+                    ),
+                    flag,
+                )
     # Commands that print what a page of the UI shows, or do what its
     # buttons do, over the database here as `--remote` does over HTTPS.
     if (
@@ -512,6 +530,8 @@ def _command(args: List[String], target: String) raises -> Int:
         db.migrate()
         print(cancel_fill(db, _registered_one(db, args[3])))
         return 0
+    # --dry-run (#475) makes every check the command does, with the same
+    # refusals, and writes nothing: the same code, told not to write.
     if cmd == "backfill" and _backfill_flags(args) and "--as-fill" in args:
         # A fill request (#465): the scheduler runs its keys as fill runs.
         var db = State(url)
@@ -523,6 +543,7 @@ def _command(args: List[String], target: String) raises -> Int:
                 args[len(args) - 1],
                 "--rerun" in args,
                 "--allow-append" in args,
+                dry="--dry-run" in args,
             )
         )
         return 0
@@ -531,17 +552,32 @@ def _command(args: List[String], target: String) raises -> Int:
         # running run is still left to it. --allow-append lets a rerun
         # append again to what its steps don't replace.
         var rerun = "--rerun" in args
+        var dry = "--dry-run" in args
         var s = Scheduler(url)
         var got = s.backfill(
             args[len(args) - 2],
             args[len(args) - 1],
             rerun,
             "--allow-append" in args,
+            dry,
         )
         # Why keys weren't queued goes to stderr, so the count stays the
         # one line of output.
         for line in got.skipped():
             print(line, file=stderr)
+        if dry:
+            var p = _registered_one(s.db, args[len(args) - 2])
+            print(
+                "dry run: would queue",
+                got.batches,
+                "runs over",
+                len(got.keys),
+                "keys of",
+                p.name,
+                "(keys_per_run",
+                String(p.keys_per_run, "); nothing queued"),
+            )
+            return 0
         print("queued", len(got.runs), "runs")
         return 0
     if cmd == "cancel" and len(args) == 4:

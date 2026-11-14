@@ -53,6 +53,19 @@ fi
 echo "$out" | grep -qF "rerunning 2024-01 (done) appends again to what first appended to before, duplicating those rows: step step writes lake.a. Declare a dataset in its step's replaces=" \
     || { echo "$out"; fail "the refusal doesn't say why"; }
 echo "$out" | grep -qF -- "--allow-append" || fail "the refusal doesn't name --allow-append"
+# --dry-run (#475) refuses it the same, and so does a request; nothing is written.
+runs() { psql "$MORCA_DATABASE_URL" -Atc "SELECT (SELECT count(*) FROM orca.runs) || ' ' || (SELECT count(*) FROM orca.fill_requests)"; }
+before=$(runs)
+for fill in "" --as-fill; do
+    # shellcheck disable=SC2086
+    if dry=$(./build/morca backfill --dry-run --rerun $fill first 2024-01 2>&1); then
+        fail "backfill --dry-run --rerun $fill of first wasn't refused: $dry"
+    fi
+    [ "$dry" = "$out" ] || fail "--dry-run --rerun $fill said '$dry', the real one '$out'"
+done
+dry=$(./build/morca backfill --dry-run --rerun --allow-append first 2024-01) || fail "--dry-run --allow-append exited $?"
+[ "$dry" = "dry run: would queue 1 runs over 1 keys of first (keys_per_run 1); nothing queued" ] || fail "--dry-run --allow-append: $dry"
+[ "$(runs)" = "$before" ] || fail "--dry-run wrote: $before, then $(runs)"
 # A backfill without --rerun leaves the done month, so there's nothing to refuse.
 out=$(./build/morca backfill first 2024-01 2>/dev/null) || fail "backfill of first exited $?"
 [ "$out" = "queued 0 runs" ] || fail "backfill of first: $out"
