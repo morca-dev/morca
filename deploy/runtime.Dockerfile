@@ -86,12 +86,22 @@ RUN env=/src/project/.pixi/envs/default && mkdir -p /deps/lib /deps/include \
     && cp -r $env/include/curl /deps/include/
 
 FROM debian:bookworm-slim AS git
+# The tarball is pinned by its sha256 (kernel.org's sha256sums.asc) and
+# fetched with retries from kernel.org's mirrors in turn: edge timeouts
+# failed image builds (morca #468). Bump GIT_SHA256 with GIT_VERSION.
 ARG GIT_VERSION=2.51.2
+ARG GIT_SHA256=233d7143a2d58e60755eee9b76f559ec73ea2b3c297f5b503162ace95966b4e3
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl gcc make libc6-dev \
       zlib1g-dev libpsl5 xz-utils \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=curl /deps /deps
-RUN curl -fsSL https://mirrors.edge.kernel.org/pub/software/scm/git/git-$GIT_VERSION.tar.xz | tar xJ -C /usr/src \
+RUN f=git-$GIT_VERSION.tar.xz \
+    && for m in https://mirrors.edge.kernel.org https://cdn.kernel.org https://www.kernel.org; do \
+        curl -fsSL --retry 5 --retry-all-errors --connect-timeout 20 -o /tmp/$f $m/pub/software/scm/git/$f \
+          && echo "$GIT_SHA256  /tmp/$f" | sha256sum -c - && break; \
+        rm -f /tmp/$f; \
+      done \
+    && test -f /tmp/$f && tar xJf /tmp/$f -C /usr/src && rm /tmp/$f \
     && cd /usr/src/git-$GIT_VERSION && ln -s libcurl.so.4 /deps/lib/libcurl.so \
     && make -j"$(nproc)" prefix=/opt/morca gitexecdir=/opt/morca/libexec/git \
         template_dir=/opt/morca/libexec/git/templates \
