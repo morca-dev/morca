@@ -11,7 +11,10 @@
 # - a second request adds its new keys, one without --rerun is refused;
 # - morca status and /api/pipelines/<name> show its progress;
 # - it resumes after a `morca scheduler` is killed mid-run;
-# - it ends once every key ran; --cancel cancels one and its runs.
+# - it ends once every key ran; --cancel cancels one and its runs;
+# - --dry-run (#475) says what a backfill or a request would do, and
+#   refuses what the real one refuses with the same message, writing
+#   nothing.
 #
 # Needs MORCA_DATABASE_URL (pixi run test-fill-requests starts a throwaway
 # server), curl and jq.
@@ -93,6 +96,40 @@ MORCA_NOW="$T0" ./build/morca register --config "$proj/morca.toml" ./build/daily
 [ "$(./build/morca backfill daily 2024-01-01..2024-01-06 2>> "$log")" = "queued 3 runs" ] || fail "the first backfill"
 drain "$T0"
 
+# --- --dry-run: what it would do, nothing written ---
+written() { q "SELECT (SELECT count(*) FROM orca.runs) || ' ' || (SELECT count(*) FROM orca.fill_requests) || ' ' || (SELECT coalesce(string_agg(keys, ' ' ORDER BY id), '') FROM orca.fill_requests)"; }
+same() {  # same ARGS...: `morca backfill --dry-run ARGS` is refused as `morca backfill ARGS` is, writing nothing
+    before=$(written)
+    if dry=$(./build/morca backfill --dry-run "$@" 2>&1); then fail "--dry-run $* wasn't refused: $dry"; fi
+    [ "$(written)" = "$before" ] || fail "--dry-run $* wrote: $(written)"
+    if real=$(./build/morca backfill "$@" 2>&1); then fail "$* wasn't refused: $real"; fi
+    [ "$dry" = "$real" ] || fail "--dry-run $* said '$dry', the real one '$real'"
+    [ "$(written)" = "$before" ] || fail "$* wrote: $(written)"
+}
+before=$(written)
+got=$(./build/morca backfill --dry-run daily 2024-01-07..2024-01-10 2>> "$log") || fail "--dry-run of a backfill"
+[ "$got" = "dry run: would queue 2 runs over 4 keys of daily (keys_per_run 2); nothing queued" ] || fail "--dry-run said: $got"
+got=$(./build/morca backfill --dry-run --rerun daily 2024-01-05..2024-01-07 2>> "$log") || fail "--dry-run --rerun"
+[ "$got" = "dry run: would queue 2 runs over 3 keys of daily (keys_per_run 2); nothing queued" ] || fail "--dry-run --rerun said: $got"
+got=$(./build/morca backfill --dry-run daily 2024-01-05..2024-01-07 2> "$proj/err") || fail "--dry-run over done keys"
+[ "$got" = "dry run: would queue 1 runs over 1 keys of daily (keys_per_run 2); nothing queued" ] || fail "--dry-run over done keys said: $got"
+grep -q "^skipped 2 done: 2024-01-05, 2024-01-06" "$proj/err" || fail "--dry-run didn't say what it skips: $(cat "$proj/err")"
+got=$(./build/morca backfill --rerun --as-fill --dry-run daily 2024-01-01..2024-01-06 2>> "$log") || fail "--dry-run of a request"
+[ "$got" = "dry run: would record a fill request of daily: 6 keys, as fill runs (keys_per_run 2, fill_max_runs 1, 22:00–06:00 UTC); nothing recorded" ] \
+    || fail "--dry-run of a request said: $got"
+[ "$(written)" = "$before" ] || fail "--dry-run wrote: $before, then $(written)"
+same nosuch 2024-01-01
+same --as-fill nosuch 2024-01-01
+same daily 2024-01-07..2024-01-0x
+same --rerun --as-fill daily 2023-12-31..2023-12-01
+for flag in --cancel --preview; do
+    if got=$(./build/morca backfill --dry-run "$flag" daily 2>&1); then fail "--dry-run $flag wasn't refused: $got"; fi
+    echo "$got" | grep -qF "morca: backfill --dry-run checks a backfill or a fill request (--as-fill); it can't be combined with $flag" \
+        || fail "--dry-run $flag said: $got"
+done
+[ "$(written)" = "$before" ] || fail "a refused --dry-run wrote: $(written)"
+echo "ok   --dry-run says what a backfill or a request would do, and writes nothing"
+
 # --- The request queues nothing; outside fill_window nothing starts ---
 got=$(./build/morca backfill --rerun --as-fill daily 2024-01-01..2024-01-06 2>> "$log") || fail "the request"
 case "$got" in "fill request "*" of daily: 6 keys, as fill runs (keys_per_run 2, fill_max_runs 1, 22:00–06:00 UTC)"*) ;; *) fail "the request said: $got" ;; esac
@@ -132,6 +169,11 @@ got=$(./build/morca backfill --rerun --as-fill daily 2024-01-05..2024-01-08 2>> 
 case "$got" in "added 2 keys to fill request "*" of daily (2 already in it), 8 in all"*) ;; *) fail "the merge said: $got" ;; esac
 ./build/morca backfill --as-fill daily 2024-01-05 >> "$log" 2>&1 && fail "a request without --rerun beside one with it"
 grep -q "has fill request .* going with --rerun" "$log" || fail "no reason for the refusal"
+before=$(written)
+got=$(./build/morca backfill --dry-run --rerun --as-fill daily 2024-01-08..2024-01-09 2>> "$log") || fail "--dry-run of a merge"
+case "$got" in "dry run: would add 1 keys to fill request "*" of daily (1 already in it), 9 in all, as fill runs (keys_per_run 2, fill_max_runs 1, 22:00–06:00 UTC); nothing recorded") ;; *) fail "--dry-run of a merge said: $got" ;; esac
+[ "$(written)" = "$before" ] || fail "--dry-run of a merge wrote: $(written)"
+same --as-fill daily 2024-01-05
 echo "ok   a second request adds its keys; one that differs in --rerun is refused"
 
 # --- A scheduler killed mid-run: the next one goes on ---

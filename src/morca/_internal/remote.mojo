@@ -1005,7 +1005,7 @@ def api_command(mut api: Api, args: List[String]) raises -> Int:
                 preview = True
             elif a == "--allow-append":
                 allow_append = True
-            elif a == "--as-fill" or a == "--cancel":
+            elif a == "--as-fill" or a == "--cancel" or a == "--dry-run":
                 raise Error(
                     "morca: backfill ",
                     a,

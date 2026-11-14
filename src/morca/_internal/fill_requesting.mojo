@@ -20,11 +20,14 @@ def request_fill(
     keys: String,
     rerun: Bool = False,
     allow_append: Bool = False,
+    dry: Bool = False,
 ) raises -> String:
     """Records `keys` as a fill request of `p`, for the scheduler to run as
     fill runs, and says so in a line. Refused as `morca backfill --rerun`
     is without `allow_append`; with an open request, the keys it hasn't
-    are added to it, but one that differs in `rerun` is refused."""
+    are added to it, but one that differs in `rerun` is refused. With
+    `dry` (`morca backfill --dry-run --as-fill`), the same checks, and a
+    line on what it would record, recording nothing."""
     if rerun and not allow_append:
         var why = rerun_refusal(db, p, keys)
         if why:
@@ -77,13 +80,17 @@ def request_fill(
         ", ",
         p.fill.window_text(),
     )
+    var would = String("dry run: would add ") if dry else String("added ")
     if open:
         ref o = open.value()
-        if added > 0:
-            requests_db.merge_request(tx, o.id, joined, keys)
-        tx.commit()
+        if dry:
+            tx.rollback()
+        else:
+            if added > 0:
+                requests_db.merge_request(tx, o.id, joined, keys)
+            tx.commit()
         return String(
-            "added ",
+            would,
             added,
             " keys to fill request ",
             o.id,
@@ -96,6 +103,18 @@ def request_fill(
             " in all, as fill runs (",
             how,
             ")",
+            "; nothing recorded" if dry else "",
+        )
+    if dry:
+        tx.rollback()
+        return String(
+            "dry run: would record a fill request of ",
+            p.name,
+            ": ",
+            len(all),
+            " keys, as fill runs (",
+            how,
+            "); nothing recorded",
         )
     var id = requests_db.add_request(
         tx, p.name, joined, keys, rerun, getenv("USER", "")

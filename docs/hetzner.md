@@ -674,6 +674,15 @@ run = "morca backfill --rerun --as-fill mojo_repos 2023-01-01..2026-11-13"
 `morca status <pipeline>` shows its progress, and `morca backfill --cancel
 <pipeline>` stops it.
 
+To check a backfill step before a release, run it with `--dry-run` after
+`backfill` against a stack with earlier runs (`docker exec scheduler morca
+backfill --dry-run --rerun --as-fill mojo_repos 2023-01-01..2026-11-13`). It
+makes every check the step would (the pipeline, the keys, `--rerun`'s
+refusal for steps that append and `--allow-append`, an open fill request
+that differs) and writes nothing. It exits non-zero with the refusal the
+deploy would hit, or prints what the step would queue or request and exits
+0 ([A backfill as a fill](morca-toml.md#a-backfill-as-a-fill)).
+
 `morca upgrade --from <deployed> --to <new>` prints the steps of every version
 after `--from` up to `--to`, a line each:
 `step<TAB><id><TAB><before|after><TAB><run|manual><TAB><command or text>`.
