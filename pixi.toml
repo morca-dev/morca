@@ -384,6 +384,8 @@ test-lake = { cmd = "tests/lake.sh", depends-on = ["build-liblake"] }
 test-tables-source = { cmd = "scripts/mojo-build.sh -D MORCA_LAKE_SOURCE=1 -I src $DEP_INC tests/test_tables.mojo -o build/test-tables-source && scripts/with-postgres.sh ./build/test-tables-source" }
 # morca.tables' BatchBuilder and column accessors, and a table outside any step.
 test-lake-batch = { cmd = "scripts/mojo-build.sh -I src $DEP_INC tests/test_lake_batch.mojo -o build/test-lake-batch && ./build/test-lake-batch", depends-on = ["build-liblake"] }
+# The same with liblake's code compiled in, as test-tables-source.
+test-lake-batch-source = { cmd = "scripts/mojo-build.sh -D MORCA_LAKE_SOURCE=1 -I src $DEP_INC tests/test_lake_batch.mojo -o build/test-lake-batch-source && ./build/test-lake-batch-source" }
 test-chaos-tables = { cmd = "CHAOS_SRC=tests/chaos_tables.mojo CHAOS_CHECK=1 scripts/with-postgres.sh tests/chaos.sh", depends-on = ["build-liblake"] }
 test-taxi = { cmd = "scripts/with-postgres.sh tests/taxi.sh", depends-on = ["build-liblake"] }
 test-lineage = { cmd = "scripts/with-postgres.sh tests/lineage.sh", depends-on = ["build-liblake"] }
@@ -411,7 +413,7 @@ test-keyed-names = { cmd = "scripts/with-postgres.sh tests/keyed_names.sh", depe
 # `morca worker` with no database, committing to a local warehouse.
 test-worker = { cmd = "scripts/with-postgres.sh tests/worker.sh", depends-on = ["build-liblake"] }
 # CI runs these three groups on runners of their own; test-data is all three.
-test-data-tables = { depends-on = ["build-shared", "test-tables", "test-tables-source", "test-lake", "test-lake-batch", "test-append-files", "test-replace", "test-replace-concurrent", "test-formal-retry", "test-run-token", "test-chaos-tables", "test-lineage", "test-dataview", "test-commits", "test-expire", "test-taxi"] }
+test-data-tables = { depends-on = ["build-shared", "test-tables", "test-tables-source", "test-lake", "test-lake-batch", "test-lake-batch-source", "test-append-files", "test-replace", "test-replace-concurrent", "test-formal-retry", "test-run-token", "test-chaos-tables", "test-lineage", "test-dataview", "test-commits", "test-expire", "test-taxi"] }
 test-data-sensors = { depends-on = ["build-shared", "test-sensors", "test-keys-per-run", "test-sensed-behind-live", "test-lineage-s3", "test-sensors-s3", "test-sample-s3", "test-worker"] }
 test-data-keyed = { depends-on = ["build-shared", "test-keyed", "test-keyed-backfills", "test-keyed-sensor", "test-keyed-names"] }
 test-data = { depends-on = ["test-data-tables", "test-data-sensors", "test-data-keyed"] }

@@ -113,8 +113,19 @@ library's handles and mirrors of iceberg's, under iceberg's names:
   `summary`, `current_snapshot_id`, `properties`, `schema()`, ...),
   taken when the table loads, refreshes or commits.
 - **`TableScan`** has `select`, `filter`, `use_snapshot`, `to_batches`,
-  `plan_files`, `to_batches_for_tasks` and `count`.
-- **`Schema`** and **`PartitionSpec`** are Iceberg JSON (`Schema.parse`).
+  `to_batch_reader` (a batch at a time, as the library reads them),
+  `plan_files`, `to_batches_for_tasks` and `count`. A planned file's
+  `DataFile` has its `partition` values (`PartitionValue`, like iceberg's
+  `Datum`: `partition[0].i` is a day or month partition's number).
+- **`Schema`** and **`PartitionSpec`** are Iceberg JSON (`Schema.parse`);
+  `Schema.find_by_name`, `find_field` and `has_field` look up its fields
+  (`SchemaField`), which the library reads.
+- **`table_exists`** says whether the warehouse has a dataset's table.
+- **`FileWriter`** writes a file per partition per `write`, or a file per
+  partition a row group at a time (`write_row_group`, `close_files`), with
+  `options` (iceberg's `WriteOptions`) settable before it writes.
+  `Table.read_file` and `Table.delete_file` reach files written and not
+  committed, through the table's IO.
 - **`BatchBuilder`** builds a batch of a schema's columns a value at a
   time, in place of `iceberg.batch`'s builders.
 - **`DataFiles`** carries written entries in iceberg's own encoding, so a
@@ -124,7 +135,9 @@ library's handles and mirrors of iceberg's, under iceberg's names:
 instead, through the same functions: the old way, to compare against and
 to fall back on.
 """
-from arrow_mlake.carrow_import import ImportedStream
+from std.memory import bitcast
+
+from arrow_mlake.carrow_import import ImportedArray, ImportedStream
 from dista import Codec
 from parquet import RecordBatch
 
@@ -158,6 +171,7 @@ from morca._lake.schema import (
     PartitionField,
     PartitionSpec,
     Schema,
+    SchemaField,
     parse_transform,
 )
 from morca._lake.names import (
@@ -368,6 +382,43 @@ struct Table(Copyable, Movable):
             raise take_error(self._api, err)
         self._mirror()
 
+    def read_file(self, path: String) raises -> List[RecordBatch]:
+        """The rows of a Parquet file read through the table's IO: one this
+        run wrote (`FileWriter`) and hasn't committed, which no scan sees."""
+        var got = Slots(1)
+        var err = Slots()
+        var rc = self._api.read_file(
+            self.handle,
+            Int(path.unsafe_ptr()),
+            path.byte_length(),
+            got.addr,
+            err.addr,
+        )
+        if rc != 0:
+            raise take_error(self._api, err)
+        var out = List[RecordBatch]()
+        if got[0] == 0:
+            return out^
+        var s = ImportedStream(got[0])
+        while True:
+            var b = s.next()
+            if not b:
+                break
+            out.append(b.take())
+        return out^
+
+    def delete_file(self, path: String) raises:
+        """Deletes a file through the table's IO: one this run wrote and
+        won't commit. A committed file is the table's to remove (`commit`)."""
+        var err = Slots()
+        if (
+            self._api.delete_file(
+                self.handle, Int(path.unsafe_ptr()), path.byte_length(), err.addr
+            )
+            != 0
+        ):
+            raise take_error(self._api, err)
+
     def scan(self) -> TableScan:
         """A scan of the current snapshot: nothing pinned or checked (`scan`
         is the step's)."""
@@ -406,6 +457,21 @@ def load_dataset(dataset: String) raises -> Table:
     if h == 0:
         raise take_error(a, err)
     return Table(h, a)
+
+
+def table_exists(dataset: String) raises -> Bool:
+    """Whether the warehouse has `dataset`'s table, outside any step: nothing
+    is checked or recorded. Raises only when there's no warehouse
+    (`MORCA_WAREHOUSE`)."""
+    var a = api()
+    var yes = Slots(1)
+    var err = Slots()
+    var rc = a.table_exists(
+        Int(dataset.unsafe_ptr()), dataset.byte_length(), yes.addr, err.addr
+    )
+    if rc != 0:
+        raise take_error(a, err)
+    return yes[0] != 0
 
 
 def table(mut ctx: Ctx, dataset: String) raises -> Table:
@@ -484,6 +550,34 @@ def ensure_table(
 
 
 @fieldwise_init
+struct PartitionValue(Copyable, Movable):
+    """One partition value of a data file, as iceberg's `Datum` holds it:
+    `kind` is its primitive type (iceberg's `P_*`), and the value is in `i`
+    (integers, dates, timestamps, booleans, and a `day`, `month`, `year`,
+    `hour` or `bucket` transform's result), `f`, `s` or `b`. `valid` is
+    False for a null."""
+
+    var kind: Int
+    var i: Int64
+    var f: Float64
+    var s: String
+    var b: List[UInt8]
+    var valid: Bool
+
+
+def _partition_of(mut d: Dec) raises -> List[PartitionValue]:
+    var out = List[PartitionValue]()
+    for _ in range(Int(d.int())):
+        var valid = d.bool()
+        var kind = Int(d.int())
+        var i = d.int()
+        var f = bitcast[DType.float64](d.int())
+        var s = d.str()
+        out.append(PartitionValue(kind, i, f, s^, d.bytes(), valid))
+    return out^
+
+
+@fieldwise_init
 struct DataFile(Copyable, Movable):
     """What a data or delete file entry shows; the entry itself stays in the
     library's encoding (`DataFiles`)."""
@@ -495,6 +589,8 @@ struct DataFile(Copyable, Movable):
     var partition_key: String
     """The partition's values, as iceberg keys them: equal for files of one
     partition."""
+    var partition: List[PartitionValue]
+    """The partition's values, one a partition field, in the spec's order."""
 
 
 @fieldwise_init
@@ -584,6 +680,23 @@ struct TableScan(Copyable, Movable):
         """The rows, as batches."""
         return self.to_batches_for_paths(List[String]())
 
+    def to_batch_reader(self) raises -> BatchReader:
+        """The same rows as `to_batches`, in the same order, a batch at a
+        time: the library reads the plan a file at a time, so a caller that
+        folds the rows holds a file's batches rather than the scan's.
+        Planning happens here, so a bad snapshot raises from this call."""
+        ref a = self.table._api
+        var o = self._opts(List[String]())
+        var r = Slots(1)
+        var err = Slots()
+        var rc = a.reader_open(
+            self.table.handle, o.addr(), len(o), r.addr, err.addr
+        )
+        _ = o^
+        if rc != 0:
+            raise take_error(a, err)
+        return BatchReader(r[0], a)
+
     def to_batches_for_tasks(
         self, tasks: List[FileScanTask]
     ) raises -> List[RecordBatch]:
@@ -616,13 +729,14 @@ struct TableScan(Copyable, Movable):
             var size = d.int()
             var spec_id = Int(d.int())
             var key = d.str()
+            var partition = _partition_of(d)
             var residual = d.str()
             var start = d.int()
             var length = d.int()
             var deletes = Int(d.int())
             tasks.append(
                 FileScanTask(
-                    DataFile(path^, content, records, size, key^),
+                    DataFile(path^, content, records, size, key^, partition^),
                     spec_id,
                     residual^,
                     start,
@@ -644,6 +758,40 @@ struct TableScan(Copyable, Movable):
         if rc != 0:
             raise take_error(a, err)
         return Int64(n[0])
+
+
+struct BatchReader(Movable):
+    """A scan being read a batch at a time (`TableScan.to_batch_reader`), as
+    iceberg's `BatchReader` is: the library's reader, a handle."""
+
+    var handle: Int
+    """0 for a scan with nothing to read."""
+    var _api: Api
+
+    def __init__(out self, handle: Int, a: Api):
+        self.handle = handle
+        self._api = a.copy()
+
+    def __deinit__(deinit self):
+        self._api.reader_free(self.handle)
+
+    def next_batch(mut self) raises -> Optional[RecordBatch]:
+        """The next batch, or nothing once the scan is done."""
+        if self.handle == 0:
+            return None
+        var arr = Slots(1)
+        var sch = Slots(1)
+        var err = Slots()
+        var rc = self._api.reader_next(
+            self.handle, arr.addr, sch.addr, err.addr
+        )
+        if rc != 0:
+            raise take_error(self._api, err)
+        if arr[0] == 0:
+            self._api.reader_free(self.handle)
+            self.handle = 0
+            return None
+        return ImportedArray(arr[0], sch[0]).into_batch()
 
 
 def scan(mut ctx: Ctx, table: Table) raises -> TableScan:
@@ -750,7 +898,10 @@ struct DataFiles(Codec, Copyable, Movable, Sized):
             var content = Int(d.int())
             var records = d.int()
             var size = d.int()
-            out.append(DataFile(p^, content, records, size, d.str()))
+            var key = d.str()
+            out.append(
+                DataFile(p^, content, records, size, key^, _partition_of(d))
+            )
         _ = b^
         return out^
 
@@ -782,19 +933,76 @@ struct DataFiles(Codec, Copyable, Movable, Sized):
         return Self(b^)
 
 
+@fieldwise_init
+struct WriteOptions(Copyable, Equatable, Movable):
+    """How a `FileWriter` writes, as iceberg's `WriteOptions` names it:
+    taken from the table's properties when the writer is made, and the
+    writer's to change before it writes."""
+
+    var codec: String
+    var row_group_rows: Int
+    """Rows per row group at most."""
+    var page_size: Int
+    """Target uncompressed bytes of values per data page."""
+    var compression_level: Int
+    """0 is the codec's default; ZSTD takes 1 to 22."""
+    var use_dictionary: Bool
+    var truncate: Int
+    """Bytes the column bounds keep; 0 keeps them whole."""
+    var num_workers: Int
+    """Threads that encode a file's pages: 1 is the calling thread, 0 every
+    core. The files are the same either way."""
+
+    def __eq__(self, other: Self) -> Bool:
+        return self._enc().buf == other._enc().buf
+
+    def _enc(self) -> Enc:
+        var e = Enc()
+        e.str(self.codec)
+        e.int(Int64(self.row_group_rows))
+        e.int(Int64(self.page_size))
+        e.int(Int64(self.compression_level))
+        e.bool(self.use_dictionary)
+        e.int(Int64(self.truncate))
+        e.int(Int64(self.num_workers))
+        return e^
+
+    @staticmethod
+    def _dec(mut d: Dec) raises -> Self:
+        var codec = d.str()
+        var rows = Int(d.int())
+        var page = Int(d.int())
+        var level = Int(d.int())
+        var dict = d.bool()
+        var truncate = Int(d.int())
+        return Self(codec^, rows, page, level, dict, truncate, Int(d.int()))
+
+
 struct FileWriter(Movable):
     """Writes batches into a table's data files as they come, without
     committing them, and keeps their entries. For a worker that produces a
     table's rows a batch at a time; `write_files` writes a list at once.
 
-    It holds the table's schema, spec, sort order and write properties as
-    they were when it was made: a schema change committed meanwhile isn't
-    seen, and `append_files` commits the entries all the same.
+    - **`write`** (and `put`) writes a file per partition of each call.
+    - **`write_row_group`** adds each partition's rows to that partition's
+      open file as a row group, so a big file is written a slice at a time
+      and the rows are never all in one batch; **`close_files`** ends the
+      open files (`finish` does too). Files come in the order their
+      partitions first appear.
+
+    `options` are the table's write properties when it's made; a change to
+    them applies to what's written after. It holds the table's schema, spec
+    and sort order as they were when it was made: a schema change committed
+    meanwhile isn't seen, and `append_files` commits the entries all the
+    same.
     """
 
     var handle: Int
     var rows: Int
     """The rows written so far."""
+    var options: WriteOptions
+    var _sent: WriteOptions
+    """The options the library has."""
     var _api: Api
 
     def __init__(out self, table: Table) raises:
@@ -804,19 +1012,41 @@ struct FileWriter(Movable):
         self.rows = 0
         if self.handle == 0:
             raise take_error(self._api, err)
+        var got = Slots()
+        self._api.writer_options(self.handle, got.addr)
+        var b = take_bytes(self._api, got)
+        var d = Dec(Int(b.unsafe_ptr()), len(b))
+        self.options = WriteOptions._dec(d)
+        _ = b^
+        self._sent = self.options.copy()
 
-    def write(mut self, batches: List[RecordBatch]) raises:
-        """Writes `batches`: a file per partition they hold."""
+    def _write(mut self, batches: List[RecordBatch], row_group: Bool) raises:
         for b in batches:
             self.rows += b.num_rows
+        var o = Enc()
+        if self.options != self._sent:
+            o = self.options._enc()
         var ex = Exported(batches)
         var err = Slots()
         var rc = self._api.writer_write(
-            self.handle, ex.n(), ex.arrays_addr(), ex.schemas_addr(), err.addr
+            self.handle,
+            o.addr(),
+            len(o),
+            ex.n(),
+            ex.arrays_addr(),
+            ex.schemas_addr(),
+            1 if row_group else 0,
+            err.addr,
         )
         _ = ex^
+        _ = o^
         if rc != 0:
             raise take_error(self._api, err)
+        self._sent = self.options.copy()
+
+    def write(mut self, batches: List[RecordBatch]) raises:
+        """Writes `batches`: a file per partition they hold."""
+        self._write(batches, False)
 
     def put(mut self, var batch: RecordBatch) raises:
         """Writes one batch."""
@@ -824,10 +1054,27 @@ struct FileWriter(Movable):
         one.append(batch^)
         self.write(one)
 
-    def finish(deinit self) -> DataFiles:
-        """The entries of every file written."""
+    def write_row_group(mut self, var batch: RecordBatch) raises:
+        """Adds `batch`'s rows to the open file of the partition they fall
+        in as a row group (more than one past `options.row_group_rows`),
+        opening the file on the partition's first rows."""
+        var one = List[RecordBatch]()
+        one.append(batch^)
+        self._write(one, True)
+
+    def close_files(mut self) raises:
+        """Ends the files `write_row_group` has open; their entries are
+        `finish`'s with the rest."""
+        var err = Slots()
+        if self._api.writer_close(self.handle, err.addr) != 0:
+            raise take_error(self._api, err)
+
+    def finish(deinit self) raises -> DataFiles:
+        """The entries of every file written, open ones ended first."""
         var got = Slots()
-        self._api.writer_finish(self.handle, got.addr)
+        var err = Slots()
+        if self._api.writer_finish(self.handle, got.addr, err.addr) != 0:
+            raise take_error(self._api, err)
         return DataFiles(take_bytes(self._api, got))
 
     def __deinit__(deinit self):
