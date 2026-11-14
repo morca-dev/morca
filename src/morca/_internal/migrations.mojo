@@ -869,6 +869,13 @@ def _migrations() -> List[List[String]]:
             "ALTER TABLE orca.pipelines ADD COLUMN priority integer NOT"
             " NULL DEFAULT 0"
         ],
+        # What each worker can grant a run (#462): a pool's learned
+        # requests are capped at its largest worker's. Additive: an older
+        # binary leaves them null, and its workers' rooms aren't weighed.
+        [
+            "ALTER TABLE orca.workers ADD COLUMN room_cpus integer",
+            "ALTER TABLE orca.workers ADD COLUMN room_memory_mb bigint",
+        ],
     ]
 
 
@@ -910,6 +917,8 @@ def _floor_raisers() -> List[Int]:
     which the binaries before it neither read nor write; they start the
     pipelines by name, as they did, and a registration they make leaves it
     as it was.
+    61 (`workers.room_cpus`, `room_memory_mb`, #462) is additive: nullable
+    columns the binaries before it neither read nor write.
     """
     return [1, 24]
 

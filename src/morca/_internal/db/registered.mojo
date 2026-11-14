@@ -59,6 +59,7 @@ struct Registration(Copyable, Movable):
     var learned_cpus: Int
     var learned_key: String
     """What `learned` was learned from (`learn_key` then)."""
+    var learned_capped: String
     var max_runs_auto: Bool
     var priority: Int
 
@@ -116,7 +117,8 @@ def registrations(
             " coalesce((learned->>'runs')::bigint, 0) AS learned_runs,"
             " coalesce((learned->>'memory_mb')::bigint, 0) AS"
             " learned_memory_mb, coalesce((learned->>'cpus')::bigint, 0) AS"
-            " learned_cpus, priority FROM orca.pipelines WHERE binary_path IS"
+            " learned_cpus, coalesce(learned->>'capped', '') AS"
+            " learned_capped, priority FROM orca.pipelines WHERE binary_path IS"
             " NOT NULL AND retired IS NULL AND ($1 = '' OR name = $1) ORDER BY"
             " priority DESC, name"
         ),
@@ -170,6 +172,7 @@ def registrations(
                 Int(r.int64("learned_memory_mb")),
                 Int(r.int64("learned_cpus")),
                 r.text("learned_key"),
+                r.text("learned_capped"),
                 r.bool("max_runs_auto"),
                 Int(r.int64("priority")),
             )
@@ -191,7 +194,8 @@ def keep_learned(
         (
             "UPDATE orca.pipelines SET learned = jsonb_build_object('key',"
             " $2::text, 'runs', $3::bigint, 'memory_mb', $4::bigint, 'cpus',"
-            " $5::bigint) WHERE name = $1"
+            " $5::bigint) || jsonb_strip_nulls(jsonb_build_object('capped',"
+            " learned->'capped')) WHERE name = $1"
         ),
         Params()
         .text(pipeline)

@@ -8,6 +8,7 @@ from morca._internal.watchdog import (
     Counts,
     Lease,
     Quiet,
+    Unmet,
     check_text,
     checks_json,
     cost_rate,
@@ -19,6 +20,7 @@ from morca._internal.watchdog import (
     eval_idle,
     eval_launches,
     eval_stuck,
+    eval_unmet,
     limits,
     parse_checks,
     parse_duration,
@@ -149,6 +151,25 @@ def test_stuck_scopes_to_the_pipeline() raises:
     assert_false(eval_stuck(c, calm).tripped)
 
 
+def test_unmet_scopes_to_the_pipeline() raises:
+    # A run waiting for more than the host can grant at all (#462): its
+    # pipeline, once it has waited unmet_minutes.
+    var c = default_config()
+    var why = "needs 64 GB, more than the 2.5 GB this host grants at most"
+    var runs: List[Unmet] = [
+        Unmet("a", 7, 12.0, why),
+        Unmet("b", 9, 3.0, why),
+    ]
+    var r = eval_unmet(c, runs)
+    assert_true(r.tripped)
+    assert_equal(len(r.pipelines), 1)
+    assert_equal(r.pipelines[0], "a")
+    assert_equal(r.detail, String("a run 7 ", why, ", for 12 minutes"))
+    var soon: List[Unmet] = [Unmet("b", 9, 9.9, why)]
+    assert_false(eval_unmet(c, soon).tripped)
+    assert_false(eval_unmet(c, List[Unmet]()).tripped)
+
+
 def test_control() raises:
     var c = default_config()
     assert_false(eval_control(c, True, 89.0, 84.0, _all()).tripped)
@@ -215,7 +236,15 @@ def test_checks_of_each_rule() raises:
     assert_true(idle.checks[0].past and not idle.checks[1].past)
     assert_false(idle.tripped)
     assert_equal(idle.checks[1].op, "at least")
-    for rule in ["launches", "cost", "idle", "failing", "stuck", "control"]:
+    for rule in [
+        "launches",
+        "cost",
+        "idle",
+        "failing",
+        "stuck",
+        "unmet",
+        "control",
+    ]:
         assert_true(len(limits(c, String(rule))) > 0)
 
 

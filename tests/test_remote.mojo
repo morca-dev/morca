@@ -5,6 +5,7 @@ whole of it against `morca ui`."""
 
 from std.os import getenv, listdir, remove, setenv, stat
 from std.os.path import exists
+from json import loads
 from std.testing import (
     TestSuite,
     assert_equal,
@@ -18,6 +19,7 @@ from morca._internal.remote import (
     find_credential,
     read_credentials,
     remote_url,
+    waiting_line,
     write_credentials,
 )
 from morca._internal.tokens import (
@@ -194,6 +196,22 @@ def external_chmod(mut path: String, mode: Int) -> Int:
     return Int(
         external_call["chmod", c_int](path.as_c_string_span(), c_uint(mode))
     )
+
+
+def test_status_says_why_queued_runs_wait() raises:
+    # `morca status`'s line under a pipeline whose queued runs wait (#462).
+    var why = "waiting: needs 5 GB, more than the 1 GB this host grants at most"
+    assert_equal(
+        waiting_line(loads(String('{"queued": 1, "waiting": "', why, '"}'))),
+        String("  ", why),
+    )
+    assert_equal(waiting_line(loads('{"queued": 1, "waiting": null}')), "")
+    assert_equal(
+        waiting_line(loads(String('{"queued": 0, "waiting": "', why, '"}'))),
+        "",
+    )
+    # A server before `waiting`.
+    assert_equal(waiting_line(loads('{"queued": 2}')), "")
 
 
 def main() raises:

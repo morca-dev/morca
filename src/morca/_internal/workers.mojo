@@ -92,12 +92,21 @@ from morca._internal.cgroup import (
     raised_request,
 )
 from morca._internal.recommend import RunRequest
-from morca._internal.resources import Grant, Request, Room, admit
+from morca._internal.resources import (
+    WAITING,
+    Grant,
+    Request,
+    Room,
+    admit,
+    gb_text,
+)
 from morca._internal.registered import (
     recorded_cpus,
     recorded_memory_gb,
     registered,
     run_request,
+    say_capped,
+    with_cap,
 )
 from morca._internal.handover import RunOutdated, run_outdated
 from morca._internal.state import PgStore, State, beat_run
@@ -370,6 +379,12 @@ def _seen(mut db: State, w: WorkerAuth, v: Value) raises:
         cpus = v["cpus"].int_value()
     if String("memory_mb") in v and v["memory_mb"].is_int():
         mem = v["memory_mb"].int_value()
+    # What it can grant a run, from a worker that says (#462).
+    var room_cpus = Int64(-1)
+    var room_mb = Int64(-1)
+    if String("room_cpus") in v and String("room_memory_mb") in v:
+        room_cpus = v["room_cpus"].int_value()
+        room_mb = v["room_memory_mb"].int_value()
     workers_db.set_seen(
         db.conn,
         w.id,
@@ -378,6 +393,8 @@ def _seen(mut db: State, w: WorkerAuth, v: Value) raises:
         Int(cpus),
         Int(mem),
         text_field(v, "running"),
+        Int(room_cpus),
+        Int(room_mb),
     )
     if String("pressure") in v and v["pressure"].is_object():
         _pressure_seen(db, w, v, Report.from_json(v["pressure"]))
@@ -492,6 +509,49 @@ def claim(mut db: State, w: WorkerAuth, v: Value) raises -> String:
     )
 
 
+comptime POOL_ROOM_SECONDS = 600
+"""How recently a worker must have been seen for its room to count among
+its pool's (`pool_room`)."""
+
+
+def pool_unmet(
+    req: Request, most_cpus: Int, most_mb: Int, pool: String
+) -> String:
+    """Why `req` waits for no worker of `pool` that's up, the most of which
+    grants `most_cpus` and `most_mb`: "waiting: needs 5 GB, more than the
+    3.5 GB a worker of pool g grants at most"; empty if one could."""
+    var why = List[String]()
+    if most_mb > 0 and req.memory_min_mb > most_mb:
+        why.append(
+            String(
+                gb_text(req.memory_min_mb),
+                " GB, more than the ",
+                gb_text(most_mb),
+                " GB a worker of pool ",
+                pool,
+                " grants at most",
+            )
+        )
+    if most_cpus > 0 and req.cpus_min > most_cpus:
+        why.append(
+            String(
+                req.cpus_min,
+                " CPU" if req.cpus_min == 1 else " CPUs",
+                ", more than the ",
+                most_cpus,
+                " a worker of pool ",
+                pool,
+                " grants at most",
+            )
+        )
+    if len(why) == 0:
+        return String()
+    var text = String(WAITING)
+    for i in range(len(why)):
+        text.write("; needs " if i else "", why[i])
+    return text^
+
+
 def _claim_run(mut db: State, w: WorkerAuth, v: Value) raises -> String:
     """A queued run of the pool for the worker to start: `{"run":
     <spec>|null, "refused": ...}`."""
@@ -511,6 +571,13 @@ def _claim_run(mut db: State, w: WorkerAuth, v: Value) raises -> String:
     var stale = stale_limit()
     var dead = dead_sql("$2", start_grace(stale))
     var refused = String()
+    # The most a worker of the pool grants a run, this one's included
+    # (#462): learned requests are capped at it, and a request over it
+    # waits for no worker that's up.
+    var most = workers_db.pool_room(db.conn, w.pool, POOL_ROOM_SECONDS)
+    var most_cpus = max(most[0], room_cpus)
+    var most_mb = max(most[1], room_mb)
+    var most_of = String("the most a worker of pool ", w.pool, " grants")
     # The oldest queued run of each of the pool's pipelines, and of its fill
     # runs: the others of a pipeline would be refused for the same reasons
     # (its cap, image or request), and a long queue of one pipeline at its
@@ -541,9 +608,10 @@ def _claim_run(mut db: State, w: WorkerAuth, v: Value) raises -> String:
             continue
         # Its request (morca.resources), `auto` learned from its runs
         # (morca.recommend), from a worker that says what it can grant.
-        var sized = RunRequest(Request(0, 0, 0, 0), "", 0, "")
+        var sized = RunRequest.none()
         if room_cpus >= 0:
-            sized = run_request(db, p)
+            sized = run_request(db, p, most_cpus, most_mb, most_of)
+            say_capped(db, p, sized)
         var tx = db.conn.begin()
         starting_db.lock_pipeline(tx, p.name)
         # Its fill runs and its others are capped apart, as on the local
@@ -575,8 +643,9 @@ def _claim_run(mut db: State, w: WorkerAuth, v: Value) raises -> String:
             )
             if len(fit[0]) == 0:
                 tx.rollback()
-                refused = fit[1]
-                workers_db.hold_queued(db.conn, p.name, fit[1], fill)
+                var unmet = pool_unmet(request, most_cpus, most_mb, w.pool)
+                refused = with_cap(unmet if unmet else fit[1], sized)
+                workers_db.hold_queued(db.conn, p.name, refused, fill)
                 continue
             grant = fit[0][0]
         var got = workers_db.start_claimed(

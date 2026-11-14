@@ -34,6 +34,17 @@ struct Quiet(Copyable, Movable):
 
 
 @fieldwise_init
+struct Unmet(Copyable, Movable):
+    """A queued run waiting for a request more than any host it may run on
+    can grant (#462), the minutes since it was queued, and why it waits."""
+
+    var pipeline: String
+    var run: Int
+    var minutes: Float64
+    var held: String
+
+
+@fieldwise_init
 struct TripRow(Copyable, Movable):
     """A row of `orca.watchdog_trips` with a pipeline still paused."""
 
@@ -198,6 +209,32 @@ def quiet_runs(mut conn: Connection, cpu: Float64) raises -> List[Quiet]:
     ):
         out.append(
             Quiet(r.text("pipeline"), Int(r.int64("run")), r.float64("quiet"))
+        )
+    return out^
+
+
+def unmet_runs(mut conn: Connection) raises -> List[Unmet]:
+    """The queued runs held for a request more than this host, or any
+    worker of their pool, grants at most (`morca._internal.resources.admit`,
+    `morca._internal.workers.pool_unmet`). One a single worker can't grant
+    may wait for another, so isn't one."""
+    var out = List[Unmet]()
+    for r in conn.query(
+        (
+            "SELECT pipeline, id AS run, extract(epoch FROM now() -"
+            " created)::float8 / 60 AS waited, held FROM orca.runs WHERE"
+            " status = 'queued' AND (held LIKE '%this host grants at most%'"
+            " OR held LIKE '%a worker of pool % grants at most%') ORDER BY id"
+        ),
+        Params(),
+    ):
+        out.append(
+            Unmet(
+                r.text("pipeline"),
+                Int(r.int64("run")),
+                r.float64("waited"),
+                String(r.text("held").removeprefix("waiting: ")),
+            )
         )
     return out^
 

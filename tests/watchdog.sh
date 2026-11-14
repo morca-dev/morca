@@ -18,6 +18,8 @@
 # - idle workers pause the pipeline that owns them only;
 # - failing attempts pause the pipeline they belong to only;
 # - a run quiet for 30 minutes on sampled instances pauses its pipeline;
+# - a run waiting 10 minutes for more memory than the host grants at most
+#   pauses its pipeline ("unmet", #462);
 # - a cost over $3 an hour pauses everything;
 # - a snoozed rule doesn't trip, a pipeline paused already isn't recorded
 #   again, and with MORCA_WATCHDOG_SECONDS=0 nothing is checked.
@@ -124,7 +126,7 @@ done
 curl -fsS -H 'Accept: application/json' "$base/" | jq -e '.watchdog | length == 1 and .[0].rule == "launches" and (.[0].pipelines | sort) == ["fanout", "toy"]' > /dev/null || fail "/ JSON"
 curl -fsS "$base/watchdog" | grep -q 'tripped' || fail "/watchdog"
 api=$(curl -fsS "$base/api/watchdog")
-echo "$api" | jq -e '(.rules | map(.rule)) == ["launches", "cost", "idle", "failing", "stuck", "control"]
+echo "$api" | jq -e '(.rules | map(.rule)) == ["launches", "cost", "idle", "failing", "stuck", "unmet", "control"]
     and (.rules[0] | .tripped and .value == 3 and .threshold == 2) and (.rules | map(select(.tripped)) | length) == 1' > /dev/null \
     || fail "/api/watchdog: $api"
 m=$(curl -fsS "$base/metrics")
@@ -355,6 +357,21 @@ MORCA_RUNNER=local MORCA_WATCHDOG_SECONDS=1 ./build/morca tick >> "$log" 2>&1 ||
 [ "$(q "SELECT count(*) FROM orca.watchdog_rules WHERE rule <> 'cost'")" -ge 5 ] || fail "the other rules weren't checked"
 MORCA_RUNNER=local ./build/morca watchdog status 2>&1 | grep -q '^cost .*fixed price' || fail "status doesn't say fixed price"
 echo "ok   MORCA_RUNNER=local: the cost rule reads fixed price and doesn't trip; the others run"
+
+# Unmet (#462): a run queued 20 minutes ago for more than the host can ever
+# grant, held so by the start pass, pauses its pipeline alone.
+reset
+q "UPDATE orca.pipelines SET memory_gb = '64' WHERE name = 'toy';
+   INSERT INTO orca.runs (pipeline, registry_hash, partitions, trigger, status, created)
+   VALUES ('toy', '$hash', '2024-10', 'seed', 'queued', now() - interval '20 minutes')" > /dev/null
+unmet() { MORCA_RUNNER=local MORCA_HOST_MEMORY_MB=4096 MORCA_WATCHDOG_SECONDS=1 ./build/morca tick >> "$log" 2>&1 || fail "tick"; }
+unmet
+[ "$(only)" = "toy" ] || unmet  # the start pass holds it, the next pass sees it
+[ "$(only)" = "toy" ] || fail "unmet paused: '$(only)': $(q "SELECT id, status, held FROM orca.runs WHERE pipeline = 'toy' AND status = 'queued'")"
+[ "$(q "SELECT detail LIKE 'toy run %needs 64 GB, more than the 2.5 GB this host grants at most, for 2_ minutes%' FROM orca.watchdog_trips WHERE rule = 'unmet'")" = t ] \
+    || fail "the unmet trip: $(q "SELECT rule, detail FROM orca.watchdog_trips")"
+q "UPDATE orca.pipelines SET memory_gb = NULL WHERE name = 'toy'; UPDATE orca.runs SET status = 'cancelled', ended = now() WHERE pipeline = 'toy' AND status = 'queued'" > /dev/null
+echo "ok   unmet: a run waiting for more than the host grants at most pauses its pipeline"
 
 reset
 grep -q "can't check the watchdog" "$log" && fail "the watchdog raised"

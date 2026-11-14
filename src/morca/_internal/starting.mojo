@@ -43,7 +43,6 @@ from morca._internal.sample import (
 )
 from morca._internal.resources import (
     Grant,
-    Request,
     admit,
     run_env as grant_env,
 )
@@ -68,6 +67,8 @@ from morca._internal.registered import (
     recorded_cpus,
     recorded_memory_gb,
     run_request,
+    say_capped,
+    with_cap,
 )
 from morca._internal.pool_runs import (
     _fill_for_workers,
@@ -162,9 +163,12 @@ def _start(
     # Its request on this host (morca.resources), `auto` learned from its
     # runs (morca.recommend): resolved here, once for the starts this
     # pass makes, each granted from it for its life.
-    var sized = RunRequest(Request(0, 0, 0, 0), "", 0, "")
+    var sized = RunRequest.none()
     if control or placed == "local":
-        sized = run_request(self.db, p, self.room.cpus)
+        sized = run_request(
+            self.db, p, self.room.cpus, self.room.memory_mb, "this host's most"
+        )
+        say_capped(self.db, p, sized)
     var tx = self.db.conn.begin()
     starting_db.lock_pipeline(tx, p.name)
     starting_db.lock_runs(tx, p.name)
@@ -269,7 +273,14 @@ def _start(
         grants = got[0].copy()
         if len(grants) < free:
             # The ones that don't start say why; those that do, not.
-            hold = _taken(tx, p, False, got[1], self.stale, self._dead("$1"))
+            hold = _taken(
+                tx,
+                p,
+                False,
+                with_cap(got[1], sized),
+                self.stale,
+                self._dead("$1"),
+            )
         free = len(grants)
     # Its queued runs say why they wait, or no longer do; one behind an
     # older live run of its keys, which run.
@@ -366,6 +377,9 @@ def _start(
                 grant.memory_mb,
                 "MB (0: not asked for)",
                 sized.text(),
+                String(
+                    "(", sized.cap_text(), ")"
+                ) if sized.capped else String(),
             )
         elif sized.source == DEFAULT:
             print("run", id, "of", p.name, "requests", sized.text())

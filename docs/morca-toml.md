@@ -253,7 +253,11 @@ env = { DISTA_WORKER_SLOTS = "auto", GHARCHIVE_PARALLEL = "auto" }
   (1) and `MORCA_RESERVE_MEMORY_MB` (1536). A run that doesn't fit stays
   queued, and its page, its pipeline's page (**Waiting**) and their JSON
   (`held`, `waiting`) say why: `waiting: needs 2 GB, 1.3 GB free of grants`,
-  or `waiting: needs 30 GB, more than the 6.5 GB this host grants at most`.
+  or `waiting: needs 30 GB, more than the 6.5 GB this host grants at most`,
+  and so does `morca status`, under the pipeline's line. A run that waits
+  `MORCA_WATCHDOG_UNMET_MINUTES` (10) for more than the host can ever grant
+  trips the watchdog's `unmet` rule ([docs/watchdog.md](watchdog.md)),
+  which pauses its pipeline and sends its alert.
   `max_runs` and `fill_max_runs` still cap the runs on top.
 - **Grants.** A run that starts gets up to its maximum of what's left, in
   `MORCA_GRANT_CPUS` and `MORCA_GRANT_MEMORY_MB`. The grant is fixed for that
@@ -265,7 +269,9 @@ env = { DISTA_WORKER_SLOTS = "auto", GHARCHIVE_PARALLEL = "auto" }
 - **Remote workers** (`morca worker`) admit the runs they take the same way,
   against their own host, with the same variables; a worker's reserve
   defaults to 0 CPUs and 512 MB. A run that doesn't fit is left queued for
-  another worker, held saying which one had no room.
+  another worker, held saying which one had no room, or, more than any
+  worker of the pool seen in the last 10 minutes grants, `waiting: needs 5
+  GB, more than the 3.5 GB a worker of pool g grants at most`.
 - **No request, no change.** A pipeline without `cpus` or `memory_gb` is
   started as before: no check, no grant. Its runs aren't counted against
   the others' either, so on a shared host give every pipeline a request,
@@ -283,7 +289,8 @@ env = { DISTA_WORKER_SLOTS = "auto", GHARCHIVE_PARALLEL = "auto" }
   stalled on memory, PSI) for `MORCA_RUN_MEMORY_HELD_SECONDS` (120; 0: never)
   is killed by morca the same way. The attempt fails `out of memory at
   <limit>`, and the pipeline then asks for `MORCA_RUN_MEMORY_GROWTH` (1.5)
-  times that at least, up to `memory_gb`'s maximum: its retry and its later
+  times that at least, up to `memory_gb`'s maximum and what the host can
+  grant (more would wait forever): its retry and its later
   runs, until 20 of its runs after the one killed have succeeded
   (registering a different `memory_gb` forgets it sooner). Killed at that
   maximum already, the run fails then, with the kill as its error, rather
@@ -309,8 +316,14 @@ both JSONs have `learned`.
 **Turning it on.** `memory_gb = "auto"` or `cpus = "auto"` asks for it:
 it is then the request's minimum and maximum. `auto` as a range's lower
 end, `memory_gb = "auto..24"`, asks for it at most 24 GB, granted up to 24.
-Learned CPUs are also at most what the host grants a run, so a run whose
-peaks reach more cores than that runs on fewer rather than waiting.
+Learned CPUs and memory are also at most what the host grants a run (on a
+pool of workers, the most its largest worker grants), so a run whose peaks
+reach more than that runs with less rather than waiting forever (#462).
+A capped memory is logged once each time the cap changes, and shown in
+`morca config show` and on the pipeline's card (`learned from 20 runs: 2.5
+GB, capped at 2.2 GB, this host's most`, `"capped"` in the JSON), and in
+a waiting run's reason. A declared request isn't capped: one over what the
+host grants waits, as above.
 `morca register --memory-gb auto` does the same. Each start of a run on the
 local runner, the control host or a remote worker is admitted and granted
 from it (cgroup limit, kill and out-of-memory retry as above), resolved

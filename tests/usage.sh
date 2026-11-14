@@ -18,7 +18,9 @@
 # - registered with `memory_gb = "auto"`, a run on the local runner is
 #   granted it, recording that it's learned from 3 runs, and the card and
 #   `morca config show` say it's applied; with `learn = false`, the next run
-#   has no request, recording `default`.
+#   has no request, recording `default`;
+# - on a host that grants a run less than it learned, the next run starts
+#   capped at what the host grants, logged once and shown (#462).
 #
 # Needs MORCA_DATABASE_URL (pixi run test-usage starts a throwaway server),
 # curl and jq.
@@ -102,7 +104,8 @@ MORCA_UI_ADDR="127.0.0.1:$port" ./build/morca ui >> "$log" 2>&1 &
 pids="$pids $!"
 until_ 10 "morca ui didn't start" curl -fs "$base/" -o /dev/null
 ./build/morca scheduler > build/usage-sched.out 2>&1 &
-pids="$pids $!"
+sched=$!
+pids="$pids $sched"
 
 # On the local runner.
 ./build/morca backfill hog 2024-01 >> "$log" 2>&1 || fail "backfill 2024-01"
@@ -227,4 +230,35 @@ grep -qE '^  learn +false +morca.toml \[pipelines.hog\]$' build/usage-config.out
     && grep -qE '^  learned from 5 runs: .*; not applied: learn = false$' build/usage-config.out \
     || fail "config show learn = false: $(cat build/usage-config.out)"
 curl -fs "$base/pipelines/hog" | grep -q '· not applied' || fail "the Resources card doesn't say not applied"
+
+# Learned more than the host grants (#462): capped at its most, the run
+# starts rather than waiting forever, and the cap is logged once and shown.
+printf '[pipelines.hog]\nmemory_gb = "auto"\n' > build/usage-morca.toml
+./build/morca register --config build/usage-morca.toml ./build/hog >> "$log" 2>&1 \
+    || fail "register memory_gb = auto, learning"
+mb=$(./build/morca config show hog --json | jq -r .learned.memory_mb)
+cap=$((mb - 64))
+kill "$sched" 2> /dev/null || true
+wait "$sched" 2> /dev/null || true
+MORCA_HOST_MEMORY_MB=$cap MORCA_RESERVE_MEMORY_MB=0 ./build/morca scheduler > build/usage-sched-capped.out 2>&1 &
+sched=$!
+pids="$pids $sched"
+./build/morca backfill hog 2024-06 >> "$log" 2>&1 || fail "backfill 2024-06"
+r6=$(q "SELECT max(id) FROM orca.runs")
+until_ 60 "run $r6 didn't start capped: $(q "SELECT status, held FROM orca.runs WHERE id = $r6")" \
+    is "SELECT status <> 'queued' FROM orca.runs WHERE id = $r6" t
+is "SELECT request_source || ' ' || grant_memory_mb FROM orca.runs WHERE id = $r6" "learned $cap" \
+    || fail "run $r6's capped request: $(q "SELECT request_memory_gb, request_source, grant_memory_mb FROM orca.runs WHERE id = $r6")"
+[ "$(grep -c "morca: pipeline hog memory: learned .* GB, capped at .* GB, this host's most" build/usage-sched-capped.out)" -eq 1 ] \
+    || fail "the cap wasn't logged once: $(grep -n -e memory: -e granted build/usage-sched-capped.out)"
+grep -q "granted hog run $r6 .* (learned .* GB, capped at .* GB, this host's most)" build/usage-sched-capped.out \
+    || fail "the grant's log: $(grep granted build/usage-sched-capped.out)"
+./build/morca config show hog | grep -qE "^  learned from [0-9]+ runs: .*, capped at [0-9.]+ GB, this host's most \(" \
+    || fail "config show capped: $(./build/morca config show hog)"
+curl -fs -H 'Accept: application/json' "$base/pipelines/hog" | jq -e '.learned.capped | test("^capped at [0-9.]+ GB, this host.s most$")' > /dev/null \
+    || fail "the pipeline's JSON: $(curl -fs -H 'Accept: application/json' "$base/pipelines/hog" | jq -c .learned)"
+curl -fs "$base/pipelines/hog" | grep -q "capped at [0-9.]* GB, this host" \
+    || fail "the Resources card doesn't say capped"
+until_ 60 "run $r6 didn't end: $(q "SELECT status FROM orca.runs WHERE id = $r6")" \
+    is "SELECT status IN ('succeeded', 'failed') FROM orca.runs WHERE id = $r6" t
 echo "usage: ok"
