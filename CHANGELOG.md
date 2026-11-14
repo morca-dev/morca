@@ -2,11 +2,9 @@
 
 ## 0.30.0 - 2026-11-14
 
-- **Learned memory fits the host:** a learned `memory_gb` is capped at what the host or pool can grant, so its runs start instead of waiting forever; `morca status` shows why queued runs wait, and a run that can never start trips the watchdog's new `unmet` rule. (#462)
-
-- **More of iceberg in `morca.tables`:** `TableScan.to_batch_reader`, a data file's `partition` values, `Schema.find_by_name`/`has_field`, `FileWriter.write_row_group` and `options`, `Table.read_file`/`delete_file`, and `table_exists`. (#466)
-
-- **Backfills as fills:** `morca backfill --rerun --as-fill <pipeline> KEYS` (also as an upgrade step) has the scheduler run the keys as fill runs within `keys_per_run`, `fill_max_runs`, `fill_window` and the budget, resuming across restarts; `morca backfill --cancel <pipeline>` stops it. (#467)
+- **Backfills as fills:** `morca backfill --rerun --as-fill` runs a big re-run in chunks, under the fill settings, and resumes across restarts; `--cancel` stops it. (#467)
+- **Learned memory fits the host:** learned requests are capped at what the host can grant; `morca status` shows why runs wait, and a new watchdog rule, `unmet`, catches runs that can never start. (#463)
+- **More of `morca.tables` on liblake:** a batch reader, typed partition values, schema lookup, row-group writing and `table_exists` (liblake ABI 3). (#466)
 
 ## 0.29.0 - 2026-11-14
 
