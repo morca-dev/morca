@@ -17,7 +17,8 @@ from arrow_mlake.arrow import (
 from iceberg.catalog.filesystem import Table
 from iceberg.json import json_quote
 from iceberg.read import ScanOptions
-from iceberg.scan import TableScan
+from iceberg.manifest import ManifestCache
+from iceberg.scan import TRUE_RESIDUAL, FileScanTask, TableScan
 from iceberg.types import P_DOUBLE, P_FLOAT
 from iceberg.values import iso_text
 from parquet import RecordBatch
@@ -230,11 +231,116 @@ def _scan_of(t: Table, a: DataAsk, cols: List[Column]) raises -> TableScan:
     return scan.filter(filter_dsl(cols, a.wheres))
 
 
-def _options(limit: Int) -> ScanOptions:
-    var o = ScanOptions()
-    o.limit = limit
-    o.num_workers = 1
-    return o^
+comptime GROUP_FILES = 16
+"""Data files read together, at most: their footers in one round of
+requests and their chunks in the next, instead of a round each."""
+comptime GROUP_BYTES = 8 << 20
+"""Their size together, at most; a file bigger than this is read alone,
+stopping at the rows wanted."""
+
+
+def _countable(t: FileScanTask) -> Bool:
+    """Whether the file's `record_count` is the rows the scan gets from it
+    (iceberg's own test for a count from the metadata)."""
+    return (
+        len(t.delete_files) == 0
+        and t.residual == TRUE_RESIDUAL
+        and t.start == 0
+        and t.length == t.data_file.file_size_in_bytes
+        and t.data_file.record_count > 0
+    )
+
+
+struct _TaskReader(Movable):
+    """The planned files' batches in the scan's order, up to `want` rows
+    from its start, files that are all before `skip` passed over by their
+    counts. Small files are read together (`GROUP_FILES`, `GROUP_BYTES`),
+    since a table of many small appends would otherwise cost two rounds of
+    requests a file; a big one alone, with the rows still wanted as its
+    limit, so the reader stops inside it."""
+
+    var scan: TableScan
+    var tasks: List[FileScanTask]
+    var next_task: Int
+    var want: Int
+    var skip: Int
+    var at: Int
+    """Rows of the scan before the next batch: those skipped by count and
+    those handed out."""
+    var skipped: Int
+    var pending: List[RecordBatch]
+    """The group's batches not handed out yet, reversed."""
+
+    def __init__(
+        out self,
+        scan: TableScan,
+        var tasks: List[FileScanTask],
+        want: Int,
+        skip: Int = 0,
+    ):
+        self.scan = scan.copy()
+        self.tasks = tasks^
+        self.next_task = 0
+        self.want = want
+        self.skip = skip
+        self.at = 0
+        self.skipped = 0
+        self.pending = List[RecordBatch]()
+
+    def _fill(mut self) raises -> Bool:
+        while self.next_task < len(self.tasks) and self.at < self.want:
+            ref first = self.tasks[self.next_task]
+            if (
+                _countable(first)
+                and self.at + Int(first.data_file.record_count) <= self.skip
+            ):
+                var n = Int(first.data_file.record_count)
+                self.at += n
+                self.skipped += n
+                self.next_task += 1
+                continue
+            var lo = self.next_task
+            var hi = lo + 1
+            var bytes = Int(first.data_file.file_size_in_bytes)
+            var known = Int(first.data_file.record_count) if _countable(
+                first
+            ) else 0
+            while (
+                hi < len(self.tasks)
+                and hi - lo < GROUP_FILES
+                and self.at + known < self.want
+            ):
+                ref t = self.tasks[hi]
+                var b = Int(t.data_file.file_size_in_bytes)
+                if bytes + b > GROUP_BYTES:
+                    break
+                bytes += b
+                if _countable(t):
+                    known += Int(t.data_file.record_count)
+                hi += 1
+            var group = List[FileScanTask]()
+            for k in range(lo, hi):
+                group.append(self.tasks[k].copy())
+            var o = ScanOptions()
+            o.num_workers = 1
+            o.files_at_once = hi - lo
+            if hi - lo == 1:
+                o.limit = self.want - self.at
+            var got = self.scan.to_batches_for_tasks(group^, o)
+            self.next_task = hi
+            var n = len(got)
+            for _ in range(n):
+                self.pending.append(got.pop())
+            if n > 0:
+                return True
+        return False
+
+    def next_batch(mut self) raises -> Optional[RecordBatch]:
+        if len(self.pending) == 0 and not self._fill():
+            return None
+        var b = self.pending.pop()
+        self.at += b.num_rows
+        return Optional[RecordBatch](b^)
 
 
 def _batch_columns(
@@ -268,6 +374,7 @@ struct _Rows(Movable):
     var stopped: String
     var filter: String
     var seconds: Float64
+    var plan_seconds: Float64
 
     def __init__(out self):
         self.columns = List[Column]()
@@ -281,9 +388,10 @@ struct _Rows(Movable):
         self.stopped = String()
         self.filter = String()
         self.seconds = 0
+        self.plan_seconds = 0
 
 
-def _read_rows(t: Table, a: DataAsk) raises -> _Rows:
+def _read_rows(t: Table, a: DataAsk, mut cache: ManifestCache) raises -> _Rows:
     """The page of rows at `a.offset`, `a.limit` long, of the filtered rows
     in the sort's order (the scan's without one)."""
     var full = t.scan()
@@ -310,8 +418,10 @@ def _read_rows(t: Table, a: DataAsk) raises -> _Rows:
             read.append(sort_col)
     r.filter = filter_dsl(cols, a.wheres)
     var scan = _scan_of(t, a, cols).select(read.copy())
-    r.files = len(scan.plan_files())
     var clock = _Clock(a.seconds)
+    var tasks = scan.plan_files_with(cache)
+    r.files = len(tasks)
+    r.plan_seconds = clock.seconds()
     var cap = Int(a.memory_mb * 1024 * 1024)
     var held = 0
     var keys = List[_Key]()
@@ -322,7 +432,9 @@ def _read_rows(t: Table, a: DataAsk) raises -> _Rows:
     # Without a sort, the rows past the page are never read; with one,
     # every filtered row is, up to max_rows.
     var want = a.offset + a.limit + 1 if not sort_col else a.max_rows + 1
-    var reader = scan.to_batch_reader(_options(want))
+    var reader = _TaskReader(
+        scan, tasks^, want, skip=a.offset if not sort_col else 0
+    )
     var done = False
     while not done:
         if clock.over():
@@ -337,7 +449,7 @@ def _read_rows(t: Table, a: DataAsk) raises -> _Rows:
             break
         var at = _batch_columns(b, read, cols)
         for i in range(b.num_rows):
-            var n = r.scanned
+            var n = reader.skipped + r.scanned
             r.scanned += 1
             if not sort_col:
                 if n < a.offset:
@@ -369,7 +481,6 @@ def _read_rows(t: Table, a: DataAsk) raises -> _Rows:
         if not done and held > cap:
             r.stopped = _memory_stop(a.memory_mb)
             break
-    reader.raise_if_failed()
     for i in range(len(r.cells)):
         r.order.append(i)
     r.lo = 0
@@ -383,9 +494,11 @@ def _read_rows(t: Table, a: DataAsk) raises -> _Rows:
     return r^
 
 
-def rows_json(t: Table, a: DataAsk, mut out: String) raises:
+def rows_json(
+    t: Table, a: DataAsk, mut cache: ManifestCache, mut out: String
+) raises:
     """`"rows": {...}`: `_read_rows`' page."""
-    var r = _read_rows(t, a)
+    var r = _read_rows(t, a, cache)
     out.write('"rows": {"columns": [')
     for k in range(len(r.columns)):
         ref c = r.columns[k]
@@ -423,6 +536,8 @@ def rows_json(t: Table, a: DataAsk, mut out: String) raises:
         json_quote(r.stopped) if r.stopped else String("null"),
         ', "seconds": ',
         r.seconds,
+        ', "plan_seconds": ',
+        r.plan_seconds,
         "}",
     )
 
@@ -430,7 +545,9 @@ def rows_json(t: Table, a: DataAsk, mut out: String) raises:
 # ── the chart ────────────────────────────────────────────────────────────────
 
 
-def chart_json(t: Table, a: DataAsk, mut out: String) raises:
+def chart_json(
+    t: Table, a: DataAsk, mut cache: ManifestCache, mut out: String
+) raises:
     """`"chart": {...}`: each `chart_y` column averaged (or summed) over
     the filtered rows by `chart_x`, in x's order."""
     var full = t.scan()
@@ -453,7 +570,7 @@ def chart_json(t: Table, a: DataAsk, mut out: String) raises:
         if y not in read:
             read.append(y)
     var scan = _scan_of(t, a, cols).select(read.copy())
-    var reader = scan.to_batch_reader(_options(a.max_rows))
+    var reader = _TaskReader(scan, scan.plan_files_with(cache), a.max_rows)
     var clock = _Clock(a.seconds)
     var xs = List[String]()
     var index = Dict[String, Int]()
@@ -472,6 +589,8 @@ def chart_json(t: Table, a: DataAsk, mut out: String) raises:
         ref b = got.value()
         var at = _batch_columns(b, read, cols)
         for i in range(b.num_rows):
+            if scanned >= a.max_rows:
+                break
             scanned += 1
             var x = cell_json(b, at[0][0], i, xkind)
             var p = index.get(x, -1)
@@ -498,9 +617,8 @@ def chart_json(t: Table, a: DataAsk, mut out: String) raises:
                         counts[p][k] += 1
                 except:
                     pass
-        if stopped:
+        if stopped or scanned >= a.max_rows:
             break
-    reader.raise_if_failed()
     if not stopped and scanned >= a.max_rows:
         stopped = String(
             "the chart read the first ",
@@ -597,13 +715,15 @@ def _unjson(s: String) -> String:
     return String(from_utf8_lossy=Span(out))
 
 
-def csv_json(t: Table, a: DataAsk, mut out: String) raises:
+def csv_json(
+    t: Table, a: DataAsk, mut cache: ManifestCache, mut out: String
+) raises:
     """Writes the filtered rows (sorted, if asked) to `a.csv` as CSV, up to
     `a.max_rows`; `"csv": {...}` says how many and why it stopped."""
     var page = a.copy()
     page.offset = 0
     page.limit = a.max_rows
-    var r = _read_rows(t, page)
+    var r = _read_rows(t, page, cache)
     var n = 0
     with open(a.csv, "w") as f:
         var head = String()

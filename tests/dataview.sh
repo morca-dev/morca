@@ -13,6 +13,12 @@
 # - the CSV download, capped (MORCA_DATA_DOWNLOAD_ROWS), with why it stopped;
 # - a page's row cap, a filter on a column that isn't one (400), and the
 #   time and memory limits, each saying why the read stopped;
+# - over lake.small and lake.wide, which tests/dataview/many.mojo writes a
+#   commit a day to (many snapshots, manifests and small files): a later
+#   page skips the files before it by their counts and reads the rest
+#   together, with the same rows as a read from the start; the manifests
+#   and the partitions are kept in MORCA_DATA_CACHE, so the next read
+#   fetches none; and a Data link marks the page as loading once clicked;
 # - [datasets."lake.obs"] public = false hides the data from visitors not
 #   logged in once login is on (401), not from those logged in, and not the
 #   dataset's overview; config check accepts the table and refuses a bad one.
@@ -28,6 +34,9 @@ pids=
 scripts/mojo-build.sh -I src $DEP_INC tests/dataview/obs.mojo -o build/dv-obs &
 pids="$pids $!"
 # shellcheck disable=SC2086
+scripts/mojo-build.sh -I src $DEP_INC tests/dataview/many.mojo -o build/dv-many &
+pids="$pids $!"
+# shellcheck disable=SC2086
 scripts/mojo-build.sh -I src $DEP_INC bin/morca_maintain.mojo -o build/morca_maintain &
 pids="$pids $!"
 # shellcheck disable=SC2086
@@ -36,7 +45,8 @@ for pid in $pids $!; do wait "$pid"; done
 log=build/dataview.log
 : > "$log"
 export MORCA_WAREHOUSE=$PWD/build/dataview-wh MORCA_MAINTAIN=$PWD/build/morca_maintain
-rm -rf "$MORCA_WAREHOUSE"
+export MORCA_DATA_CACHE=$PWD/build/dataview-cache
+rm -rf "$MORCA_WAREHOUSE" "$MORCA_DATA_CACHE"
 ui=
 fail() {
     echo "FAIL: $*"
@@ -190,6 +200,36 @@ start_ui MORCA_DATA_SECONDS=0.000001
 case "$(json "" | jq -r .rows.stopped)" in "the scan stopped at its time limit"*) ;; *) fail "the time limit: $(json "" | jq -c .rows)" ;; esac
 stop_ui
 echo "ok   bad filters are 400; the memory and time limits stop a read, saying why"
+
+# Many commits: pages by count, the cache, the loading mark.
+./build/dv-many run --partitions 2024-01-01..2024-02-29 >> "$log" 2>&1 || fail "many"
+md() { ./build/morca_maintain data "$@" || fail "morca_maintain data $*"; }
+for ds in lake.small lake.wide; do
+    all=$(md $ds --offset 0 --limit 100 --max-rows 1000)
+    [ "$(echo "$all" | jq .rows.files)" -ge 60 ] || fail "$ds has $(echo "$all" | jq .rows.files) files"
+    want=$(echo "$all" | jq -c '.rows.rows[37:58]')
+    page=$(md $ds --offset 37 --limit 21 --max-rows 1000)
+    [ "$(echo "$page" | jq -c .rows.rows)" = "$want" ] || fail "$ds rows 37-58: $(echo "$page" | jq -c .rows.rows), not $want"
+    [ "$(echo "$page" | jq .rows.scanned)" -lt 37 ] || fail "$ds read $(echo "$page" | jq .rows.scanned) rows for a page at 37"
+    [ "$(echo "$page" | jq .rows.next)" = 58 ] || fail "$ds page's next"
+    [ "$(echo "$page" | jq .timings.manifests.requests)" -eq 0 ] || fail "$ds fetched manifests again: $(echo "$page" | jq -c .timings)"
+    [ "$(echo "$page" | jq -c .partitions)" = "$(echo "$all" | jq -c .partitions)" ] || fail "$ds partitions from the cache"
+    top=$(md $ds --sort -id --limit 1 --max-rows 100000 | jq '.rows.rows[0][0]')
+    [ "$top" -eq "$(md $ds --limit 100000 --max-rows 100000 | jq '[.rows.rows[][0]] | max')" ] \
+        || fail "$ds sorted by id, descending, starts at $top"
+done
+[ "$(ls "$MORCA_DATA_CACHE" | grep -c partitions-)" -ge 2 ] || fail "no partitions kept in $MORCA_DATA_CACHE"
+env MORCA_DATA_CACHE=off ./build/morca_maintain data lake.small --limit 5 > build/dataview/nocache.json
+[ "$(jq .timings.manifests.requests build/dataview/nocache.json)" -gt 0 ] || fail "MORCA_DATA_CACHE=off still read the cache"
+start_ui
+curl -fsS "$base/datasets/lake.obs?tab=data" | grep -qF 'document.body.classList.toggle("loading", on)' || fail "no loading mark on the Data tab"
+curl -fsS "$base/static/morca.css" | grep -qF 'body.loading::after { content: "Loading data' || fail "no loading style"
+stop_ui
+old=$(md lake.wide --no-rows --no-partitions | jq -r '.snapshots[9].snapshot')
+env MORCA_DATA_CACHE_MB=0.002 ./build/morca_maintain data lake.wide --snapshot "$old" --limit 5 > /dev/null
+kept=$(find "$MORCA_DATA_CACHE" -type f -exec cat {} + | wc -c)
+[ "$kept" -le 2048 ] || fail "the cache past MORCA_DATA_CACHE_MB: $kept bytes"
+echo "ok   many files: later pages by count, manifests and partitions kept, the loading mark"
 
 # public = false: hidden from visitors once login is on.
 printf '[pipelines.obs]\n\n[datasets."lake.obs"]\npublic = false\n' > "$conf"

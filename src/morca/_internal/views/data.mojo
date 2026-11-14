@@ -17,6 +17,9 @@ The limits, each from the UI's environment:
 | `MORCA_DATA_CHART_ROWS` | 100000 | filtered rows a chart reads, at most |
 | `MORCA_DATA_SECONDS` | 20 | how long a read may take |
 | `MORCA_DATA_MEMORY_MB` | 256 | what a read may hold |
+
+What a read keeps on disk for the next, by snapshot, is
+`morca._internal.datacache`'s (`MORCA_DATA_CACHE`, `MORCA_DATA_CACHE_MB`).
 """
 
 from std.os import getenv

@@ -608,5 +608,16 @@ button.cal__day:focus-visible { outline: 2px solid var(--lake-soft); outline-off
 .cal__key { display: inline-block; width: 0.7rem; height: 0.7rem; border-radius: 2px; vertical-align: middle; }
 .cal__key::after { content: none; }
 .cal--static .cal__day { cursor: default; }
+/* While a Data tab loads (morca._internal.ui.loading): a bar along the top, and a note. */
+body.loading { cursor: progress; }
+body.loading::before { content: ""; position: fixed; top: 0; left: 0; right: 0; height: 3px; z-index: 60;
+  background: linear-gradient(90deg, transparent, var(--lake), transparent) no-repeat;
+  background-size: 40% 100%; animation: loading-bar 1.1s linear infinite; }
+body.loading::after { content: "Loading data\2026"; position: fixed; top: 0.6rem; right: 1rem; z-index: 60;
+  font-size: 0.8125rem; padding: 0.2rem 0.7rem; border-radius: 999px; color: var(--lake);
+  background: var(--surface); border: 1px solid var(--border-strong); box-shadow: var(--shadow); }
+@keyframes loading-bar { from { background-position: -60% 0; } to { background-position: 160% 0; } }
+@media (prefers-reduced-motion: reduce) {
+  body.loading::before { animation: none; background: var(--lake); } }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 """
