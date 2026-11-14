@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.31.0 - 2026-11-14
+
+- **Image builds retry the git download:** the runtime image fetches git's source tarball with retries from three kernel.org mirrors and checks its sha256. (#470)
+
+- **`morca backfill --dry-run`:** makes every check a backfill or a fill request makes and writes nothing, printing what it would do or exiting non-zero with the real refusal. (#475)
+
 ## 0.30.0 - 2026-11-14
 
 - **Backfills as fills:** `morca backfill --rerun --as-fill` runs a big re-run in chunks, under the fill settings, and resumes across restarts; `--cancel` stops it. (#467)
