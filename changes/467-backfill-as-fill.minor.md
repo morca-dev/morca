@@ -1,0 +1,1 @@
+- **Backfills as fills:** `morca backfill --rerun --as-fill <pipeline> KEYS` (also as an upgrade step) has the scheduler run the keys as fill runs within `keys_per_run`, `fill_max_runs`, `fill_window` and the budget, resuming across restarts; `morca backfill --cancel <pipeline>` stops it. (#467)

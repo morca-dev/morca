@@ -680,6 +680,47 @@ def waiting_line(p: Value) raises -> String:
     return String("  ", w.string_value())
 
 
+def request_line(v: Value) raises -> String:
+    """`morca status <pipeline>`'s line for its open fill request (#465,
+    `fill.request` in its page's JSON), or empty for none: `fill request 3
+    (2023-01..2026-10, rerun): 12 of 46 done, 1 running, 33 left; next:
+    2023-02`."""
+    if String("fill") not in v or v["fill"].is_null():
+        return ""
+    var f = v["fill"]
+    if String("request") not in f or f["request"].is_null():
+        return ""
+    var r = f["request"]
+    var line = String(
+        "fill request ",
+        _int_of(r, "id"),
+        " (",
+        r["spec"].string_value(),
+        ", rerun" if r["rerun"].bool_value() else "",
+        "): ",
+        _int_of(r, "done"),
+        " of ",
+        _int_of(r, "total"),
+        " done",
+    )
+    var parts: List[Tuple[String, String]] = [
+        (String("skipped"), String("already done")),
+        (String("running"), String("running")),
+        (String("retrying"), String("retrying")),
+        (String("failed"), String("failed")),
+    ]
+    for part in parts:
+        var n = _int_of(r, part[0])
+        if n > 0:
+            line.write(", ", n, " ", part[1])
+    line.write(", ", _int_of(r, "left"), " left")
+    if r["next"].is_string():
+        line.write("; next: ", r["next"].string_value())
+    if f["idle"].is_string():
+        line.write("\n  idle: ", f["idle"].string_value())
+    return line^
+
+
 def pressure_status(v: Value) raises -> String:
     """`morca status`'s line for the scheduler's host's memory pressure
     (`memory_pressure` in `/`'s JSON, `morca._internal.admission`), or empty for
@@ -757,6 +798,9 @@ def print_status(json: String, one: Bool) raises:
             )
     if not one:
         return
+    var asked = request_line(v)
+    if asked:
+        print(asked)
     var runs = v["runs"].array_items()
     print("runs:" if len(runs) > 0 else "runs: none")
     for r in runs:
@@ -961,6 +1005,13 @@ def api_command(mut api: Api, args: List[String]) raises -> Int:
                 preview = True
             elif a == "--allow-append":
                 allow_append = True
+            elif a == "--as-fill" or a == "--cancel":
+                raise Error(
+                    "morca: backfill ",
+                    a,
+                    " runs where the database is (the scheduler's host, or",
+                    " an upgrade step), not over --remote",
+                )
             elif a.startswith("--"):
                 raise Error("usage: unknown option: ", a)
             else:

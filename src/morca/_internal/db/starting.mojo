@@ -248,18 +248,27 @@ def startable(
 
 
 def queue_fill(
-    mut tx: Transaction, pipeline: String, registry_hash: String, key: String
+    mut tx: Transaction,
+    pipeline: String,
+    registry_hash: String,
+    key: String,
+    request: Int64 = 0,
 ) raises -> Int64:
-    """A new queued fill run of `pipeline` over `key`."""
+    """A new queued fill run of `pipeline` over `key`, of the fill request
+    `request` (0 for the fill's range)."""
     return (
         tx.query(
             (
                 "INSERT INTO orca.runs (pipeline,"
-                " registry_hash, partitions, trigger, status)"
-                " VALUES ($1, $2, $3, 'fill', 'queued')"
+                " registry_hash, partitions, trigger, status, fill_request)"
+                " VALUES ($1, $2, $3, 'fill', 'queued', NULLIF($4, 0))"
                 " RETURNING id"
             ),
-            Params().text(pipeline).text(registry_hash).text(key),
+            Params()
+            .text(pipeline)
+            .text(registry_hash)
+            .text(key)
+            .int64(request),
         )
         .row(0)
         .int64("id")
