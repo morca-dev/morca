@@ -130,7 +130,9 @@ def lake_schema_fields(
 
 
 @export("lake_table_exists")
-def lake_table_exists(ds: Int, n: Int, out_yes: Int, err: Int) abi("C") -> Int32:
+def lake_table_exists(
+    ds: Int, n: Int, out_yes: Int, err: Int
+) abi("C") -> Int32:
     return lib.lake_table_exists(ds, n, out_yes, err)
 
 
@@ -142,7 +144,9 @@ def lake_read_file(
 
 
 @export("lake_delete_file")
-def lake_delete_file(h: Int, path: Int, path_n: Int, err: Int) abi("C") -> Int32:
+def lake_delete_file(
+    h: Int, path: Int, path_n: Int, err: Int
+) abi("C") -> Int32:
     return lib.lake_delete_file(h, path, path_n, err)
 
 

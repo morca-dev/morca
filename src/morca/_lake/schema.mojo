@@ -51,7 +51,10 @@ struct Schema(Copyable, Movable, Writable):
         var got = Slots()
         var err = Slots()
         var rc = a.schema_fields(
-            Int(self.json.unsafe_ptr()), self.json.byte_length(), got.addr, err.addr
+            Int(self.json.unsafe_ptr()),
+            self.json.byte_length(),
+            got.addr,
+            err.addr,
         )
         if rc != 0:
             raise take_error(a, err)

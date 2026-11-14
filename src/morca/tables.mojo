@@ -413,7 +413,10 @@ struct Table(Copyable, Movable):
         var err = Slots()
         if (
             self._api.delete_file(
-                self.handle, Int(path.unsafe_ptr()), path.byte_length(), err.addr
+                self.handle,
+                Int(path.unsafe_ptr()),
+                path.byte_length(),
+                err.addr,
             )
             != 0
         ):
