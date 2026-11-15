@@ -1,0 +1,1 @@
+- **Release tagging:** the runtime image is tagged even when it's a Docker manifest list (0.32.0's tag step failed). (#493)
