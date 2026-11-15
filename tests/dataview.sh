@@ -13,6 +13,14 @@
 # - the CSV download, capped (MORCA_DATA_DOWNLOAD_ROWS), with why it stopped;
 # - a page's row cap, a filter on a column that isn't one (400), and the
 #   time and memory limits, each saying why the read stopped;
+# - over lake.small and lake.wide, which tests/dataview/many.mojo writes a
+#   commit a day to (many snapshots, manifests and small files): a later
+#   page skips the files before it by their counts and reads the rest
+#   together, with the same rows as a read from the start; the manifests
+#   and the partitions are kept in MORCA_DATA_CACHE, so the next read
+#   fetches none; and a Data link marks the page as loading once clicked;
+# - a pipeline's Data tab: the first rows of each dataset it writes, through
+#   the same reader, linked to the dataset's Data tab;
 # - [datasets."lake.obs"] public = false hides the data from visitors not
 #   logged in once login is on (401), not from those logged in, and not the
 #   dataset's overview; config check accepts the table and refuses a bad one.
@@ -28,6 +36,9 @@ pids=
 scripts/mojo-build.sh -I src $DEP_INC tests/dataview/obs.mojo -o build/dv-obs &
 pids="$pids $!"
 # shellcheck disable=SC2086
+scripts/mojo-build.sh -I src $DEP_INC tests/dataview/many.mojo -o build/dv-many &
+pids="$pids $!"
+# shellcheck disable=SC2086
 scripts/mojo-build.sh -I src $DEP_INC bin/morca_maintain.mojo -o build/morca_maintain &
 pids="$pids $!"
 # shellcheck disable=SC2086
@@ -36,7 +47,8 @@ for pid in $pids $!; do wait "$pid"; done
 log=build/dataview.log
 : > "$log"
 export MORCA_WAREHOUSE=$PWD/build/dataview-wh MORCA_MAINTAIN=$PWD/build/morca_maintain
-rm -rf "$MORCA_WAREHOUSE"
+export MORCA_DATA_CACHE=$PWD/build/dataview-cache
+rm -rf "$MORCA_WAREHOUSE" "$MORCA_DATA_CACHE"
 ui=
 fail() {
     echo "FAIL: $*"
@@ -162,6 +174,16 @@ run=$(psql "$MORCA_DATABASE_URL" -Atc "SELECT max(id) FROM orca.runs WHERE pipel
 curl -fsS "$base/runs/$run" | grep -qF "href=\"/datasets/lake.obs?tab=data&amp;snapshot=$S2\"" || fail "the run page's link to the data it wrote"
 echo "ok   home, the pipeline page, the steps, the datasets list and the run page link to the data"
 
+# A pipeline's Data tab: what it writes, a few rows each.
+page=$(curl -fsS "$base/pipelines/obs?tab=data")
+echo "$page" | grep -qF 'href="/pipelines/obs?tab=data" aria-current="page">Data</a>' || fail "the pipeline's Data tab"
+echo "$page" | grep -qF '<section class="card pdata" id="data-0"><h2><a href="/datasets/lake.obs">lake.obs</a></h2>' || fail "lake.obs's card"
+echo "$page" | grep -qF "Snapshot $S2 · 300 rows · 6 files" || fail "lake.obs's snapshot line: $(echo "$page" | grep -o 'Snapshot [^<]*')"
+echo "$page" | grep -qF '<a class="data-link" href="/datasets/lake.obs?tab=data">All its data</a>' || fail "the link to lake.obs's Data tab"
+[ "$(echo "$page" | grep -o '<td class="num">' | wc -l | tr -d ' ')" -ge 20 ] || fail "lake.obs's rows on the pipeline's Data tab"
+[ "$(echo "$page" | grep -o '<tr>' | wc -l | tr -d ' ')" -eq 21 ] || fail "not 20 rows and a header: $(echo "$page" | grep -o '<tr>' | wc -l)"
+echo "ok   the pipeline's Data tab: lake.obs's snapshot and first 20 rows, linked to its Data tab"
+
 # The download: capped, with why.
 hdr=build/dataview/csv.hdr
 curl -fsS -D "$hdr" -o build/dataview/obs.csv "$base/datasets/lake.obs/data.csv?f=month:eq:2024-01" || fail "the download"
@@ -191,6 +213,36 @@ case "$(json "" | jq -r .rows.stopped)" in "the scan stopped at its time limit"*
 stop_ui
 echo "ok   bad filters are 400; the memory and time limits stop a read, saying why"
 
+# Many commits: pages by count, the cache, the loading mark.
+./build/dv-many run --partitions 2024-01-01..2024-02-29 >> "$log" 2>&1 || fail "many"
+md() { ./build/morca_maintain data "$@" || fail "morca_maintain data $*"; }
+for ds in lake.small lake.wide; do
+    all=$(md $ds --offset 0 --limit 100 --max-rows 1000)
+    [ "$(echo "$all" | jq .rows.files)" -ge 60 ] || fail "$ds has $(echo "$all" | jq .rows.files) files"
+    want=$(echo "$all" | jq -c '.rows.rows[37:58]')
+    page=$(md $ds --offset 37 --limit 21 --max-rows 1000)
+    [ "$(echo "$page" | jq -c .rows.rows)" = "$want" ] || fail "$ds rows 37-58: $(echo "$page" | jq -c .rows.rows), not $want"
+    [ "$(echo "$page" | jq .rows.scanned)" -lt 37 ] || fail "$ds read $(echo "$page" | jq .rows.scanned) rows for a page at 37"
+    [ "$(echo "$page" | jq .rows.next)" = 58 ] || fail "$ds page's next"
+    [ "$(echo "$page" | jq .timings.manifests.requests)" -eq 0 ] || fail "$ds fetched manifests again: $(echo "$page" | jq -c .timings)"
+    [ "$(echo "$page" | jq -c .partitions)" = "$(echo "$all" | jq -c .partitions)" ] || fail "$ds partitions from the cache"
+    top=$(md $ds --sort -id --limit 1 --max-rows 100000 | jq '.rows.rows[0][0]')
+    [ "$top" -eq "$(md $ds --limit 100000 --max-rows 100000 | jq '[.rows.rows[][0]] | max')" ] \
+        || fail "$ds sorted by id, descending, starts at $top"
+done
+[ "$(ls "$MORCA_DATA_CACHE" | grep -c partitions-)" -ge 2 ] || fail "no partitions kept in $MORCA_DATA_CACHE"
+env MORCA_DATA_CACHE=off ./build/morca_maintain data lake.small --limit 5 > build/dataview/nocache.json
+[ "$(jq .timings.manifests.requests build/dataview/nocache.json)" -gt 0 ] || fail "MORCA_DATA_CACHE=off still read the cache"
+start_ui
+curl -fsS "$base/datasets/lake.obs?tab=data" | grep -qF 'document.body.classList.toggle("loading", on)' || fail "no loading mark on the Data tab"
+curl -fsS "$base/static/morca.css" | grep -qF 'body.loading::after { content: "Loading data' || fail "no loading style"
+stop_ui
+old=$(md lake.wide --no-rows --no-partitions | jq -r '.snapshots[9].snapshot')
+env MORCA_DATA_CACHE_MB=0.002 ./build/morca_maintain data lake.wide --snapshot "$old" --limit 5 > /dev/null
+kept=$(find "$MORCA_DATA_CACHE" -type f -exec cat {} + | wc -c)
+[ "$kept" -le 2048 ] || fail "the cache past MORCA_DATA_CACHE_MB: $kept bytes"
+echo "ok   many files: later pages by count, manifests and partitions kept, the loading mark"
+
 # public = false: hidden from visitors once login is on.
 printf '[pipelines.obs]\n\n[datasets."lake.obs"]\npublic = false\n' > "$conf"
 ./build/morca config check "$conf" >> "$log" 2>&1 || fail "config check refused [datasets]"
@@ -212,10 +264,14 @@ for path in / /datasets /pipelines/obs; do
         || fail "$path doesn't mark lake.obs's data link private for a visitor"
 done
 [ "$(code "$base/datasets/lake.obs")" = 200 ] || fail "the overview is hidden too"
+[ "$(code "$base/pipelines/obs?tab=data")" = 200 ] && grep -qF 'Its data is shown to those logged in' build/dataview/body \
+    && ! grep -q '<td class="num">' build/dataview/body || fail "the pipeline's Data tab shows hidden data to a visitor"
 jar=build/dataview/cookies.txt
 rm -f "$jar"
 [ "$(code -c "$jar" -H "Origin: $base" -d 'name=alice&password=correct+horse+battery' "$base/login")" = 303 ] || fail "log in"
 [ "$(code -b "$jar" "$base/datasets/lake.obs/data.json")" = 200 ] || fail "hidden from alice"
+[ "$(code -b "$jar" "$base/pipelines/obs?tab=data")" = 200 ] && grep -q '<td class="num">' build/dataview/body \
+    || fail "the pipeline's Data tab hides lake.obs from alice"
 printf '[pipelines.obs]\n' > "$conf"
 MORCA_CONFIG=$conf ./build/morca register ./build/dv-obs > build/dataview/reg.out 2>&1 || fail "register without [datasets]"
 grep -qx 'dataset lake.obs settings removed: its data is public' build/dataview/reg.out || fail "register's line: $(cat build/dataview/reg.out)"

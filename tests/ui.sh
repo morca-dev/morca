@@ -216,7 +216,7 @@ for t in "/pipelines/toy Overview" "/pipelines/toy?tab=bogus Overview" "/pipelin
     set -- $t
     [ "$(tab_of "$1")" = "$2" ] || fail "$1 isn't on $2: $(tab_of "$1")"
 done
-echo "$page" | grep -qF '<nav class="ptabs" aria-label="Pipeline sections"><a class="ptabs__tab" href="/pipelines/toy" aria-current="page">Overview</a><a class="ptabs__tab" href="/pipelines/toy?tab=runs">Runs</a><a class="ptabs__tab" href="/pipelines/toy?tab=operate">Operate</a></nav>' \
+echo "$page" | grep -qF '<nav class="ptabs" aria-label="Pipeline sections"><a class="ptabs__tab" href="/pipelines/toy" aria-current="page">Overview</a><a class="ptabs__tab" href="/pipelines/toy?tab=runs">Runs</a><a class="ptabs__tab" href="/pipelines/toy?tab=operate">Operate</a><a class="ptabs__tab" href="/pipelines/toy?tab=data">Data</a></nav>' \
     || fail "the tabs"
 echo "$page" | grep -q 'id="start"\|<h2>Versions\|<h2>Runs</h2>\|id="coverage"' && fail "Overview has another tab's sections"
 page=$(html '/pipelines/toy?tab=runs')
@@ -226,6 +226,7 @@ page=$(html '/pipelines/toy?tab=operate')
 echo "$page" | grep -q 'id="coverage"' && echo "$page" | grep -q 'id="start"' && echo "$page" | grep -q '<h2>Stop runs' \
     || fail "the Operate tab"
 echo "$page" | grep -q 'data-poll="/pipelines/toy/progress?tab=operate"' || fail "Operate has no live Progress"
+html '/pipelines/toy?tab=data' | grep -qF 'Its steps write no datasets' || fail "toy's Data tab"
 [ "$(json '/pipelines/toy?tab=runs' | jq -c '[.steps | length, (.runs | length)]')" = "$(json /pipelines/toy | jq -c '[.steps | length, (.runs | length)]')" ] \
     || fail "the JSON differs by tab"
 MORCA_NOW=2024-01-15T00:00Z ./build/morca register ./build/daily >> "$log" 2>&1 || fail "register daily"

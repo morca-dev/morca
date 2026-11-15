@@ -585,48 +585,8 @@ def _rows_card(
         h.raw("</section>")
         return
     ref r = rows.value()
-    var stopped = r.at("/stopped")
-    if stopped.is_string():
-        h.raw('<p class="card__warn">')
-        h.text("Stopped: ", stopped.string_value(), ".")
-        h.raw("</p>")
-    var names = _names(r, "/columns")
+    rows_table(h, r, len(q.filters) > 0)
     var list = r.at("/rows").array_items()
-    if len(list) == 0:
-        h.raw('<p class="card__none">No rows')
-        h.raw(" match the filters." if len(q.filters) else ".")
-        h.raw("</p>")
-    else:
-        h.raw('<div class="scroll"><table><thead><tr>')
-        var types = List[String]()
-        for c in r.at("/columns").array_items():
-            types.append(c.at("/type").string_value())
-        for k in range(len(names)):
-            h.raw("<th")
-            var num = types[k] in ["int", "long", "float", "double"] or types[
-                k
-            ].startswith("decimal")
-            if num:
-                h.raw(' class="num"')
-            h.raw(' title="')
-            h.text(types[k])
-            h.raw('">')
-            h.text(names[k])
-            h.raw("</th>")
-        h.raw("</tr></thead><tbody>")
-        for row in list:
-            h.raw("<tr>")
-            var cells = row.array_items()
-            for k in range(len(cells)):
-                ref c = cells[k]
-                if c.is_null():
-                    h.raw('<td class="null">null</td>')
-                elif c.is_number():
-                    h.num(c.to_json())
-                else:
-                    h.mono(_text_of(c))
-            h.raw("</tr>")
-        h.raw("</tbody></table></div>")
     var offset = Int(r.at("/offset").int_value())
     var next = r.at("/next")
     h.raw('<nav class="pager" aria-label="Pages of rows">')
@@ -662,6 +622,53 @@ def _rows_card(
     h.raw('<a href="')
     h.text(String(dataset_href(name), "/data.json?", _qs(q.query(offset))))
     h.raw('">JSON</a></nav></section>')
+
+
+def rows_table(mut h: Html, r: Value, filtered: Bool) raises:
+    """A read's `rows`: why it stopped, if it did, and the table of them
+    (or that there are none), each column titled with its type."""
+    var stopped = r.at("/stopped")
+    if stopped.is_string():
+        h.raw('<p class="card__warn">')
+        h.text("Stopped: ", stopped.string_value(), ".")
+        h.raw("</p>")
+    var names = _names(r, "/columns")
+    var list = r.at("/rows").array_items()
+    if len(list) == 0:
+        h.raw('<p class="card__none">No rows')
+        h.raw(" match the filters." if filtered else ".")
+        h.raw("</p>")
+    else:
+        h.raw('<div class="scroll"><table><thead><tr>')
+        var types = List[String]()
+        for c in r.at("/columns").array_items():
+            types.append(c.at("/type").string_value())
+        for k in range(len(names)):
+            h.raw("<th")
+            var num = types[k] in ["int", "long", "float", "double"] or types[
+                k
+            ].startswith("decimal")
+            if num:
+                h.raw(' class="num"')
+            h.raw(' title="')
+            h.text(types[k])
+            h.raw('">')
+            h.text(names[k])
+            h.raw("</th>")
+        h.raw("</tr></thead><tbody>")
+        for row in list:
+            h.raw("<tr>")
+            var cells = row.array_items()
+            for k in range(len(cells)):
+                ref c = cells[k]
+                if c.is_null():
+                    h.raw('<td class="null">null</td>')
+                elif c.is_number():
+                    h.num(c.to_json())
+                else:
+                    h.mono(_text_of(c))
+            h.raw("</tr>")
+        h.raw("</tbody></table></div>")
 
 
 def _chart_card(mut h: Html, name: String, q: DataQuery, v: Value) raises:

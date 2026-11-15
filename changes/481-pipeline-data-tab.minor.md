@@ -1,0 +1,1 @@
+- **A Data tab on pipeline pages:** each dataset a pipeline writes, with its current snapshot and first rows, read as the dataset's own Data tab reads them, and a link there. (#481)

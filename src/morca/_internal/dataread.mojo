@@ -31,23 +31,32 @@ every row it reads, so the memory limit is what bounds it.
 `OP` is `eq`, `ne`, `lt`, `le`, `gt`, `ge` or `in` (values split on `,`).
 """
 
+from std.time import perf_counter_ns
+
 from iceberg.catalog.filesystem import Table
 from iceberg.json import json_quote
 from iceberg.manifest import (
     CONTENT_DATA,
     MANIFEST_CONTENT_DATA,
     STATUS_DELETED,
+    Manifest,
     ManifestCache,
-    read_manifest_io,
-    read_manifest_list_io_cached,
+    ManifestFile,
+    read_manifest_bytes_cached,
+    read_manifest_io_cached,
+    read_manifest_list_bytes_cached,
 )
+from iceberg.metadata import Snapshot
 
+from morca._internal.datacache import DataCache
 from morca._internal.dataask import DataAsk, columns_of, iso_ms, parse_ask
 from morca._internal.datarows import chart_json, csv_json, rows_json
 from morca._lake.impl import load_dataset
 
 comptime SNAPSHOTS_SHOWN = 100
 comptime PARTITIONS_SHOWN = 1000
+comptime MANIFEST_BYTES = 256 << 20
+"""How many bytes of manifests a read holds, to plan with more than once."""
 
 
 def table_json(t: Table, snapshot: Int64, mut out: String) raises:
@@ -157,25 +166,94 @@ struct _Part(Copyable, Movable):
         self.last_ms = -1
 
 
-def partitions_json(t: Table, snapshot: Int64, mut out: String) raises:
+def warm_manifests(
+    t: Table, snap: Snapshot, mut cache: ManifestCache, mut disk: DataCache
+) raises -> List[ManifestFile]:
+    """The snapshot's manifest list, with the bytes of every manifest it
+    names in `cache`, for `partitions_json` and the rows' plan to share:
+    from `disk` where it has them, the rest fetched at once and kept there.
+    A manifest's bytes never change, so they're kept by its location."""
+    var lst: List[UInt8]
+    var got = disk.get(snap.manifest_list)
+    if got:
+        lst = got.take()
+    else:
+        lst = t.io.read_all(snap.manifest_list)
+        disk.put(snap.manifest_list, Span(lst))
+    cache.keep_file(snap.manifest_list, Span(lst))
+    var mfs = read_manifest_list_bytes_cached(lst^, cache)
+    var missing = List[String]()
+    for mf in mfs:
+        if cache.has_file(mf.manifest_path):
+            continue
+        var d = disk.get(mf.manifest_path)
+        if d:
+            cache.keep_file(mf.manifest_path, Span(d.value()))
+        else:
+            missing.append(mf.manifest_path)
+    var fetched = t.io.read_all_many(missing)
+    for i in range(len(missing)):
+        disk.put(missing[i], Span(fetched[i]))
+        cache.keep_file(missing[i], Span(fetched[i]))
+    return mfs^
+
+
+def _manifest(
+    t: Table, mf: ManifestFile, mut cache: ManifestCache
+) raises -> Manifest:
+    if cache.has_file(mf.manifest_path):
+        return read_manifest_bytes_cached(
+            cache.file(mf.manifest_path), mf, cache
+        )
+    return read_manifest_io_cached(t.io, mf.manifest_path, mf, cache)
+
+
+def partitions_json(
+    t: Table,
+    snapshot: Int64,
+    mut cache: ManifestCache,
+    mut disk: DataCache,
+    mut out: String,
+) raises:
     """`"partitions": [...]` of the snapshot: a row per partition, newest
-    partition values first, from its data manifests."""
-    ref m = t.metadata
+    partition values first, from its data manifests; kept in `disk` by the
+    table and the snapshot, which never change."""
     var scan = t.scan()
     if snapshot >= 0:
         scan = scan.use_snapshot(snapshot)
-    out.write('"partitions": [')
     if not scan.has_any_snapshot():
-        out.write('], "partitions_total": 0')
+        out.write('"partitions": [], "partitions_total": 0')
         return
     var snap = scan.snapshot()
-    var cache = ManifestCache()
+    var key = String(
+        "partitions-", t.metadata.table_uuid, "-", snap.snapshot_id, ".json"
+    )
+    var kept = disk.get_text(key)
+    if kept:
+        out.write(kept.value())
+        return
+    var mfs: List[ManifestFile]
+    if snap.manifest_list:
+        mfs = warm_manifests(t, snap, cache, disk)
+    else:
+        mfs = List[ManifestFile]()
+    var text = _partitions(t, mfs, cache)
+    if t.metadata.table_uuid and snap.manifest_list:
+        disk.put_text(key, text)
+    out.write(text)
+
+
+def _partitions(
+    t: Table, mfs: List[ManifestFile], mut cache: ManifestCache
+) raises -> String:
+    ref m = t.metadata
+    var out = String('"partitions": [')
     var parts = List[_Part]()
     var index = Dict[String, Int]()
-    for mf in read_manifest_list_io_cached(t.io, snap.manifest_list, cache):
+    for mf in mfs:
         if mf.content != MANIFEST_CONTENT_DATA:
             continue
-        var man = read_manifest_io(t.io, mf.manifest_path, mf)
+        var man = _manifest(t, mf, cache)
         ref spec = man.partition_spec
         for e in man.entries:
             if e.status == STATUS_DELETED:
@@ -234,6 +312,7 @@ def partitions_json(t: Table, snapshot: Int64, mut out: String) raises:
             "}",
         )
     out.write('], "partitions_total": ', len(parts))
+    return out^
 
 
 def _sort_text_desc(mut order: List[Int], parts: List[_Part]):
@@ -284,28 +363,77 @@ def _digits(b: Span[Byte, _], at: Int) -> Int:
 # ── the command ──────────────────────────────────────────────────────────────
 
 
+struct _Phases(Movable):
+    """How long each part of a read took, and the requests it made: the
+    JSON's `timings`."""
+
+    var t: Int
+    var requests: Int
+    var json: String
+
+    def __init__(out self):
+        self.t = Int(perf_counter_ns())
+        self.requests = 0
+        self.json = String()
+
+    def mark(mut self, name: StaticString, t: Table):
+        var now = Int(perf_counter_ns())
+        var n = t.io.counts().requests()
+        self.json.write(
+            ", " if self.json else "",
+            '"',
+            name,
+            '": {"seconds": ',
+            Float64(now - self.t) / 1e9,
+            ', "requests": ',
+            n - self.requests,
+            "}",
+        )
+        self.t = now
+        self.requests = n
+
+
 def data_json(a: DataAsk) raises -> String:
     """What `morca_maintain data` prints for `a`."""
+    var ph = _Phases()
     var t = load_dataset(a.dataset)
+    ph.mark("load", t)
+    # One cache of manifests for the partitions, the rows and the chart,
+    # which all plan the same snapshot; and the one on disk, across reads.
+    var cache = ManifestCache()
+    cache.max_file_bytes = MANIFEST_BYTES
+    var disk = DataCache.from_env()
     var out = String('{"dataset": ', json_quote(a.dataset), ", ")
+    var scan = t.scan()
+    if a.snapshot >= 0:
+        scan = scan.use_snapshot(a.snapshot)
+    if scan.has_any_snapshot() and scan.snapshot().manifest_list:
+        _ = warm_manifests(t, scan.snapshot(), cache, disk)
+    ph.mark("manifests", t)
     if a.csv:
-        csv_json(t, a, out)
+        csv_json(t, a, cache, out)
         out.write("}")
+        disk.prune()
         return out^
     table_json(t, a.snapshot, out)
+    ph.mark("table", t)
     if a.partitions:
         out.write(", ")
-        partitions_json(t, a.snapshot, out)
+        partitions_json(t, a.snapshot, cache, disk, out)
+        ph.mark("partitions", t)
     if a.rows:
         out.write(", ")
-        rows_json(t, a, out)
+        rows_json(t, a, cache, out)
+        ph.mark("rows", t)
     if a.chart_x:
         out.write(", ")
         try:
-            chart_json(t, a, out)
+            chart_json(t, a, cache, out)
         except e:
             out.write('"chart": {"error": ', json_quote(String(e)), "}")
-    out.write("}")
+        ph.mark("chart", t)
+    out.write(', "timings": {', ph.json, "}}")
+    disk.prune()
     return out^
 
 

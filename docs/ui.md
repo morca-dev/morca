@@ -152,13 +152,14 @@ the next ask.
 
 ## A pipeline's page
 
-Three tabs, each its own page, so links and the back button work:
+Four tabs, each its own page, so links and the back button work:
 
 | Tab | Link | What it has |
 |---|---|---|
 | Overview | `/pipelines/<name>` | the cards below, Steps, keys, snapshots not run, Next runs |
 | Runs | `?tab=runs` | its runs and versions |
 | Operate | `?tab=operate` | Coverage (the calendar of done, failed and open days), Start runs, Stop runs |
+| Data | `?tab=data` | Each dataset it writes: its current snapshot and first 20 rows, read as the dataset's Data tab reads them, and a link to that tab |
 
 The name, Pause and the Progress card are on every tab. Links to
 `#coverage`, `#start` or `#stop` open Operate.
@@ -364,8 +365,24 @@ the page says which one stopped it:
 | `MORCA_DATA_SECONDS` | 20 | how long a read may take |
 | `MORCA_DATA_MEMORY_MB` | 256 | what a read may hold |
 
-Without a sort only the page's rows are read; a sort holds every filtered
-row it reads, so the memory limit is what bounds it. There is no SQL.
+Without a sort only the page's rows are read, and a later page skips the
+files before it by their row counts; a sort holds every filtered row it
+reads, so the memory limit is what bounds it. Small files are read 16 at a
+time. There is no SQL.
+
+A snapshot never changes, so a read keeps the manifests it fetched, and
+the partitions it worked out, on local disk for the next one; a table of
+many small commits then doesn't fetch its manifests again for every page.
+`timings` in the JSON says how long each part of the read took and the
+requests it made.
+
+| Variable | Default | |
+|---|---|---|
+| `MORCA_DATA_CACHE` | `$TMPDIR/morca-data-cache` | where; `off` for no cache |
+| `MORCA_DATA_CACHE_MB` | 256 | what it keeps; the least recently used goes first |
+
+A click on a Data link, or on one of the tab's forms, shows "Loading
+data…" and a bar along the top until the page comes.
 
 Like every other page, the Data tab needs no login. A dataset whose
 `[datasets."<name>"]` table in morca.toml has `public = false`
