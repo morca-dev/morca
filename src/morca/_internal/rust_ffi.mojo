@@ -67,6 +67,7 @@ comptime _ProgressFn = def(Int, Int64, Int64) thin abi("C") -> None
 comptime _MetricFn = def(Int, Int, Int, Float64) thin abi("C") -> None
 comptime _AddFileFn = def(Int, Int, Int) thin abi("C") -> Int32
 comptime _LastErrorFn = def(Int) thin abi("C") -> Int
+comptime _GetNextFn = def(Int, Int) thin abi("C") -> Int32
 
 comptime _PROGRESS_EVERY_NS = 10_000_000_000
 """Progress is logged at most every 10 s, and when it's done."""
@@ -435,6 +436,21 @@ struct WorkerCall(Movable):
             self.stream_block
         )
         return _cstring(msg)
+
+    def next_array(mut self, storage: Int) raises -> Bool:
+        """Pulls the stream's next `ArrowArray` into the 80 bytes at
+        `storage`, not imported (`morca.rust_step` moves it to liblake);
+        False at the end of the stream. Raises if `get_next` fails, and
+        `last_error` says why in the worker's words."""
+        var f = _get_int(self.stream_block, 8)
+        var rc = Pointer(to=f).unsafe_bitcast[_GetNextFn]()[](
+            self.stream_block, storage
+        )
+        if rc != 0:
+            raise Error(
+                "the stream's get_next failed (", rc, "): ", self.last_error()
+            )
+        return _get_int(storage, 64) != 0
 
     def start(mut self) raises:
         """Calls `morca_worker_run` and takes the stream it returns; raises

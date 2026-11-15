@@ -12,7 +12,9 @@
 #   rows are all still there;
 # - `morca tick` sweeps every dataset by its own policy, and leaves
 #   lake.counts (thirty days) alone;
-# - the snapshot a run read is still in morca lineage once it's expired.
+# - the snapshot a run read is still in morca lineage once it's expired;
+# - morca_maintain expires through liblake (#471): it has none of
+#   iceberg's code, and decides as the -D MORCA_LAKE_SOURCE=1 build does.
 #
 # Needs MORCA_DATABASE_URL (pixi run -e data test-expire starts a throwaway
 # server) and jq.
@@ -30,6 +32,9 @@ scripts/mojo-build.sh -I src $DEP_INC bin/scheduler.mojo -o build/morca &
 pids="$pids $!"
 # shellcheck disable=SC2086
 scripts/mojo-build.sh -I src $DEP_INC bin/morca_maintain.mojo -o build/morca_maintain &
+pids="$pids $!"
+# shellcheck disable=SC2086
+scripts/mojo-build.sh -D MORCA_LAKE_SOURCE=1 -I src $DEP_INC bin/morca_maintain.mojo -o build/morca_maintain-source &
 for pid in $pids $!; do wait "$pid"; done
 log=build/expire.log
 : > "$log"
@@ -76,6 +81,17 @@ out=$(./build/morca expire lake.events --older-than 0s --keep 1 --dry-run) || fa
 echo "$out" >> "$log"
 echo "$out" | grep -q "^dry run lake.events: snapshots 7 -> 2 (5 expired" || fail "dry run: $out"
 [ "$(nsnap events)" -eq 7 ] || fail "a dry run expired something"
+# The library's expiry decides as the compiled-in code does, and only the
+# compiled-in build has iceberg's code (see tests/lake.sh).
+dry() { "./build/$1" expire lake.events --older-than 0s --keep 1 --dry-run --report | sed 's/; [0-9.e-]* s$//'; }
+lib_out=$(dry morca_maintain) || fail "morca_maintain --dry-run: $lib_out"
+src_out=$(dry morca_maintain-source) || fail "morca_maintain-source --dry-run: $src_out"
+[ "$lib_out" = "$src_out" ] || fail "the library's expiry differs from the compiled-in code's:
+  $lib_out
+  $src_out"
+iceberg_fns() { nm "$1" | awk '$3 ~ /^_?iceberg::/' | wc -l; }
+[ "$(iceberg_fns build/morca_maintain)" -eq 0 ] || fail "build/morca_maintain links iceberg's code"
+[ "$(iceberg_fns build/morca_maintain-source)" -gt 0 ] || fail "-D MORCA_LAKE_SOURCE=1 didn't compile the library's code in"
 
 # The real one keeps the current snapshot (it is the last run's only one)
 # and the snapshot the failed count run read.

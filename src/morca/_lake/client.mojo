@@ -97,11 +97,13 @@ comptime WriterOptionsFn = def(Int, Int) thin abi("C") -> None
 comptime WriterFinishFn = def(Int, Int, Int) thin abi("C") -> Int32
 comptime Call4Fn = def(Int, Int, Int, Int) thin abi("C") -> Int32
 """A call of four integers and a status: `lake_reader_next`,
-`lake_schema_fields`, `lake_table_exists`, `lake_delete_file`."""
+`lake_schema_fields`, `lake_table_exists`, `lake_delete_file`,
+`lake_expire`, `lake_data`, `lake_sink_take`."""
 comptime FilesInfoFn = def(Int, Int, Int, Int) thin abi("C") -> Int32
 comptime ConcatFn = def(Int, Int, Int, Int, Int, Int) thin abi("C") -> Int32
 comptime DecodeFn = def(Int, Int, Int, Int, Int) thin abi("C") -> Int32
 comptime EmptyBatchFn = def(Int, Int, Int, Int, Int) thin abi("C") -> Int32
+comptime SinkNewFn = def(Int, Int, Int, Int, Int, Int, Int) thin abi("C") -> Int
 comptime ConcatBatchesFn = def(Int, Int, Int, Int, Int, Int) thin abi(
     "C"
 ) -> Int32
@@ -169,6 +171,14 @@ struct Api(Copyable, Movable):
     var delete_file: Call4Fn
     var writer_options: WriterOptionsFn
     var writer_close: StatusFn
+    var expire: Call4Fn
+    var data: Call4Fn
+    var sink_new: SinkNewFn
+    var sink_schema: MetaFn
+    var sink_put: MetaFn
+    var sink_take: Call4Fn
+    var sink_finish: MetaFn
+    var sink_free: FreeFn
 
     @staticmethod
     def from_library(lib: OwnedDLHandle) raises -> Self:
@@ -209,6 +219,14 @@ struct Api(Copyable, Movable):
             delete_file=_sym[Call4Fn](lib, "lake_delete_file"),
             writer_options=_sym[WriterOptionsFn](lib, "lake_writer_options"),
             writer_close=_sym[StatusFn](lib, "lake_writer_close"),
+            expire=_sym[Call4Fn](lib, "lake_expire"),
+            data=_sym[Call4Fn](lib, "lake_data"),
+            sink_new=_sym[SinkNewFn](lib, "lake_sink_new"),
+            sink_schema=_sym[MetaFn](lib, "lake_sink_schema"),
+            sink_put=_sym[MetaFn](lib, "lake_sink_put"),
+            sink_take=_sym[Call4Fn](lib, "lake_sink_take"),
+            sink_finish=_sym[MetaFn](lib, "lake_sink_finish"),
+            sink_free=_sym[FreeFn](lib, "lake_sink_free"),
         )
 
     def __init__(
@@ -250,6 +268,14 @@ struct Api(Copyable, Movable):
         delete_file: Call4Fn,
         writer_options: WriterOptionsFn,
         writer_close: StatusFn,
+        expire: Call4Fn,
+        data: Call4Fn,
+        sink_new: SinkNewFn,
+        sink_schema: MetaFn,
+        sink_put: MetaFn,
+        sink_take: Call4Fn,
+        sink_finish: MetaFn,
+        sink_free: FreeFn,
     ):
         self.free_text = free_text
         self.load = load
@@ -287,6 +313,14 @@ struct Api(Copyable, Movable):
         self.delete_file = delete_file
         self.writer_options = writer_options
         self.writer_close = writer_close
+        self.expire = expire
+        self.data = data
+        self.sink_new = sink_new
+        self.sink_schema = sink_schema
+        self.sink_put = sink_put
+        self.sink_take = sink_take
+        self.sink_finish = sink_finish
+        self.sink_free = sink_free
 
 
 struct _Loaded(Movable):
@@ -387,6 +421,14 @@ def api() raises -> Api:
             delete_file=lib.lake_delete_file,
             writer_options=lib.lake_writer_options,
             writer_close=lib.lake_writer_close,
+            expire=lib.lake_expire,
+            data=lib.lake_data,
+            sink_new=lib.lake_sink_new,
+            sink_schema=lib.lake_sink_schema,
+            sink_put=lib.lake_sink_put,
+            sink_take=lib.lake_sink_take,
+            sink_finish=lib.lake_sink_finish,
+            sink_free=lib.lake_sink_free,
         )
     else:
         var p = _get_global["MORCA_LAKE_LIB", _init, _keep]()

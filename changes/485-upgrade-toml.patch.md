@@ -1,1 +1,0 @@
-- **Project images ship upgrade.toml:** `deploy/project.Dockerfile` copies a project's `upgrade.toml` and `CHANGELOG.md`, if it has them, to `/opt/morca`, so `deploy.sh` runs its upgrade steps. (#485)

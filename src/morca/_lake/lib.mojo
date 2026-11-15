@@ -11,6 +11,15 @@ a file writer of a heap `FileWriter`, a batch reader of a heap
 `BatchReader` (`lake_reader_free`). Written files cross as bytes, iceberg's
 `encode_data_files`, which is also how a dista task carries them.
 
+**Maintenance.** `morca_maintain`'s two commands run here whole, so it
+compiles no iceberg (#471): `lake_expire` (snapshot expiry,
+`morca._lake.expire_impl`) and `lake_data` (the UI's data view,
+`morca._internal.dataread`).
+
+**Rust steps.** What `morca.rust_step` does with a worker's output, so a
+program with Rust steps compiles no iceberg either (#474): the `lake_sink_*`
+functions, in `morca._lake.rust_sink`, imported here.
+
 The ABI (`morca._lake.abi`) says how text, maps, out blocks, errors and the
 host block cross; each function's doc says what its failure value is.
 """
@@ -53,9 +62,20 @@ from morca._lake.abi import (
     put_int,
     text_of,
 )
+from morca._lake.expire import ExpireAsk
+from morca._lake.expire_impl import expire_dataset
 from morca._lake.host import Host
 from morca._lake.names import dataset_of
+from morca._lake.rust_sink import (
+    lake_sink_finish,
+    lake_sink_free,
+    lake_sink_new,
+    lake_sink_put,
+    lake_sink_schema,
+    lake_sink_take,
+)
 import morca._lake.impl as tables
+from morca._internal.dataread import data_text
 
 
 # ── handles, errors, batches ────────────────────────────────────────────────
@@ -866,6 +886,39 @@ def lake_files_decode(
         _ = decode_data_files(Span(bytes), at)
         put_int(pos, 0, at)
         give(out_block, Span(bytes)[start:at])
+        return 0
+    except e:
+        _fail(err, e)
+        return 1
+
+
+# ── maintenance ─────────────────────────────────────────────────────────────
+
+
+def lake_expire(
+    ask: Int, ask_n: Int, out_block: Int, err: Int
+) abi("C") -> Int32:
+    """One dataset's snapshot expiry: `morca._lake.expire.ExpireAsk` in,
+    its `Expiry` to `out_block`, both encoded; 1 on error."""
+    try:
+        var got = expire_dataset(ExpireAsk.decode(ask, ask_n))
+        var e = got.encode()
+        give(out_block, Span(e.buf))
+        return 0
+    except e:
+        _fail(err, e)
+        return 1
+
+
+def lake_data(
+    args: Int, args_n: Int, out_block: Int, err: Int
+) abi("C") -> Int32:
+    """`morca_maintain data`'s output for its arguments (an encoded list of
+    strings, those after `data`), to `out_block`; 1 on arguments it can't
+    parse (a failed read is the output's `{"error": ...}`)."""
+    try:
+        var d = Dec(args, args_n)
+        give_text(out_block, data_text(d.strs()))
         return 0
     except e:
         _fail(err, e)

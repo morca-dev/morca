@@ -4,7 +4,8 @@
 
 The `morca` binary doesn't link iceberg, so the UI runs this in the
 project's `morca_maintain` (as `morca expire` does), a short-lived process
-it kills past its time limit. What it reads:
+it kills past its time limit. It runs inside liblake (`lake_data`, #471),
+so `morca_maintain` compiles no iceberg either. What it reads:
 
 - **the table**: its schema (columns, types, field ids and docs), its
   partition spec and its snapshots, newest first, from the metadata alone;
@@ -474,13 +475,14 @@ def _data_json(a: DataAsk, mut disk: DataCache) raises -> String:
     return out^
 
 
-def data_main(args: List[String]) raises:
-    """`morca_maintain data ...`: the JSON on stdout, or on a mistake in
+def data_text(args: List[String]) raises -> String:
+    """What `morca_maintain data ...` prints: the JSON, or on a mistake in
     what was asked for (a column the table hasn't, a value of the wrong
-    type) `{"error": ...}` and exit 0, since the UI shows it."""
+    type) `{"error": ...}`, and exit 0, since the UI shows it. Raises only
+    on arguments it can't parse. Runs inside liblake (`lake_data`)."""
     var a = parse_ask(args)
     try:
-        print(data_json(a))
+        return data_json(a)
     except e:
         var msg = String(e)
-        print(String('{"error": ', json_quote(msg), "}"))
+        return String('{"error": ', json_quote(msg), "}")

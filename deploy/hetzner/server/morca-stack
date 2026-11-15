@@ -1456,6 +1456,8 @@ cmd_drain_old() {
 drain_wait() {
     host=$(docker inspect -f '{{.Config.Hostname}}' "$1" 2> /dev/null) || host=
     safe "$host"
+    # Polled every MORCA_STACK_DRAIN_POLL_SECONDS (5, a divisor of 60).
+    dw_poll=${MORCA_STACK_DRAIN_POLL_SECONDS:-5}
     t=0
     while [ "$(docker inspect -f '{{.State.Running}}' "$1" 2> /dev/null)" = true ]; do
         if [ -n "$2" ] && [ "$t" -ge "$2" ]; then
@@ -1468,8 +1470,8 @@ drain_wait() {
             # a run over more than 3 partitions shows its first and last
             psql_q "SELECT '  run ' || r.id || ' ' || r.pipeline || ' ' || CASE WHEN cardinality(p.a) > 3 THEN p.a[1] || ' ... ' || p.a[cardinality(p.a)] || ' (' || cardinality(p.a) || ' partitions)' ELSE r.partitions END || ', running ' || date_trunc('second', now() - r.started) FROM orca.runs r JOIN orca.schedulers s ON s.id = r.instance CROSS JOIN LATERAL (SELECT string_to_array(r.partitions, ',') AS a) p WHERE r.status = 'running' AND s.host = '$host' ORDER BY r.id" 2> /dev/null || true
         fi
-        sleep 5
-        t=$((t + 5))
+        sleep "$dw_poll"
+        t=$((t + dw_poll))
     done
     docker rm -f "$1" > /dev/null
     echo "morca-stack: $1 drained and removed"
@@ -1631,13 +1633,14 @@ dumps() { # the dumps' names in the bucket, oldest first
 }
 
 # s3 cp FROM TO, tried three times: Object Storage drops the odd request
-# ("failure to meet throughput minimum", #425).
+# ("failure to meet throughput minimum", #425). The tries are
+# MORCA_STACK_RETRY_SECONDS (3) and twice that apart.
 s3_put() {
     n=1
     until s3 s3 cp "$1" "$2" > /dev/null; do
         [ "$n" -lt 3 ] || return 1
         echo "morca-stack: copying $1 to $2 failed (try $n of 3); trying again" >&2
-        sleep "$((n * 3))"
+        sleep "$((n * ${MORCA_STACK_RETRY_SECONDS:-3}))"
         n=$((n + 1))
     done
 }

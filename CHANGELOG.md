@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.32.0 - 2026-11-15
+
+- **Faster Data tab:** manifests read once, in parallel, and cached on disk (`MORCA_DATA_CACHE`); a loading indicator on click. (#480)
+- **Data tab on pipeline pages:** each dataset the pipeline writes, with its first rows. (#481)
+- **Data view on a full disk:** the cache stops writing and shrinks below `MORCA_DATA_CACHE_MIN_FREE_MB`, rereads broken files, and `data.csv` answers 503 instead of crashing. (#484, #487)
+- **Project images ship upgrade.toml** and CHANGELOG.md, so `deploy.sh` runs their upgrade steps. (#485)
+- **`morca_maintain` on liblake (ABI 4):** expiry and the data view no longer compile iceberg. (#488)
+- **Rust steps on liblake (ABI 5):** `morca.rust_step` no longer compiles iceberg. (#490)
+- Hetzner test flake fixed. (#486)
+
 ## 0.31.0 - 2026-11-14
 
 - **Reliable git download in image builds:** retries across three kernel.org mirrors, sha256 checked. (#470)

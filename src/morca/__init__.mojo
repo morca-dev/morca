@@ -56,9 +56,9 @@ work sized to it). A pipeline declares sensors with `Pipeline[...,
 sensor=True]`; the sensing itself is internal.
 
 `morca.tables`, `morca.keyed` and `morca.rust_step` aren't re-exported
-from `morca`: tables load liblake (#454), and `morca.rust_step` imports
-iceberg, which the `morca` binary and a pipeline without tables don't
-need.
+from `morca`: tables load liblake (#454), and `morca.rust_step` goes
+through it too (#474), which the `morca` binary and a pipeline without
+tables don't need.
 
 **Kept for compatibility, no stability promise.** `morca` still exports
 the run stores (`Store`, `RunStore`, `MemoryStore`, `Recorder`, `RunInfo`,

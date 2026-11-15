@@ -255,6 +255,10 @@ def rust_step(
    commit, not one per batch: morca recognises a step's commits by their
    number after a crash.
 
+Steps 4 to 7 run inside liblake, the library `morca.tables` loads, so a
+proxy pipeline compiles no iceberg: the stream's arrays move to the library
+as they're pulled, without a copy (#474).
+
 Any failure before the commit (the worker's error or panic, a schema or a
 file that doesn't fit, a batch that can't be aligned) fails the attempt,
 and the run's retries apply. Files already written or uploaded are left

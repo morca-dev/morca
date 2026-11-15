@@ -24,6 +24,7 @@ from iceberg.values import iso_text
 from parquet import RecordBatch
 from parquet.display import scalar_json
 
+from morca._internal.datacache import write_file
 from morca._internal.dataask import (
     NESTED,
     Column,
@@ -724,21 +725,34 @@ def csv_json(
     page.offset = 0
     page.limit = a.max_rows
     var r = _read_rows(t, page, cache)
+    # Written whole with write_file, not Mojo's file write, which aborts
+    # the process on a full disk (#483): that's a "csv" error instead.
+    var text = String()
+    for k in range(len(r.columns)):
+        text.write("," if k else "", _csv_field(json_quote(r.columns[k].name)))
+    text.write("\n")
     var n = 0
-    with open(a.csv, "w") as f:
-        var head = String()
-        for k in range(len(r.columns)):
-            head.write(
-                "," if k else "", _csv_field(json_quote(r.columns[k].name))
-            )
-        f.write(head, "\n")
-        for i in range(r.lo, r.hi):
-            ref row = r.cells[r.order[i]]
-            var line = String()
-            for k in range(len(row)):
-                line.write("," if k else "", _csv_field(row[k]))
-            f.write(line, "\n")
-            n += 1
+    for i in range(r.lo, r.hi):
+        ref row = r.cells[r.order[i]]
+        for k in range(len(row)):
+            text.write("," if k else "", _csv_field(row[k]))
+        text.write("\n")
+        n += 1
+    if not write_file(a.csv, text.as_bytes()):
+        out.write(
+            '"csv": {"path": ',
+            json_quote(a.csv),
+            ', "error": ',
+            json_quote(
+                String(
+                    "morca_maintain: can't write the download to ",
+                    a.csv,
+                    ": its disk is full or can't be written",
+                )
+            ),
+            "}",
+        )
+        return
     var stopped = r.stopped.copy()
     if not stopped and r.more:
         stopped = String(

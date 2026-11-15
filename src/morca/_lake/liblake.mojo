@@ -263,3 +263,49 @@ def lake_files_decode(
     buf: Int, n: Int, pos: Int, out_block: Int, err: Int
 ) abi("C") -> Int32:
     return lib.lake_files_decode(buf, n, pos, out_block, err)
+
+
+@export("lake_expire")
+def lake_expire(
+    ask: Int, ask_n: Int, out_block: Int, err: Int
+) abi("C") -> Int32:
+    return lib.lake_expire(ask, ask_n, out_block, err)
+
+
+@export("lake_data")
+def lake_data(
+    args: Int, args_n: Int, out_block: Int, err: Int
+) abi("C") -> Int32:
+    return lib.lake_data(args, args_n, out_block, err)
+
+
+@export("lake_sink_new")
+def lake_sink_new(
+    h: Int, name: Int, name_n: Int, dir: Int, dir_n: Int, flush: Int, err: Int
+) abi("C") -> Int:
+    return lib.lake_sink_new(h, name, name_n, dir, dir_n, flush, err)
+
+
+@export("lake_sink_schema")
+def lake_sink_schema(s: Int, schema: Int, err: Int) abi("C") -> Int32:
+    return lib.lake_sink_schema(s, schema, err)
+
+
+@export("lake_sink_put")
+def lake_sink_put(s: Int, array: Int, err: Int) abi("C") -> Int32:
+    return lib.lake_sink_put(s, array, err)
+
+
+@export("lake_sink_take")
+def lake_sink_take(s: Int, path: Int, path_n: Int, err: Int) abi("C") -> Int32:
+    return lib.lake_sink_take(s, path, path_n, err)
+
+
+@export("lake_sink_finish")
+def lake_sink_finish(s: Int, out_block: Int, err: Int) abi("C") -> Int32:
+    return lib.lake_sink_finish(s, out_block, err)
+
+
+@export("lake_sink_free")
+def lake_sink_free(s: Int) abi("C"):
+    lib.lake_sink_free(s)
