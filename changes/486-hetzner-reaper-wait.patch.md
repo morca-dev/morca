@@ -1,0 +1,1 @@
+- **Hetzner test flake:** tests/hetzner.sh waits for the old scheduler's reaper to finish before reading its log. (#486)
