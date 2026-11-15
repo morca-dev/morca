@@ -1,5 +1,7 @@
 # A PR that changes code adds a changelog fragment, changes/<pr>-<slug>.md
-# (changes/README.md); the label no-changelog skips the check.
+# (changes/README.md); the label no-changelog skips the check. And a PR
+# that changes deploy/hetzner raises the tools' own version,
+# deploy/hetzner/VERSION (#461; scripts/hetzner-version.sh).
 name: changelog
 on:
   pull_request:
@@ -21,3 +23,14 @@ jobs:
           run-install: false
       - run: pixi global install --channel https://mojoshelf.org/channel mojoshelf
       - run: shelf changes check
+
+  hetzner-version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: deploy/hetzner changed only with a new deploy/hetzner/VERSION
+        env:
+          BASE: ${{ github.base_ref }}
+        run: sh scripts/hetzner-version.sh "origin/$BASE"

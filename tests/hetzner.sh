@@ -1142,7 +1142,7 @@ has "public-key-from-file $XDG_CONFIG_HOME/morca-hetzner/keys/laptop.pub"
 rm "$local_env"
 HETZNER_ENV=$shared/hetzner.env sh deploy/hetzner/deploy.sh --dry-run ttt0000 > "$FAKE/out" 2>&1 \
     || fail "deploy.sh --dry-run with no local file"
-has "deploy.sh: stack morca, settings $shared/hetzner.env$"
+has "deploy.sh: stack morca, settings $shared/hetzner.env, scripts $(cat deploy/hetzner/VERSION)$"
 # HETZNER_LOCAL_ENV names another; one that's missing, or that sets NAME, is refused.
 echo "ADMIN_IP=198.51.100.10/32" > "$FAKE/other.local.env"
 HETZNER_ENV=$shared/hetzner.env HETZNER_LOCAL_ENV=$FAKE/other.local.env sh deploy/hetzner/deploy.sh --dry-run ttt0000 > "$FAKE/out" 2>&1 \

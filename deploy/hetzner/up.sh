@@ -1,5 +1,5 @@
 #!/bin/sh
-# up.sh [--dry-run] [--restore <backups/pg/<time>.dump|latest>] [--force] [--yes]
+# up.sh [--dry-run] [--restore <backups/pg/<time>.dump|latest>] [--force] [--yes] [--skip-tools-check]
 #
 # Makes the morca stack on Hetzner Cloud, or brings what exists back to what
 # hetzner.env says; running it again is how drift is fixed. Per step, what
@@ -15,6 +15,13 @@
 # starts (a new server on an empty Volume). --force lets the final apply
 # restart the scheduler although runs are running (it kills them).
 # --dry-run prints every hcloud and ssh command and runs none.
+#
+# First, before any Hetzner resource or the server is touched, it checks
+# that these scripts are new enough for the image the stack runs (lib.sh's
+# check_tools, #461): the tag the server has deployed, or for a new server
+# MORCA_TAG; with neither (a dry run asks the server nothing) it says so
+# and goes on, deploy.sh checking the tag it deploys. --skip-tools-check
+# skips it.
 set -eu
 # shellcheck source=lib.sh
 . "$(dirname "$0")/lib.sh"
@@ -42,6 +49,23 @@ need NAME LOCATION ADMIN_IP
 need_file SSH_PUBLIC_KEY_FILE
 need_settings
 need_tool hcloud ssh jq
+
+# --- these scripts against the image's minimum (check_tools) ----------------
+# The tag the server runs (read only: morca-stack tags), else MORCA_TAG.
+up_tag=
+if exists server "$SERVER"; then
+    IP=$(server_ip)
+    up_tag=$(remote morca-stack tags 2> /dev/null < /dev/null) || up_tag=
+    up_tag=${up_tag#morca }
+    up_tag=${up_tag#orca }
+    up_tag=${up_tag%%,*}
+fi
+up_tag=${up_tag:-${MORCA_TAG:-}}
+if [ -n "$up_tag" ]; then
+    check_tools "$up_tag"
+else
+    echo "up.sh: no tag deployed or in MORCA_TAG: not checking which morca-hetzner the image needs (deploy.sh checks its tag)" >&2
+fi
 
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/morca-hetzner.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT

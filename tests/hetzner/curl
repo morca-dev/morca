@@ -1,0 +1,82 @@
+#!/bin/sh
+# A fake curl for tests/hetzner.sh: the registry check_tools reads (lib.sh,
+# #461). Each URL goes to $FAKE/curl.log, with "(as user)" when curl's
+# config on stdin gives a user (never its password).
+#
+# Every image is a two-platform index whose arm64 and amd64 manifests name
+# one config; the config's dev.morca.hetzner-min label is $FAKE/tools-min/<tag>
+# (none without the file). $FAKE/registry-private makes manifests and blobs
+# answer 401 without the bearer token the token realm hands GHCR_USER
+# (anyone else's token is refused too);
+# $FAKE/registry-down makes every request fail; a tag listed in
+# $FAKE/registry-missing is a 404.
+out=
+dump=
+fmt=
+url=
+fail=0
+stdin=0
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -o) out=$2 && shift ;;
+        -D) dump=$2 && shift ;;
+        -w) fmt=$2 && shift ;;
+        -K) stdin=1 && shift ;;
+        -H | --max-time) shift ;;
+        -f | -fsS) fail=1 ;;
+        -*) ;;
+        *) url=$1 ;;
+    esac
+    shift
+done
+config=
+[ "$stdin" = 0 ] || config=$(cat)
+as=
+case $config in *"user = "*) as=" (as user)" ;; esac
+echo "curl $url$as" >> "$FAKE/curl.log"
+[ ! -f "$FAKE/registry-down" ] || {
+    echo "curl: (6) Could not resolve host" >&2
+    exit 6
+}
+answer() { # CODE BODY
+    [ -z "$dump" ] || printf 'HTTP/1.1 %s\r\n%s\r\n\r\n' "$1" "${hdr:-}" > "$dump"
+    if [ -n "$out" ]; then printf '%s' "$2" > "$out"; else printf '%s' "$2"; fi
+    [ -z "$fmt" ] || printf '%s' "$1"
+    [ "$fail" = 0 ] || [ "$1" = 200 ] || exit 22
+    exit 0
+}
+hdr=
+case $url in
+    https://fake-auth.invalid/token*)
+        # Anyone gets a token, but only GHCR_USER's reads a private image.
+        if [ -n "$as" ]; then answer 200 '{"token":"tok"}'; else answer 200 '{"token":"anon"}'; fi
+        ;;
+esac
+if [ -f "$FAKE/registry-private" ]; then
+    case $config in
+        *"Authorization: Bearer tok"*) ;;
+        *)
+            hdr='www-authenticate: Bearer realm="https://fake-auth.invalid/token",service="fake",scope="repository:x:pull"'
+            answer 401 '{"errors":[{"code":"UNAUTHORIZED"}]}'
+            ;;
+    esac
+fi
+case $url in
+    */manifests/sha256:m-*)
+        t=${url##*/manifests/sha256:m-}
+        answer 200 "{\"mediaType\":\"application/vnd.oci.image.manifest.v1+json\",\"config\":{\"digest\":\"sha256:c-${t%-*}\"}}"
+        ;;
+    */manifests/*)
+        t=${url##*/manifests/}
+        ! grep -qxF "$t" "$FAKE/registry-missing" 2> /dev/null || answer 404 '{"errors":[{"code":"MANIFEST_UNKNOWN"}]}'
+        answer 200 "{\"mediaType\":\"application/vnd.oci.image.index.v1+json\",\"manifests\":[{\"digest\":\"sha256:m-$t-amd64\",\"platform\":{\"os\":\"linux\",\"architecture\":\"amd64\"}},{\"digest\":\"sha256:m-$t-arm64\",\"platform\":{\"os\":\"linux\",\"architecture\":\"arm64\"}},{\"digest\":\"sha256:att\",\"platform\":{\"os\":\"unknown\",\"architecture\":\"unknown\"}}]}"
+        ;;
+    */blobs/sha256:c-*)
+        t=${url##*/blobs/sha256:c-}
+        if [ -f "$FAKE/tools-min/$t" ]; then
+            answer 200 "{\"config\":{\"Labels\":{\"org.opencontainers.image.title\":\"morca-runtime\",\"dev.morca.hetzner-min\":\"$(cat "$FAKE/tools-min/$t")\"}}}"
+        fi
+        answer 200 '{"config":{"Labels":{"org.opencontainers.image.title":"morca-runtime"}}}'
+        ;;
+esac
+answer 404 '{}'

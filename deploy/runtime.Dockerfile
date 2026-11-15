@@ -172,6 +172,13 @@ RUN mkdir -p /opt/morca/pipelines /src/project/.pixi/envs/default \
     && ln -s /opt/morca/ssl /src/project/.pixi/envs/default/ssl
 ARG MORCA_VERSION=""
 LABEL org.opencontainers.image.title="morca-runtime" org.opencontainers.image.version="${MORCA_VERSION}"
+# The oldest deploy/hetzner tools (deploy/hetzner/VERSION) this morca works
+# with: deploy.sh, promote.sh and up.sh read it from the registry and stop
+# when they're older (#461). A project's image built FROM this one inherits
+# it. Raise it, to the tools' new VERSION, when morca comes to need what
+# only newer tools do (a morca-stack command, a setting); it is never above
+# deploy/hetzner/VERSION (scripts/hetzner-version.sh).
+LABEL dev.morca.hetzner-min="0.31.0"
 # postgres.mojo and flare find what they dlopen under $CONDA_PREFIX/lib.
 ENV CONDA_PREFIX=/opt/morca LD_LIBRARY_PATH=/opt/morca/lib PATH=/opt/morca/bin:/opt/morca/pipelines:/usr/bin:/bin \
     LLVM_SYMBOLIZER_PATH=/opt/morca/libexec/llvm-symbolizer GIT_EXEC_PATH=/opt/morca/libexec/git

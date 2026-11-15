@@ -69,7 +69,10 @@ Cloudflare ---- tunnel ------>| cloudflared -> ui:8270, console:8080            
 
 The scripts don't need a checkout of morca: each release has them as
 `morca-hetzner-<version>.tar.gz`, which unpacks to `morca-hetzner-<version>/`
-(its `VERSION` file says which, and the scripts print it). The newest:
+(its `VERSION` file says which, and the scripts print it). `<version>` is the
+tools' own version, not morca's: it moves only when the scripts change, so
+most morca releases ship the same tools again ([Which tools a deploy
+needs](#which-tools-a-deploy-needs)). The newest:
 
 ```sh
 curl -fsSL https://github.com/morca-dev/morca/releases/latest/download/morca-hetzner.tar.gz | tar -xz
@@ -331,6 +334,39 @@ once memory is nearly full, which pressure should keep from happening.
 The tag is the project's image tag: see [Images](#images). This replaces
 `morca aws app` and `morca aws up` for code changes, and needs `hcloud` with a
 context like `up.sh`.
+
+### Which tools a deploy needs
+
+The scripts (`morca-hetzner`) have a version of their own,
+`deploy/hetzner/VERSION`, raised only when something under `deploy/hetzner`
+changes (CI fails a pull request that changes it without). A morca release
+attaches them as `morca-hetzner-<tools version>.tar.gz`, the same name as
+the release before when they didn't change, and as `morca-hetzner.tar.gz`.
+
+The scripts and the server's morca are coupled (`morca-stack can-overlap`,
+`drain-old`, `register`, upgrade steps, a required setting such as
+`DRAIN_SECONDS`), so an image says which tools it needs: its label
+`dev.morca.hetzner-min`, the oldest `morca-hetzner` that knows what its
+morca asks of the server. The runtime image sets it
+([`deploy/runtime.Dockerfile`](../deploy/runtime.Dockerfile)), and a
+project's image built `FROM` it inherits it. Before they touch the server,
+`deploy.sh`, `promote.sh` (through `deploy.sh`) and `up.sh` read the
+label from the registry (`curl`; a private image as `GHCR_USER` with
+`ghcr-token`) and stop when they're older:
+
+```text
+deploy.sh: ghcr.io/morca-dev/census:a1b2c3d needs morca-hetzner >= 0.32.0, and these scripts are 0.31.0: get the newest with curl -fsSL https://github.com/morca-dev/morca/releases/latest/download/morca-hetzner.tar.gz | tar -xz, and run them from morca-hetzner-<version>/; nothing was changed on the server
+```
+
+So you need new tools only when that check says so, or when a release's
+changelog names a change to them. Newer tools keep working with older
+images: an image without the label (from before it, morca 0.31.0 and
+older) has no minimum and is deployed as before. `up.sh` checks the tag
+the server runs (a new server: `MORCA_TAG`; with neither it says so and
+goes on); `deploy.sh --rollback` doesn't check, the scripts having deployed
+those tags before. A registry that can't be read, or a tag it hasn't,
+stops the deploy (a dry run only warns); `--skip-tools-check` goes on
+without the check.
 
 ### Settings from `hetzner.env`
 
@@ -1195,7 +1231,10 @@ FROM ghcr.io/morca-dev/morca-runtime:${MORCA_VERSION}
 COPY --from=build /out/bin /opt/morca/bin
 ```
 
-and build it with `--build-arg MORCA_VERSION=<the morca it pins>`. A
+and build it with `--build-arg MORCA_VERSION=<the morca it pins>`. An
+image that isn't built `FROM` the runtime has no `dev.morca.hetzner-min`
+unless it sets one (`LABEL dev.morca.hetzner-min="<the runtime's>"`), and
+so no [tools check](#which-tools-a-deploy-needs). A
 `RUN` in a stage `FROM` the runtime runs busybox `sh`: there is no bash or
 apt-get there, so install packages in a build stage and copy them in. A
 `Dockerfile.morca` that builds everything itself, like the census's today,
