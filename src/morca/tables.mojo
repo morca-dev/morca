@@ -137,11 +137,11 @@ to fall back on.
 """
 from std.memory import bitcast
 
-from arrow_mlake.carrow_import import ImportedArray, ImportedStream
 from dista import Codec
 from parquet import RecordBatch
 
 from morca.ctx import Ctx
+from morca._internal.lakehost import HostBlock
 from morca._lake.abi import (
     MODE_APPEND,
     MODE_BY_STEP,
@@ -150,16 +150,10 @@ from morca._lake.abi import (
     SNAP_NONE,
     Dec,
     Enc,
-    Slots,
 )
-from morca._lake.client import (
-    Api,
-    Exported,
-    HostBlock,
-    api,
-    take_bytes,
-    take_error,
-)
+from morca._lake.calls import NoHost
+from morca._lake.client import Api, Exported, api
+import morca._lake.calls as lake
 from morca._lake.batch import (
     BatchBuilder,
     column_of,
@@ -280,7 +274,7 @@ struct TableMeta(Copyable, Movable):
         return self.properties.get(key, default)
 
 
-def _meta_of(mut d: Dec) raises -> Tuple[TableMeta, String]:
+def _meta_of(mut d: Dec[_]) raises -> Tuple[TableMeta, String]:
     var m = TableMeta()
     m.location = d.str()
     var metadata_location = d.str()
@@ -347,14 +341,9 @@ struct Table(Copyable, Movable):
 
     def _mirror(mut self) raises:
         """Takes the library's metadata again."""
-        var got = Slots()
-        var err = Slots()
-        if self._api.table_meta(self.handle, got.addr, err.addr) != 0:
-            raise take_error(self._api, err)
-        var b = take_bytes(self._api, got)
-        var d = Dec(Int(b.unsafe_ptr()), len(b))
+        var b = lake.table_meta(self._api, self.handle)
+        var d = Dec(b)
         var meta = _meta_of(d)
-        _ = b^
         self.metadata = meta[0].copy()
         self.metadata_location = meta[1].copy()
 
@@ -363,13 +352,7 @@ struct Table(Copyable, Movable):
         """The table at `location`, a directory or in object storage
         (`s3://...`, configured from the `AWS_*` environment)."""
         var a = api()
-        var err = Slots()
-        var h = a.load(
-            Int(location.unsafe_ptr()), location.byte_length(), err.addr
-        )
-        if h == 0:
-            raise take_error(a, err)
-        return Table(h, a)
+        return Table(lake.load(a, location), a)
 
     @staticmethod
     def load_local(location: String) raises -> Table:
@@ -377,50 +360,18 @@ struct Table(Copyable, Movable):
 
     def refresh(mut self) raises:
         """Takes the table's latest metadata."""
-        var err = Slots()
-        if self._api.table_refresh(self.handle, err.addr) != 0:
-            raise take_error(self._api, err)
+        lake.table_refresh(self._api, self.handle)
         self._mirror()
 
     def read_file(self, path: String) raises -> List[RecordBatch]:
         """The rows of a Parquet file read through the table's IO: one this
         run wrote (`FileWriter`) and hasn't committed, which no scan sees."""
-        var got = Slots(1)
-        var err = Slots()
-        var rc = self._api.read_file(
-            self.handle,
-            Int(path.unsafe_ptr()),
-            path.byte_length(),
-            got.addr,
-            err.addr,
-        )
-        if rc != 0:
-            raise take_error(self._api, err)
-        var out = List[RecordBatch]()
-        if got[0] == 0:
-            return out^
-        var s = ImportedStream(got[0])
-        while True:
-            var b = s.next()
-            if not b:
-                break
-            out.append(b.take())
-        return out^
+        return lake.read_file(self._api, self.handle, path)
 
     def delete_file(self, path: String) raises:
         """Deletes a file through the table's IO: one this run wrote and
         won't commit. A committed file is the table's to remove (`commit`)."""
-        var err = Slots()
-        if (
-            self._api.delete_file(
-                self.handle,
-                Int(path.unsafe_ptr()),
-                path.byte_length(),
-                err.addr,
-            )
-            != 0
-        ):
-            raise take_error(self._api, err)
+        lake.delete_file(self._api, self.handle, path)
 
     def scan(self) -> TableScan:
         """A scan of the current snapshot: nothing pinned or checked (`scan`
@@ -430,20 +381,9 @@ struct Table(Copyable, Movable):
     def append(mut self, batches: List[RecordBatch]) raises -> Int64:
         """Iceberg's own append, outside any step: nothing is checked or
         recorded, and a retry appends again. Steps use `append`."""
-        var ex = Exported(batches)
-        var err = Slots()
-        var id = self._api.append(
-            0,
-            self.handle,
-            ex.n(),
-            ex.arrays_addr(),
-            ex.schemas_addr(),
-            MODE_APPEND,
-            err.addr,
+        var id = lake.append(
+            self._api, NoHost(), self.handle, Exported(batches), MODE_APPEND
         )
-        _ = ex^  # released after the library has read them
-        if id == -2:
-            raise take_error(self._api, err)
         self._mirror()
         return id
 
@@ -453,42 +393,20 @@ def load_dataset(dataset: String) raises -> Table:
     For reading what isn't a step's input, such as a keyed pipeline's keys
     (`morca.keyed`), and for a dista task's `write_files`."""
     var a = api()
-    var err = Slots()
-    var h = a.load_dataset(
-        Int(dataset.unsafe_ptr()), dataset.byte_length(), err.addr
-    )
-    if h == 0:
-        raise take_error(a, err)
-    return Table(h, a)
+    return Table(lake.load_dataset(a, dataset), a)
 
 
 def table_exists(dataset: String) raises -> Bool:
     """Whether the warehouse has `dataset`'s table, outside any step: nothing
     is checked or recorded. Raises only when there's no warehouse
     (`MORCA_WAREHOUSE`)."""
-    var a = api()
-    var yes = Slots(1)
-    var err = Slots()
-    var rc = a.table_exists(
-        Int(dataset.unsafe_ptr()), dataset.byte_length(), yes.addr, err.addr
-    )
-    if rc != 0:
-        raise take_error(a, err)
-    return yes[0] != 0
+    return lake.table_exists(api(), dataset)
 
 
 def table(mut ctx: Ctx, dataset: String) raises -> Table:
     """The table of a dataset the step declared it reads or writes."""
     var a = api()
-    var host = HostBlock(ctx)
-    var err = Slots()
-    var h = a.table(
-        host.addr, Int(dataset.unsafe_ptr()), dataset.byte_length(), err.addr
-    )
-    _ = host^
-    if h == 0:
-        raise take_error(a, err)
-    return Table(h, a)
+    return Table(lake.table(a, HostBlock(ctx), dataset), a)
 
 
 def ensure_table(
@@ -522,30 +440,11 @@ def ensure_table(
     history the scheduler's expiry keeps.
     """
     var a = api()
-    var s = schema.to_json()
-    var p = spec.to_json()
     var props = Enc()
     props.map(properties)
-    var host = HostBlock(ctx)
-    var err = Slots()
-    var h = a.ensure_table(
-        host.addr,
-        Int(dataset.unsafe_ptr()),
-        dataset.byte_length(),
-        Int(s.unsafe_ptr()),
-        s.byte_length(),
-        Int(p.unsafe_ptr()),
-        p.byte_length(),
-        props.addr(),
-        len(props),
-        err.addr,
+    var h = lake.ensure_table(
+        a, HostBlock(ctx), dataset, schema.to_json(), spec.to_json(), props
     )
-    _ = host^
-    _ = s^
-    _ = p^
-    _ = props^
-    if h == 0:
-        raise take_error(a, err)
     return Table(h, a)
 
 
@@ -568,7 +467,7 @@ struct PartitionValue(Copyable, Movable):
     var valid: Bool
 
 
-def _partition_of(mut d: Dec) raises -> List[PartitionValue]:
+def _partition_of(mut d: Dec[_]) raises -> List[PartitionValue]:
     var out = List[PartitionValue]()
     for _ in range(Int(d.int())):
         var valid = d.bool()
@@ -670,26 +569,7 @@ struct TableScan(Copyable, Movable):
     def to_batches_for_paths(
         self, paths: List[String]
     ) raises -> List[RecordBatch]:
-        ref a = self.table._api
-        var o = self._opts(paths)
-        var stream = Slots(1)
-        var err = Slots()
-        var rc = a.scan(
-            self.table.handle, o.addr(), len(o), stream.addr, err.addr
-        )
-        _ = o^
-        if rc != 0:
-            raise take_error(a, err)
-        var out = List[RecordBatch]()
-        if stream[0] == 0:
-            return out^
-        var s = ImportedStream(stream[0])
-        while True:
-            var b = s.next()
-            if not b:
-                break
-            out.append(b.take())
-        return out^
+        return lake.scan(self.table._api, self.table.handle, self._opts(paths))
 
     def to_batches(self) raises -> List[RecordBatch]:
         """The rows, as batches."""
@@ -701,16 +581,10 @@ struct TableScan(Copyable, Movable):
         folds the rows holds a file's batches rather than the scan's.
         Planning happens here, so a bad snapshot raises from this call."""
         ref a = self.table._api
-        var o = self._opts(List[String]())
-        var r = Slots(1)
-        var err = Slots()
-        var rc = a.reader_open(
-            self.table.handle, o.addr(), len(o), r.addr, err.addr
+        var r = lake.reader_open(
+            a, self.table.handle, self._opts(List[String]())
         )
-        _ = o^
-        if rc != 0:
-            raise take_error(a, err)
-        return BatchReader(r[0], a)
+        return BatchReader(r, a)
 
     def to_batches_for_tasks(
         self, tasks: List[FileScanTask]
@@ -724,18 +598,10 @@ struct TableScan(Copyable, Movable):
         return self.to_batches_for_paths(paths)
 
     def plan_files(self) raises -> List[FileScanTask]:
-        ref a = self.table._api
-        var o = self._opts(List[String]())
-        var got = Slots()
-        var err = Slots()
-        var rc = a.plan_files(
-            self.table.handle, o.addr(), len(o), got.addr, err.addr
+        var b = lake.plan_files(
+            self.table._api, self.table.handle, self._opts(List[String]())
         )
-        _ = o^
-        if rc != 0:
-            raise take_error(a, err)
-        var b = take_bytes(a, got)
-        var d = Dec(Int(b.unsafe_ptr()), len(b))
+        var d = Dec(b)
         var tasks = List[FileScanTask]()
         for _ in range(Int(d.int())):
             var path = d.str()
@@ -759,20 +625,13 @@ struct TableScan(Copyable, Movable):
                     deletes,
                 )
             )
-        _ = b^
         return tasks^
 
     def count(self) raises -> Int64:
         """How many rows the scan returns."""
-        ref a = self.table._api
-        var o = self._opts(List[String]())
-        var n = Slots(1)
-        var err = Slots()
-        var rc = a.count(self.table.handle, o.addr(), len(o), n.addr, err.addr)
-        _ = o^
-        if rc != 0:
-            raise take_error(a, err)
-        return Int64(n[0])
+        return lake.count(
+            self.table._api, self.table.handle, self._opts(List[String]())
+        )
 
 
 struct BatchReader(Movable):
@@ -794,19 +653,11 @@ struct BatchReader(Movable):
         """The next batch, or nothing once the scan is done."""
         if self.handle == 0:
             return None
-        var arr = Slots(1)
-        var sch = Slots(1)
-        var err = Slots()
-        var rc = self._api.reader_next(
-            self.handle, arr.addr, sch.addr, err.addr
-        )
-        if rc != 0:
-            raise take_error(self._api, err)
-        if arr[0] == 0:
+        var b = lake.reader_next(self._api, self.handle)
+        if not b:
             self._api.reader_free(self.handle)
             self.handle = 0
-            return None
-        return ImportedArray(arr[0], sch[0]).into_batch()
+        return b^
 
 
 def scan(mut ctx: Ctx, table: Table) raises -> TableScan:
@@ -815,15 +666,8 @@ def scan(mut ctx: Ctx, table: Table) raises -> TableScan:
     A table that had no snapshot when it was first read stays empty for the
     step: the scan sees no files even if some were committed since.
     """
-    ref a = table._api
-    var host = HostBlock(ctx)
-    var id = Slots(1)
-    var err = Slots()
-    var rc = a.pin(host.addr, table.handle, id.addr, err.addr)
-    _ = host^
-    if rc != 0:
-        raise take_error(a, err)
-    return TableScan(table.copy(), Int64(id[0]))
+    var id = lake.pin(table._api, HostBlock(ctx), table.handle)
+    return TableScan(table.copy(), id)
 
 
 def find_commit(ctx: Ctx, table: Table) -> Int64:
@@ -834,10 +678,7 @@ def find_commit(ctx: Ctx, table: Table) -> Int64:
     before committing them, such as a compaction, checks it first, so a retry
     of an attempt that committed doesn't write the files again.
     """
-    var host = HostBlock(ctx)
-    var id = table._api.find_commit(host.addr, table.handle)
-    _ = host^
-    return id
+    return lake.find_commit(table._api, HostBlock(ctx), table.handle)
 
 
 # ── written files ───────────────────────────────────────────────────────────
@@ -861,7 +702,7 @@ struct DataFiles(Codec, Copyable, Movable, Sized):
         if len(self.bytes) < 8:
             return 0
         try:
-            var d = Dec(Int(self.bytes.unsafe_ptr()), len(self.bytes))
+            var d = Dec(self.bytes)
             return Int(d.int())
         except:
             return 0
@@ -873,41 +714,15 @@ struct DataFiles(Codec, Copyable, Movable, Sized):
         if len(self.bytes) == 0:
             self.bytes = other.bytes.copy()
             return
-        var a = api()
-        var got = Slots()
-        var err = Slots()
-        var rc = a.files_concat(
-            Int(self.bytes.unsafe_ptr()),
-            len(self.bytes),
-            Int(other.bytes.unsafe_ptr()),
-            len(other.bytes),
-            got.addr,
-            err.addr,
-        )
-        if rc != 0:
-            raise take_error(a, err)
-        self.bytes = take_bytes(a, got)
+        self.bytes = lake.files_concat(api(), self.bytes, other.bytes)
 
     def files(self) raises -> List[DataFile]:
         """What each entry shows."""
         var out = List[DataFile]()
         if len(self.bytes) == 0:
             return out^
-        var a = api()
-        var buf = Slots()
-        var err = Slots()
-        if (
-            a.files_info(
-                Int(self.bytes.unsafe_ptr()),
-                len(self.bytes),
-                buf.addr,
-                err.addr,
-            )
-            != 0
-        ):
-            raise take_error(a, err)
-        var b = take_bytes(a, buf)
-        var d = Dec(Int(b.unsafe_ptr()), len(b))
+        var b = lake.files_info(api(), self.bytes)
+        var d = Dec(b)
         for _ in range(Int(d.int())):
             var p = d.str()
             var content = Int(d.int())
@@ -917,7 +732,6 @@ struct DataFiles(Codec, Copyable, Movable, Sized):
             out.append(
                 DataFile(p^, content, records, size, key^, _partition_of(d))
             )
-        _ = b^
         return out^
 
     def encode(self, mut out: List[UInt8]):
@@ -929,20 +743,7 @@ struct DataFiles(Codec, Copyable, Movable, Sized):
 
     @staticmethod
     def decode(buf: Span[UInt8, _], mut pos: Int) raises -> Self:
-        var a = api()
-        var at = Slots(1)
-        Pointer[Int, MutUntrackedOrigin](unsafe_from_address=at.addr)[] = pos
-        var got = Slots()
-        var err = Slots()
-        if (
-            a.files_decode(
-                Int(buf.unsafe_ptr()), len(buf), at.addr, got.addr, err.addr
-            )
-            != 0
-        ):
-            raise take_error(a, err)
-        pos = at[0]
-        var b = take_bytes(a, got)
+        var b = lake.files_decode(api(), buf, pos)
         if len(b) == 8 and Self(b.copy()).__len__() == 0:
             return Self()
         return Self(b^)
@@ -983,7 +784,7 @@ struct WriteOptions(Copyable, Equatable, Movable):
         return e^
 
     @staticmethod
-    def _dec(mut d: Dec) raises -> Self:
+    def _dec(mut d: Dec[_]) raises -> Self:
         var codec = d.str()
         var rows = Int(d.int())
         var page = Int(d.int())
@@ -1022,17 +823,11 @@ struct FileWriter(Movable):
 
     def __init__(out self, table: Table) raises:
         self._api = table._api.copy()
-        var err = Slots()
-        self.handle = self._api.writer_new(table.handle, err.addr)
+        self.handle = lake.writer_new(self._api, table.handle)
         self.rows = 0
-        if self.handle == 0:
-            raise take_error(self._api, err)
-        var got = Slots()
-        self._api.writer_options(self.handle, got.addr)
-        var b = take_bytes(self._api, got)
-        var d = Dec(Int(b.unsafe_ptr()), len(b))
+        var b = lake.writer_options(self._api, self.handle)
+        var d = Dec(b)
         self.options = WriteOptions._dec(d)
-        _ = b^
         self._sent = self.options.copy()
 
     def _write(mut self, batches: List[RecordBatch], row_group: Bool) raises:
@@ -1041,22 +836,9 @@ struct FileWriter(Movable):
         var o = Enc()
         if self.options != self._sent:
             o = self.options._enc()
-        var ex = Exported(batches)
-        var err = Slots()
-        var rc = self._api.writer_write(
-            self.handle,
-            o.addr(),
-            len(o),
-            ex.n(),
-            ex.arrays_addr(),
-            ex.schemas_addr(),
-            1 if row_group else 0,
-            err.addr,
+        lake.writer_write(
+            self._api, self.handle, o, Exported(batches), row_group
         )
-        _ = ex^
-        _ = o^
-        if rc != 0:
-            raise take_error(self._api, err)
         self._sent = self.options.copy()
 
     def write(mut self, batches: List[RecordBatch]) raises:
@@ -1080,17 +862,11 @@ struct FileWriter(Movable):
     def close_files(mut self) raises:
         """Ends the files `write_row_group` has open; their entries are
         `finish`'s with the rest."""
-        var err = Slots()
-        if self._api.writer_close(self.handle, err.addr) != 0:
-            raise take_error(self._api, err)
+        lake.writer_close(self._api, self.handle)
 
     def finish(deinit self) raises -> DataFiles:
         """The entries of every file written, open ones ended first."""
-        var got = Slots()
-        var err = Slots()
-        if self._api.writer_finish(self.handle, got.addr, err.addr) != 0:
-            raise take_error(self._api, err)
-        return DataFiles(take_bytes(self._api, got))
+        return DataFiles(lake.writer_finish(self._api, self.handle))
 
     def __deinit__(deinit self):
         self._api.writer_free(self.handle)
@@ -1101,22 +877,9 @@ def write_files(table: Table, batches: List[RecordBatch]) raises -> DataFiles:
     and returns their entries, for `append_files` to commit, here or in
     another process. Nothing is checked or recorded: it's for a dista task,
     which has no `Ctx`, with the table from `load_dataset`."""
-    ref a = table._api
-    var ex = Exported(batches)
-    var got = Slots()
-    var err = Slots()
-    var rc = a.write_files(
-        table.handle,
-        ex.n(),
-        ex.arrays_addr(),
-        ex.schemas_addr(),
-        got.addr,
-        err.addr,
+    return DataFiles(
+        lake.write_files(table._api, table.handle, Exported(batches))
     )
-    _ = ex^
-    if rc != 0:
-        raise take_error(a, err)
-    return DataFiles(take_bytes(a, got))
 
 
 struct FileChanges(Copyable, Defaultable, Movable):
@@ -1146,22 +909,9 @@ struct FileChanges(Copyable, Defaultable, Movable):
 def _append(
     mut ctx: Ctx, mut table: Table, batches: List[RecordBatch], mode: Int
 ) raises -> Int64:
-    var ex = Exported(batches)
-    var host = HostBlock(ctx)
-    var err = Slots()
-    var id = table._api.append(
-        host.addr,
-        table.handle,
-        ex.n(),
-        ex.arrays_addr(),
-        ex.schemas_addr(),
-        mode,
-        err.addr,
+    var id = lake.append(
+        table._api, HostBlock(ctx), table.handle, Exported(batches), mode
     )
-    _ = host^
-    _ = ex^
-    if id == -2:
-        raise take_error(table._api, err)
     table._mirror()
     return id
 
@@ -1195,19 +945,9 @@ def replace_partitions(
 def _append_files(
     mut ctx: Ctx, mut table: Table, files: DataFiles, mode: Int
 ) raises -> Int64:
-    var host = HostBlock(ctx)
-    var err = Slots()
-    var id = table._api.append_files(
-        host.addr,
-        table.handle,
-        Int(files.bytes.unsafe_ptr()),
-        len(files.bytes),
-        mode,
-        err.addr,
+    var id = lake.append_files(
+        table._api, HostBlock(ctx), table.handle, files.bytes, mode
     )
-    _ = host^
-    if id == -2:
-        raise take_error(table._api, err)
     table._mirror()
     return id
 
@@ -1260,20 +1000,6 @@ def commit(
     e.bytes(Span(files.added_data.bytes))
     e.bytes(Span(files.added_deletes.bytes))
     e.strs(files.removed)
-    var host = HostBlock(ctx)
-    var err = Slots()
-    var id = table._api.commit(
-        host.addr,
-        table.handle,
-        Int(operation.unsafe_ptr()),
-        operation.byte_length(),
-        e.addr(),
-        len(e),
-        err.addr,
-    )
-    _ = host^
-    _ = e^
-    if id == -2:
-        raise take_error(table._api, err)
+    var id = lake.commit(table._api, HostBlock(ctx), table.handle, operation, e)
     table._mirror()
     return id

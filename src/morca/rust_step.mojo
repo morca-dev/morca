@@ -87,7 +87,8 @@ from morca.ctx import Ctx
 from morca._internal.handover import outdated
 from morca._internal.rust_ffi import StopFn, WorkerCall, WorkerLib
 from morca._lake.abi import Dec, Slots
-from morca._lake.client import Api, take_bytes, take_error
+from morca._lake import calls
+from morca._lake.client import Api
 from morca._lake.names import dataset_of
 from morca.tables import DataFiles, Table, append_files, find_commit
 
@@ -223,51 +224,28 @@ struct _Sink(Movable):
         out self, table: Table, name: String, dir: String, flush_bytes: Int
     ) raises:
         self._api = table._api.copy()
-        var err = Slots()
-        self.handle = self._api.sink_new(
-            table.handle,
-            Int(name.unsafe_ptr()),
-            name.byte_length(),
-            Int(dir.unsafe_ptr()),
-            dir.byte_length(),
-            flush_bytes,
-            err.addr,
+        self.handle = calls.sink_new(
+            self._api, table.handle, name, dir, flush_bytes
         )
-        if self.handle == 0:
-            raise take_error(self._api, err)
 
     def check(mut self, stream_schema: Int) raises:
         """Checks the stream's schema, which must outlive the sink."""
-        var err = Slots()
-        if self._api.sink_schema(self.handle, stream_schema, err.addr) != 0:
-            raise take_error(self._api, err)
+        calls.sink_schema(self._api, self.handle, stream_schema)
 
     def put(mut self, array: Int) raises:
         """Moves the `ArrowArray` at `array` to the library."""
-        var err = Slots()
-        if self._api.sink_put(self.handle, array, err.addr) != 0:
-            raise take_error(self._api, err)
+        calls.sink_put(self._api, self.handle, array)
 
     def take(mut self, path: String) raises:
-        var err = Slots()
-        var rc = self._api.sink_take(
-            self.handle, Int(path.unsafe_ptr()), path.byte_length(), err.addr
-        )
-        if rc != 0:
-            raise take_error(self._api, err)
+        calls.sink_take(self._api, self.handle, path)
 
     def finish(deinit self) raises -> _Output:
-        var got = Slots()
-        var err = Slots()
-        if self._api.sink_finish(self.handle, got.addr, err.addr) != 0:
-            raise take_error(self._api, err)
-        var b = take_bytes(self._api, got)
-        var d = Dec(Int(b.unsafe_ptr()), len(b))
+        var b = calls.sink_finish(self._api, self.handle)
+        var d = Dec(Span(b))
         var files = DataFiles(d.bytes())
         var rows = Int(d.int())
         var n_own = Int(d.int())
         var own_rows = Int(d.int())
-        _ = b^  # decoded before it goes: `Dec` doesn't copy
         return _Output(files^, rows, n_own, own_rows)
 
     def __deinit__(deinit self):

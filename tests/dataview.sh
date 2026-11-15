@@ -2,7 +2,7 @@
 # A dataset's Data tab (#435, morca._internal.ui.data) over lake.obs, which
 # tests/dataview/obs.mojo writes: 150 rows a month, partitioned by month
 # and city, for 2024-01 and 2024-02. morca ui reads it through
-# morca_maintain data (morca._internal.dataread):
+# morca_maintain data (morca._lake.dataread):
 #
 # - the schema (field ids, types, docs) and the partition spec;
 # - the partitions, from the manifests: rows, files, bytes, last snapshot;

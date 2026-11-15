@@ -1,4 +1,4 @@
-"""The data view's disk cache (morca._internal.datacache, #483): what it
+"""The data view's disk cache (morca._lake.datacache, #483): what it
 writes ends with its length and hash, and a file cut short or changed is a
 miss that removes it; statvfs reads the same free space as df; below the
 free space to keep it writes nothing and empties itself; and a write to a
@@ -14,7 +14,7 @@ from std.os.path import exists
 from std.sys import argv
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
-from morca._internal.datacache import (
+from morca._lake.datacache import (
     DataCache,
     cache_name,
     checked,

@@ -1,6 +1,6 @@
 """The library's view of the step: the methods of `morca.Ctx` that the tables
 code uses, each a call through the host block (`morca._lake.abi`). The
-wrapper fills the block (`morca._lake.client.HostBlock`)."""
+program fills the block (`morca._internal.lakehost.HostBlock`)."""
 
 from morca._lake.abi import (
     CheckDeclaredFn,
@@ -26,7 +26,7 @@ from morca._lake.abi import (
     H_SAME_RUN,
     H_STATE,
     H_SUMMARY,
-    Dec,
+    RawDec,
     Slots,
     decode_map,
     encode_map,
@@ -136,24 +136,29 @@ struct Host(Copyable, Movable):
         return decode_map(p, n[0])
 
     def same_run(self, summary: Dict[String, String]) -> Bool:
-        var s = encode_map(summary)
+        return self._same_run(encode_map(summary))
+
+    def _same_run(self, s: List[UInt8]) -> Bool:
+        """`s` is borrowed for the call, so it outlives the callback that
+        reads it through its address."""
         var f = _fn[SameRunFn](self.block, H_SAME_RUN)
-        var r = f(self._state(), Int(s.unsafe_ptr()), len(s))
-        _ = s^  # alive across the call: its address went as an integer
-        return r != 0
+        return f(self._state(), Int(s.unsafe_ptr()), len(s)) != 0
 
     def made(self, table: String, summary: Dict[String, String]) -> Bool:
-        var s = encode_map(summary)
+        return self._made(table, encode_map(summary))
+
+    def _made(self, table: String, s: List[UInt8]) -> Bool:
         var f = _fn[MadeFn](self.block, H_MADE)
-        var r = f(
-            self._state(),
-            Int(table.unsafe_ptr()),
-            table.byte_length(),
-            Int(s.unsafe_ptr()),
-            len(s),
+        return (
+            f(
+                self._state(),
+                Int(table.unsafe_ptr()),
+                table.byte_length(),
+                Int(s.unsafe_ptr()),
+                len(s),
+            )
+            != 0
         )
-        _ = s^
-        return r != 0
 
     def log(self, msg: String):
         _fn[LogFn](self.block, H_LOG)(
@@ -165,7 +170,7 @@ struct Host(Copyable, Movable):
         var p = _fn[TextFn](self.block, H_COMMITS)(self._state(), n.addr)
         var out = List[HostCommit]()
         try:
-            var d = Dec(p, n[0])
+            var d = RawDec(p, n[0])
             for _ in range(Int(d.int())):
                 var t = d.str()
                 out.append(HostCommit(t^, d.int()))

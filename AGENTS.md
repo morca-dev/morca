@@ -20,7 +20,12 @@ go in the PR.
   below it, never one that imports it back, directly or through others.
   Mojo compiles a cycle, so the compiler won't catch one. When two modules
   need each other, move what they share into a lower module, or pass a
-  function or value in from the caller, instead.
+  function or value in from the caller, instead. The packages are layers
+  too: `morca._common` imports nothing of morca's, `morca._lake` (liblake
+  and the plumbing that calls it) imports only `morca._common`, and
+  `morca._internal` and the public modules may import both. `_lake` never
+  imports `_internal`, `morca.ctx` or another public module, even for one
+  helper: what both need goes in `_common`.
 
 ## Migrations
 

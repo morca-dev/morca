@@ -22,8 +22,8 @@ from morca._internal.fill import (
     fill_max_runs_auto,
     parse_fill_max_runs,
 )
+from morca._common.paths import absolute
 from morca._internal.proc import (
-    absolute,
     binary_seconds,
     capture,
 )

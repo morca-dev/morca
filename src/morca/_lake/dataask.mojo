@@ -1,5 +1,5 @@
 """What the UI's data view asks `morca_maintain data` for (#435,
-`morca._internal.dataread`): the dataset, the snapshot, the filters, the
+`morca._lake.dataread`): the dataset, the snapshot, the filters, the
 columns, the sort, the page, the chart and the limits; and the table's
 columns, with the filters as iceberg's filter DSL, each value typed by its
 column."""

@@ -6,7 +6,7 @@ the library's `morca._lake.expire_impl` does the expiry.
 
 from std.memory import bitcast
 
-from morca._lake.abi import Dec, Enc
+from morca._lake.abi import Dec, Enc, RawDec
 
 
 @fieldwise_init
@@ -39,7 +39,7 @@ struct ExpireAsk(Copyable, Movable):
 
     @staticmethod
     def decode(addr: Int, n: Int) raises -> Self:
-        var d = Dec(addr, n)
+        var d = RawDec(addr, n)
         var dataset = d.str()
         var older = d.int()
         var keep = Int(d.int())
@@ -134,8 +134,8 @@ struct Expiry(Copyable, Movable, Writable):
         return e^
 
     @staticmethod
-    def decode(addr: Int, n: Int) raises -> Self:
-        var d = Dec(addr, n)
+    def decode(b: Span[UInt8, _]) raises -> Self:
+        var d = Dec(b)
         var dataset = d.str()
         var skipped = d.str()
         var dry_run = d.bool()
