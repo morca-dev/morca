@@ -1,0 +1,1 @@
+- **The Data tab puts the table first:** a bar at the top picks the commit (newest first, searchable, with arrows, in the URL) and shows its row count, then Data and Schema tabs, with each column's type under its header. (#PR)

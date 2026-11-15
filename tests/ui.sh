@@ -1054,5 +1054,14 @@ echo "$css" | grep -qF 'td.names a { white-space: nowrap; }' || fail "a name in 
 html /pipelines/wrap_r1 | grep -qF '<td class="names"><a href="/datasets/wrap.in">wrap.in</a> <a class="data-link" href="/datasets/wrap.in?tab=data" title="wrap.in&#39;s data">data</a></td><td class="names"></td>' \
     || fail "the pipeline's Reads and Writes cells aren't class names"
 echo "ok   long Read by lists wrap between names"
+
+# The Data tab's layout (#499): its bar, tabs and the table's sticky header
+# are in the stylesheet, and tabs marked data-tabs-forget keep no choice, so
+# the Data tab opens on Data.
+for rule in '.dbar {' '.dpick__item[aria-current]' '.dview__head {' '.dtable thead th { position: sticky;' '.dtype {'; do
+    echo "$css" | grep -qF "$rule" || fail "the stylesheet has no $rule"
+done
+html / | grep -qF 'if (!sec.hasAttribute("data-tabs-forget")) put(sec.dataset.tabs, v);' || fail "data-tabs-forget still keeps the choice"
+echo "ok   the Data tab's bar, tabs and table styles"
 kill "$pid"
 echo "ok   ui"

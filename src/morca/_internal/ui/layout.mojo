@@ -313,12 +313,12 @@ comptime _TABS = """
       const panel = document.getElementById(a.getAttribute("aria-controls"));
       if (panel) panel.hidden = a.dataset.view !== v;
     }
-    if (save) { chosen[sec.dataset.tabs] = v; put(sec.dataset.tabs, v); }
+    if (save) { chosen[sec.dataset.tabs] = v; if (!sec.hasAttribute("data-tabs-forget")) put(sec.dataset.tabs, v); }
   };
   const init = (root) => {
     for (const sec of root.querySelectorAll("[data-tabs]")) {
       const asked = new URLSearchParams(location.search).get(sec.dataset.tabsParam);
-      show(sec, chosen[sec.dataset.tabs] || asked || get(sec.dataset.tabs), false);
+      show(sec, chosen[sec.dataset.tabs] || asked || (sec.hasAttribute("data-tabs-forget") ? null : get(sec.dataset.tabs)), false);
     }
   };
   document.addEventListener("click", (e) => {
@@ -332,8 +332,8 @@ comptime _TABS = """
 })();
 """
 """Tabs that switch without loading the page (`data-tabs`, the key their
-choice is kept under in `localStorage`, so it's remembered per viewer for
-every page that has them): each `role=tab` link with a `data-view` shows
+choice is kept under in `localStorage` unless `data-tabs-forget`, per viewer
+for every page with them): each `role=tab` link with a `data-view` shows
 the panel it `aria-controls`. A link's `?<data-tabs-param>=` still says
 which tab to show, and without scripts the links load it."""
 

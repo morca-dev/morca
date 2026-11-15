@@ -268,10 +268,45 @@ a.data-link:hover { border-color: var(--lake); }
 .data-line { font-size: 0.8125rem; color: var(--muted); margin-top: 0.15rem; }
 .data-line a.data-link { font-size: inherit; border: 0; padding: 0; text-decoration: underline; }
 body.anon .data-link--private, body.anon .data-link--private + .data-line__sep { display: none; }
-.data__chart form.filters, .data__rows form.filters { padding: 0.75rem 1.1rem 0; margin: 0; }
-.data__rows .pager, .data__rows > p { padding: 0 1.1rem 0.8rem; }
-.data__rows td.null { color: var(--faint); font-style: italic; }
-.data__chips { display: flex; flex-wrap: wrap; gap: 0.4rem; padding: 0.6rem 1.1rem 0; margin: 0; list-style: none; font-size: 0.8125rem; }
+.data__chart form.filters { padding: 0.75rem 1.1rem 0; margin: 0; }
+.dview .pager, .dview__panel > p { padding: 0 1.1rem 0.8rem; }
+td.null { color: var(--faint); font-style: italic; }
+.data__chips { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0; padding: 0; list-style: none; font-size: 0.8125rem; }
+/* The commit bar (morca._internal.ui.data_bar): one line above the tabs. */
+.dbar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.6rem; margin: 0 0 0.75rem; font-size: 0.875rem; }
+.dbar__step { display: inline-grid; place-items: center; width: 2rem; height: 2rem; border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm); background: var(--surface); color: var(--text); text-decoration: none; font-size: 1.1rem; }
+a.dbar__step:hover { border-color: var(--lake); }
+.dbar__step[aria-disabled] { color: var(--faint); border-color: var(--border); }
+.dpick > summary .pick__value { max-width: none; height: 2rem; line-height: calc(2rem - 2px); padding-top: 0; padding-bottom: 0; }
+.dpick > summary code { border: 0; background: none; padding: 0; }
+.dpick__latest { font-size: 0.75rem; color: var(--ok); margin-left: 0.3rem; }
+.dpick__menu { width: min(34rem, calc(100vw - 2rem)); max-height: 60vh; overflow: auto; }
+.dpick__search { width: 100%; margin-bottom: 0.3rem; }
+.dpick__list { list-style: none; margin: 0; padding: 0; }
+.dpick__item { display: flex; gap: 0.6rem; align-items: baseline; padding: 0.3rem 0.4rem; border-radius: 4px;
+  color: var(--text); text-decoration: none; }
+.dpick__item:hover, .dpick__item:focus-visible { background: var(--surface-2); }
+.dpick__item[aria-current] { background: var(--lake-wash); font-weight: 600; }
+.dpick__msg { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+.dpick__when { font-family: var(--mono); font-size: 0.75rem; color: var(--faint); white-space: nowrap; }
+.dbar__rows { color: var(--muted); font-variant-numeric: tabular-nums; }
+.dbar__rows strong { color: var(--text); }
+.dbar__more { margin-left: auto; font-size: 0.8125rem; }
+/* Data | Schema, and the rows filling what's left of the window. */
+.dview__head { display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; align-items: center; padding: 0.55rem 1.1rem;
+  border-bottom: 1px solid var(--border); background: var(--surface-2); }
+.dview__head .vtabs { margin: 0; }
+.dview__tools { display: flex; flex-wrap: wrap; gap: 0.4rem 1rem; align-items: center; padding: 0.5rem 1.1rem; }
+details.dfilter > summary { cursor: pointer; color: var(--muted); font-size: 0.8125rem; }
+details.dfilter[open] { flex-basis: 100%; }
+details.dfilter form.filters { margin: 0.6rem 0 0.2rem; }
+.dview__panel > .dtable { max-height: max(18rem, calc(100vh - 17rem)); overflow: auto; border-top: 1px solid var(--border); }
+.dtable thead th { position: sticky; top: 0; z-index: 1; }
+.dview__panel > .dtable > table, .dview__panel > .scroll > table { border: 0; border-radius: 0; overflow: visible; }
+.dtype { display: block; margin-top: 0.1rem; font-size: 0.625rem; text-transform: none; letter-spacing: 0;
+  color: var(--faint); font-weight: 400; opacity: 0.85; }
+.dschema__name code { border: 0; background: none; padding: 0; }
 .data__chips li { border: 1px solid var(--border-strong); border-radius: 999px; padding: 0.1rem 0.6rem; }
 .data__chips a { margin-left: 0.4rem; text-decoration: none; }
 """

@@ -10,6 +10,10 @@
 # - filters (eq, gt, in) that prune files, a column pick and a sort, and an
 #   earlier snapshot;
 # - the chart's data, averaged by x, and its SVG as a line and as bars;
+# - the layout (#499): the commit bar (a picker, newest first and selected,
+#   ?snapshot= in the URL, arrows to the commit before and after, the row
+#   count), then Data | Schema with the table first and each column's type
+#   under its header, then the partitions and the chart;
 # - the CSV download, capped (MORCA_DATA_DOWNLOAD_ROWS), with why it stopped;
 # - a page's row cap, a filter on a column that isn't one (400), and the
 #   time and memory limits, each saying why the read stopped;
@@ -167,6 +171,60 @@ echo "$page" | grep -qF 'href="/datasets/lake.obs/data.csv?' || fail "no downloa
 curl -fsS "$base/datasets/lake.obs" | grep -qF 'href="/datasets/lake.obs" aria-current="page">Overview</a>' || fail "the overview's tabs"
 [ "$(curl -fsS "$base/datasets/lake.obs?tab=data&fc=city&fo=eq&fv=Lima&format=json" | jq '.rows.rows | length')" -eq 100 ] || fail "the form's filter"
 echo "ok   the tab's cards, partition links, download link and filter form"
+
+# The layout (#499): the commit bar, then Data | Schema with Data shown and
+# the table first; partitions and the chart below.
+page=$(curl -fsS "$base/datasets/lake.obs?tab=data")
+at() { echo "$page" | grep -boF "$1" | head -1 | cut -d: -f1; }
+bar=$(at '<div class="dbar" role="group" aria-label="Commit">')
+tbl=$(at '<div class="scroll dtable"><table>')
+[ -n "$bar" ] && [ -n "$tbl" ] && [ "$bar" -lt "$tbl" ] || fail "the commit bar isn't above the table"
+for later in '<div id="schema" role="tabpanel"' 'id="partitions"' 'id="chart"'; do
+    n=$(at "$later")
+    [ -n "$n" ] && [ "$tbl" -lt "$n" ] || fail "the table isn't before $later"
+done
+echo "ok   the commit bar, then the table, then the schema, partitions and chart"
+
+# The commit picker: newest first, the newest selected; each a link to the
+# tab at it, which selects it; the arrows step one commit.
+picked() { echo "$page" | grep -o 'snapshot=[0-9]*[^"]*" data-search="[^"]*" aria-current="true"' | sed 's/snapshot=\([0-9]*\).*/\1/'; }
+[ "$(echo "$page" | grep -o 'class="dpick__item" href="[^"]*' | sed 's/.*snapshot=//' | tr '\n' ' ')" = "$S2 $S1 " ] \
+    || fail "the picker isn't newest first: $(echo "$page" | grep -o 'class="dpick__item" href="[^"]*')"
+[ "$(picked)" = "$S2" ] || fail "the newest isn't selected: $(picked)"
+echo "$page" | grep -qF '<span class="dpick__latest">latest</span>' || fail "the newest isn't marked latest"
+echo "$page" | grep -qF 'class="dpick__search" hidden' && echo "$page" | grep -qF '.dpick__search' || fail "no search box"
+echo "$page" | grep -qF '<span class="dbar__rows"><strong>300</strong> rows</span>' || fail "the row count: $(echo "$page" | grep -o '<span class="dbar__rows">[^/]*')"
+echo "$page" | grep -qF "<a class=\"dbar__step\" rel=\"prev\" href=\"/datasets/lake.obs?tab=data&amp;snapshot=$S1\" title=\"Older commit\"" \
+    || fail "the newest's Older arrow"
+echo "$page" | grep -qF '<span class="dbar__step" aria-disabled="true" title="Newer commit">' || fail "the newest has a Newer arrow"
+echo "$page" | grep -q "<code title=\"$S2\">$(echo "$S2" | cut -c1-8)</code> <span class=\"dpick__msg\">append · run [^<]* · 2024-02 · +150</span>" \
+    || fail "a commit's entry: $(echo "$page" | grep -o '<span class="dpick__msg">[^<]*' | head -1)"
+page=$(curl -fsS "$base/datasets/lake.obs?tab=data&snapshot=$S1&c=month")
+[ "$(picked)" = "$S1" ] || fail "?snapshot=$S1 doesn't select it: $(picked)"
+echo "$page" | grep -qF '<span class="dbar__rows"><strong>150</strong> rows</span>' || fail "$S1's row count"
+echo "$page" | grep -qF '<span class="dbar__step" aria-disabled="true" title="Older commit">' || fail "the oldest has an Older arrow"
+echo "$page" | grep -qF "<a class=\"dbar__step\" rel=\"next\" href=\"/datasets/lake.obs?tab=data&amp;snapshot=$S2&amp;c=month\" title=\"Newer commit\"" \
+    || fail "the oldest's Newer arrow, keeping the column pick"
+echo "ok   the commit picker: newest first and selected, ?snapshot= selects one, the arrows step"
+
+# Data | Schema: Data shown unless ?view=schema; types under the headers;
+# the schema's nullability, field ids and spec on its tab.
+page=$(curl -fsS "$base/datasets/lake.obs?tab=data")
+echo "$page" | grep -qF 'data-tabs="morca.data.view" data-tabs-param="view" data-tabs-forget>' || fail "the Data/Schema tabs"
+echo "$page" | grep -qF 'data-view="data" href="/datasets/lake.obs?tab=data" aria-selected="true" aria-controls="rows">Data</a>' || fail "Data isn't selected"
+echo "$page" | grep -qF 'data-view="schema" href="/datasets/lake.obs?tab=data&amp;view=schema" aria-selected="false" aria-controls="schema">Schema</a>' || fail "the Schema tab"
+echo "$page" | grep -qF '<div id="rows" role="tabpanel" class="dview__panel">' && echo "$page" | grep -qF '<div id="schema" role="tabpanel" class="dview__panel" hidden>' \
+    || fail "the Data panel isn't the one shown"
+echo "$page" | grep -qF '<th class="num" title="long">id<span class="dtype">long</span></th>' || fail "id's type under its header"
+echo "$page" | grep -qF '<th title="date">day<span class="dtype">date</span></th>' || fail "day's type under its header"
+echo "$page" | grep -qF '<th>Nullable</th>' && echo "$page" | grep -qF '<code title="note">note</code></td><td class="mono">string</td><td>yes</td>' \
+    || fail "the schema's nullability"
+echo "$page" | grep -qF '<code>month</code> (identity of <code>month</code>, field 1000)' || fail "the partition spec's field"
+page=$(curl -fsS "$base/datasets/lake.obs?tab=data&view=schema")
+echo "$page" | grep -qF 'aria-selected="true" aria-controls="schema">Schema</a>' && echo "$page" | grep -qF '<div id="rows" role="tabpanel" class="dview__panel" hidden>' \
+    || fail "?view=schema doesn't open the Schema tab"
+[ "$(echo "$j" | jq '[.schema.columns[] | has("fields")] | any')" = false ] || fail "a primitive column with fields"
+echo "ok   Data and Schema tabs, Data first; column types under the headers"
 
 # The way to the data from the pages people land on.
 curl -fsS "$base/" | grep -qF '<div class="data-line">Data: <a class="data-link" href="/datasets/lake.obs?tab=data"' \
