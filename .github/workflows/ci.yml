@@ -110,6 +110,17 @@ jobs:
           fi
           echo "code=$code" >> "$GITHUB_OUTPUT"
 
+  # morca._internal.version's MORCA_VERSION is pixi.toml's and shelf.toml's
+  # version (#455): `morca register` compares it with each pipeline's. On
+  # every PR, release PRs too, so a release that doesn't bump it fails here
+  # rather than every PR after it (`sh tests/version.sh --fix` bumps it).
+  version:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sh tests/version.sh
+
   # The Linux legs run where `changes` says: GitHub's ubuntu-latest unless
   # the LINUX_RUNNER variable names another (sai, the self-hosted runner,
   # is ["self-hosted","sai"]). On GitHub's runners the environment and the
@@ -866,7 +877,7 @@ jobs:
   # gate doesn't cover.)
   ci:
     if: ${{ always() && github.event_name != 'schedule' }}
-    needs: [release, release-check, changes, test, kind, runtime-image, runtime-image-main, runtime-lock, project-image, project-test, project-release, fuzz, format, formal, data, rust-worker]
+    needs: [release, release-check, changes, version, test, kind, runtime-image, runtime-image-main, runtime-lock, project-image, project-test, project-release, fuzz, format, formal, data, rust-worker]
     runs-on: ubuntu-latest
     steps:
       - env:

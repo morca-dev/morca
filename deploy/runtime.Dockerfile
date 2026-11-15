@@ -12,19 +12,22 @@
 #
 #     docker build -f deploy/runtime.Dockerfile -t morca-runtime:dev .
 #
-# The binaries are built in deploy/runtime/pixi.toml, a project that adds
-# this checkout of morca-mojo, so they link the same packages a project's
-# pipelines do, installed from its lock (deploy/runtime/lock.sh). Like
-# the project's image, everything has line tables (-g1), compressed, and
-# is built for MOJO_TARGET_CPU, not for the CPU of the machine building
-# it: GitHub's arm64 runners are Neoverse N2, with SVE2,
-# and Hetzner's CAX servers Neoverse N1, where an N2 binary dies with
-# SIGILL (exit 132). N1 code runs on N2, V1, V2 and Graviton. CI builds
-# amd64 for x86-64-v3 (AVX2).
+# The binaries are the morca-mojo package's own (#455, docs/binaries.md):
+# deploy/runtime/pixi.toml is a project that adds this checkout of
+# morca-mojo, installed from its lock (deploy/runtime/lock.sh), and the
+# package builds `morca` and `morca_maintain` into its bin/, so they link the
+# same packages a project's pipelines do and are the binaries a project
+# runs. Like the project's image, everything has line tables (-g1),
+# compressed, and is built for a CPU every server of the platform has, not
+# for the CPU of the machine building it (pixi.toml's package section):
+# Neoverse N1 on arm64, since GitHub's arm64 runners are Neoverse N2, with
+# SVE2, and Hetzner's CAX servers Neoverse N1, where an N2 binary dies with
+# SIGILL (exit 132); N1 code runs on N2, V1, V2 and Graviton. x86-64-v3
+# (AVX2) on amd64.
 #
 # The stages are ordered for the layer cache: `env` is the pixi environment
-# and depends only on morca's pixi.toml, src/ and the lock; `curl` and `git` start from
-# it, so a change to bin/ alone reuses `pixi install` and git as they were.
+# and depends only on morca's pixi.toml, src/ and the lock; `curl` and
+# `git` start from it.
 FROM ghcr.io/prefix-dev/pixi:0.78.0-bookworm AS env
 RUN apt-get update && apt-get install -y --no-install-recommends gcc libc6-dev git ca-certificates \
     && rm -rf /var/lib/apt/lists/*
@@ -38,13 +41,8 @@ WORKDIR /src/project
 RUN pixi install --locked
 
 FROM env AS build
-ARG MOJO_TARGET_CPU=neoverse-n1
-# Beside the checkout, not in it: pixi would see morca-mojo's source change
-# and build the package again.
-COPY bin /src/bin
-RUN mkdir -p /out/bin /out/share && cp pixi.lock /out/share/pixi.lock \
-    && pixi run sh -c 'mojo build -g1 --target-cpu "$MOJO_TARGET_CPU" /src/bin/scheduler.mojo -o /out/bin/morca \
-        && mojo build -g1 --target-cpu "$MOJO_TARGET_CPU" /src/bin/morca_maintain.mojo -o /out/bin/morca_maintain'
+RUN env=/src/project/.pixi/envs/default && mkdir -p /out/bin /out/share && cp pixi.lock /out/share/pixi.lock \
+    && cp -L $env/bin/morca $env/bin/morca_maintain /out/bin/
 # The line tables compressed, which llvm-symbolizer reads as they are.
 RUN for b in /out/bin/*; do objcopy --compress-debug-sections=zlib "$b" || exit 1; done
 # Only the pixi environment's libraries the binaries link or dlopen: libpq
@@ -57,11 +55,14 @@ RUN for b in /out/bin/*; do objcopy --compress-debug-sections=zlib "$b" || exit 
 # Postgres. OpenSSL stays conda's: libcurl and libpq need 3.2. And liblake,
 # which morca.tables loads (#454), from morca-mojo's lib/: not stripped,
 # its line tables compressed like the binaries', so a crash inside it is
-# symbolised.
+# symbolised. ldd reads the package's binaries where they're installed, not
+# the copies in /out/bin: the package build gives them an rpath relative to
+# themselves ($ORIGIN/../lib), which from /out/bin finds nothing, and Mojo's
+# runtime (libKGENCompilerRTShared) would be left out (#455).
 RUN env=/src/project/.pixi/envs/default && mkdir -p /out/lib /out/libexec \
     && cp -L $env/bin/llvm-symbolizer /out/libexec/ \
     && loaded=$(ls $env/lib/libpq.so.5 $env/lib/libflare_*.so $env/lib/lib*mojo*.so 2>/dev/null) \
-    && ldd /out/bin/* /out/libexec/* $loaded 2> /dev/null \
+    && ldd $env/bin/morca $env/bin/morca_maintain $env/lib/liblake.so /out/libexec/* $loaded 2> /dev/null \
         | awk -v e="$env" '$3 ~ "^"e {print $3}' | grep -v -e '/libicu' -e '/libpsl' \
         | sort -u | xargs -r cp -L -t /out/lib \
     && cp -L -t /out/lib $loaded \
@@ -180,7 +181,7 @@ LABEL org.opencontainers.image.title="morca-runtime" org.opencontainers.image.ve
 # deploy/hetzner/VERSION (scripts/hetzner-version.sh). 0.31.0, morca
 # 0.31.0's tarball, from before the tools' own versions (#461), still works
 # (as does 0.32.0's).
-LABEL dev.morca.hetzner-min="0.31.0"
+LABEL dev.morca.hetzner-min="0.34.0"
 # postgres.mojo and flare find what they dlopen under $CONDA_PREFIX/lib.
 ENV CONDA_PREFIX=/opt/morca LD_LIBRARY_PATH=/opt/morca/lib PATH=/opt/morca/bin:/opt/morca/pipelines:/usr/bin:/bin \
     LLVM_SYMBOLIZER_PATH=/opt/morca/libexec/llvm-symbolizer GIT_EXEC_PATH=/opt/morca/libexec/git

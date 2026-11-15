@@ -3,6 +3,7 @@
 """
 
 from std.os.path import exists
+from std.sys import stderr
 import morca._internal.db.concurrency as concurrency_db
 import morca._internal.db.pipelines as pipelines_db
 from morca._internal.concurrency import parse_concurrency, wait_limit
@@ -30,6 +31,7 @@ from morca._internal.proc import (
     capture,
 )
 from morca._internal.secrets import secrets_json
+from morca._internal.version import MISMATCH_HINT, mismatch, mixed_allowed
 from morca._internal.sensors import parse_sense
 from morca._internal.scheduler import Scheduler
 from morca._internal.registered import (
@@ -67,6 +69,12 @@ def register_pipeline(
     var got = capture([path, "describe"], binary_seconds())
     if got[0] != 0 or not got[1].startswith('{"pipeline": '):
         raise Error("morca: ", path, " describe exited ", got[0], ": ", got[1])
+    # The pipeline and this morca from one release (#455).
+    var other = mismatch(path, got[1])
+    if other and not mixed_allowed():
+        raise Error("morca: ", other, ": ", MISMATCH_HINT)
+    if other:
+        print("morca: warning:", other, file=stderr)
     var cycle = dataset_cycle(self.db, got[1])
     if cycle:
         raise Error("morca: ", path, " can't be registered: ", cycle)

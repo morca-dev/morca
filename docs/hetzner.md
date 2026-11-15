@@ -1219,7 +1219,8 @@ project. The census's is still `ghcr.io/morca-dev/census`.
 **The runtime image.** Each morca release has
 `ghcr.io/morca-dev/morca-runtime:<version>` (`0.24.0`, for linux/arm64 and
 linux/amd64; [`deploy/runtime.Dockerfile`](../deploy/runtime.Dockerfile)):
-morca's own `morca` and `morca_maintain`, git, libcurl, the CA bundles where
+morca's own `morca` and `morca_maintain` (the morca-mojo package's,
+[binaries.md](binaries.md)), git, libcurl, the CA bundles where
 libcurl, OpenSSL and flare look for them, llvm-symbolizer, and the
 `/opt/morca` layout and environment, installed from a committed lock
 (`deploy/runtime/pixi.lock`). It's built on distroless
@@ -1239,10 +1240,12 @@ register` (a bare `morca register`) reads it. Its `upgrade.toml` and
 `CHANGELOG.md`, if it has them, go to `/opt/morca` too, the first named by
 `MORCA_UPGRADE` ([upgrade steps](#a-releases-upgrade-steps)). `MORCA_VERSION` picks the runtime: the morca-mojo
 version the project pins (`morca aws push` reads it from `pixi.lock`), so
-the runtime and the pipelines are the same morca. Moving the project to a
-new morca moves its image to that release's runtime. A
-`bin/scheduler.mojo` or `bin/morca_maintain.mojo` of the project's own
-replaces the runtime's; without them the image runs the runtime's.
+the runtime and the pipelines are the same morca, and the build stops if
+the runtime's `morca version` isn't the project's. Moving the project to a
+new morca moves its image to that release's runtime. A project needs no
+`bin/scheduler.mojo` or `bin/morca_maintain.mojo`: without them the image
+runs the runtime's, which are the package's; with them, the project's own
+replace them.
 
 A project with a `Dockerfile.morca` of its own (the census) can start it the
 same way:
