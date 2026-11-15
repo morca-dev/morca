@@ -414,6 +414,12 @@ def run_row_html(
         h.raw(' <span class="muted">until ')
         h.text(r.waiting_until)
         h.raw("</span>")
+    if r.waits_on > 0 and r.held:
+        # The run holding the concurrency key it waits on (#397).
+        h.raw(' <span class="muted" title="')
+        h.text(r.held)
+        h.raw('">for run</span> ')
+        h.chip(String("/runs/", r.waits_on), String(r.waits_on))
     if rc and rc.value().failed and r.status == "failed":
         h.raw(' <span class="muted">in</span> ')
         if rc.value().step:

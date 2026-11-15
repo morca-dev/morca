@@ -85,6 +85,8 @@ from morca._internal.http_store import (
 from morca.civil import now
 from morca._internal.json import quote
 from morca._internal.db.live import dead_sql, stale_limit, start_grace
+from morca._internal.db.concurrency import ALL
+from morca._internal.key_wait import key_room, started
 from morca._internal.cgroup import (
     growth_pct_of,
     oom_text,
@@ -621,6 +623,24 @@ def _claim_run(mut db: State, w: WorkerAuth, v: Value) raises -> String:
         if live >= (p.fill.max_runs if fill else p.max_runs):
             tx.rollback()
             continue
+        # Its concurrency key (#397), across pipelines, schedulers and
+        # workers; the scheduler's pass says what its runs wait on.
+        if (
+            p.concurrency_key
+            and key_room(
+                tx,
+                p.name,
+                p.concurrency_key,
+                p.concurrency_limit,
+                stale,
+                dead,
+                ALL,
+                False,
+            ).room
+            == 0
+        ):
+            tx.rollback()
+            continue
         var request = sized.request
         if request.memory_min_mb > 0:
             # At least what an out-of-memory kill raised it to.
@@ -664,6 +684,7 @@ def _claim_run(mut db: State, w: WorkerAuth, v: Value) raises -> String:
         if not got:
             tx.rollback()
             continue
+        started(tx, id, p.concurrency_key)
         ref r = got.value()
         var spec = WorkerRun(
             Int(id),

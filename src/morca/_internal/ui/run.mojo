@@ -361,6 +361,10 @@ def _status_card(mut h: Html, r: RunRow, defs: List[StepDef]):
         )
         h.raw('<dd class="error">')
         h.text(r.held.removeprefix("held: "))
+        if r.waits_on > 0:
+            # The run holding the concurrency key it waits on (#397).
+            h.raw(" ")
+            h.chip(String("/runs/", r.waits_on), String("run ", r.waits_on))
         h.raw("</dd>")
     if r.error:
         fact_item(

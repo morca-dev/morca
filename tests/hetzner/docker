@@ -247,12 +247,14 @@ case "$all" in
         [ ! -f "$FAKE/no-config-apps" ] || { echo "morca needs MORCA_DATABASE_URL"; exit 2; }
         [ ! -f "$FAKE/apps-decl" ] || cat "$FAKE/apps-decl"
         ;;
-    # morca config check with the stack's overlay (morca-stack's
-    # check_overlay): fails while $FAKE/overlay-bad exists; $FAKE/no-overlays
+    # morca config check, with the stack's overlay (morca-stack's
+    # check_overlay) or without (need_handover_wait): fails while $FAKE/overlay-bad exists; $FAKE/no-overlays
     # is an image whose morca doesn't read overlays.
     "run --rm --env-file "*" config check")
         echo "config-check $all" >> "$FAKE/docker.log"
         [ ! -f "$FAKE/overlay-bad" ] || { echo "/etc/orca/overlay/morca.overlay.toml:1: [pipelines.toyy] isn't a pipeline of /opt/morca/morca.toml" >&2; exit 1; }
+        # $FAKE/concurrency-keys: its morca.toml declares a key (#397).
+        [ ! -f "$FAKE/concurrency-keys" ] || echo "morca: concurrency keys: /opt/morca/morca.toml:3: [pipelines.toy]; the scheduler needs MORCA_HANDOVER_WAIT_SECONDS"
         if [ -f "$FAKE/no-overlays" ]; then
             echo "/opt/morca/morca.toml: ok, 2 pipelines"
         else

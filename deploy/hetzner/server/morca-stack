@@ -102,7 +102,10 @@
 # it has exited, and stops it if it still runs MORCA_STACK_DRAIN_GRACE (60)
 # seconds past the limit (an old scheduler started without the limit);
 # deploy.sh doesn't wait for it. Runs aren't paused, and killed only at the
-# limit. apply refuses to start anything without DRAIN_SECONDS. A deploy while one still drains overlaps again: its scheduler
+# limit. apply refuses to start anything without DRAIN_SECONDS, nor, for an
+# image whose morca.toml declares a concurrency key (#397), without
+# HANDOVER_WAIT_SECONDS (MORCA_HANDOVER_WAIT_SECONDS in morca.env: how long
+# a run may wait on a key an older version's run holds). A deploy while one still drains overlaps again: its scheduler
 # becomes another scheduler-old-<time>, so several can drain at once, each
 # under its own name, and none is renamed over another. check reports each
 # one draining as information, not a failure. One that isn't running any
@@ -306,15 +309,17 @@ cmd_configure() {
         k=${kv%%=*}
         v=${kv#*=}
         case "$k" in
-            MORCA_IMAGE | MORCA_TAG | CLOUDFLARED_IMAGE | BUCKET | BACKUP_KEEP | GHCR_USER | CGROUPS | HEALTH_TIMEOUT | OVERLAP | DRAIN_SECONDS) ;;
+            MORCA_IMAGE | MORCA_TAG | CLOUDFLARED_IMAGE | BUCKET | BACKUP_KEEP | GHCR_USER | CGROUPS | HEALTH_TIMEOUT | OVERLAP | DRAIN_SECONDS | HANDOVER_WAIT_SECONDS) ;;
             *) die "unknown setting $k" ;;
         esac
         case "$k=$v" in
             OVERLAP= | OVERLAP=[01]) ;;
             OVERLAP=*) die "OVERLAP is 1 (the default) or 0, not '$v'" ;;
             DRAIN_SECONDS=*) drain_ok "$v" || die "DRAIN_SECONDS is a whole number of seconds above 0, not '$v'" ;;
+            HANDOVER_WAIT_SECONDS=) ;;
+            HANDOVER_WAIT_SECONDS=*) drain_ok "$v" || die "HANDOVER_WAIT_SECONDS is a whole number of seconds above 0, not '$v'" ;;
         esac
-        [ "$k=" = "$kv" ] && [ "$k" = GHCR_USER ] || safe "$v"
+        [ "$k=" = "$kv" ] && { [ "$k" = GHCR_USER ] || [ "$k" = HANDOVER_WAIT_SECONDS ]; } || safe "$v"
         [ "$k" != CGROUPS ] || [ "$v" = 0 ] || [ "$v" = 1 ] || die "CGROUPS is 1 (the default) or 0, not $v"
         old=$(conf_get "$k")
         if [ "$keep" = 1 ] && [ -n "$old" ]; then
@@ -489,6 +494,10 @@ EOS
         ! overlap || echo MORCA_OVERLAP=on
         dl_=$(conf_get DRAIN_SECONDS)
         [ -z "$dl_" ] || echo "MORCA_DRAIN_SECONDS=$dl_"
+        # How long a run may wait on a concurrency key an older version's
+        # run holds (#397); apply checked it's set if the image needs it.
+        hw_=$(conf_get HANDOVER_WAIT_SECONDS)
+        [ -z "$hw_" ] || echo "MORCA_HANDOVER_WAIT_SECONDS=$hw_"
     } > "$1/morca.env"
 }
 
@@ -630,6 +639,19 @@ check_overlay() {
         *) die "$1's morca doesn't read overlays (morca 0.25 does): it said '$(echo "$out" | tail -n 1)'; take CONFIG_OVERLAY_FILE out of hetzner.env to deploy it" ;;
     esac
     echo "morca-stack: the overlay: $(echo "$out" | tail -n 1)" >&2
+}
+
+# need_handover_wait IMAGE: HANDOVER_WAIT_SECONDS is set when IMAGE's
+# morca.toml declares a concurrency key (#397): its scheduler and register
+# refuse to go without it. IMAGE's `morca config check` says when it does
+# (an image from before says nothing, and needs nothing). Asked only while
+# stack.conf has none.
+need_handover_wait() {
+    [ -z "$(conf_get HANDOVER_WAIT_SECONDS)" ] || return 0
+    # shellcheck disable=SC2046
+    hw_out=$(docker run --rm --env-file "$CONF/settings.env" $(overlay_mount) "$1" config check 2>&1) || return 0
+    hw_keys=$(echo "$hw_out" | sed -n 's/^morca: concurrency keys: \(.*\); the scheduler needs.*/\1/p')
+    [ -z "$hw_keys" ] || die "$1's morca.toml declares concurrency keys ($hw_keys), and HANDOVER_WAIT_SECONDS isn't set in $CONF/stack.conf: set it in hetzner.env, how long, in seconds, a run waiting on a key may wait for a run of an older version to end before it fails, and deploy again (docs/hetzner.md#the-handover-wait-limit); nothing was changed"
 }
 
 # The tags the stack is set to run: "morca TAG", then "app NAME TAG".
@@ -1119,6 +1141,7 @@ cmd_plan() {
     [ "$dbonly" = 0 ] || die "plan: --db-only starts only Postgres"
     need_morca_image "$(conf_get MORCA_IMAGE):${newtag:-$(conf_get MORCA_TAG)}"
     check_overlay "$(conf_get MORCA_IMAGE):${newtag:-$(conf_get MORCA_TAG)}"
+    need_handover_wait "$(conf_get MORCA_IMAGE):${newtag:-$(conf_get MORCA_TAG)}"
     desired
     ENVDIR=$CONF/plan.d
     rm -rf "$ENVDIR"
@@ -1182,6 +1205,7 @@ cmd_apply() {
         drain_limit > /dev/null
         need_morca_image "$(conf_get MORCA_IMAGE):${newtag:-$(conf_get MORCA_TAG)}"
         check_overlay "$(conf_get MORCA_IMAGE):${newtag:-$(conf_get MORCA_TAG)}"
+        need_handover_wait "$(conf_get MORCA_IMAGE):${newtag:-$(conf_get MORCA_TAG)}"
         migrate_orca
     fi
     # A stack applied before deployed was kept: what it runs is its conf.

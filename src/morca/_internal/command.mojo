@@ -93,6 +93,7 @@ from morca._internal.instances import (
     wait_for_lead,
 )
 from morca._internal.dataset_config import read_datasets, record_datasets
+from morca._internal.key_wait import check_wait_limit
 from morca._internal.pool_config import read_pools, record_pools
 from morca._internal.registering import register_pipeline
 from morca._internal.registered import Registered, registered
@@ -613,6 +614,7 @@ def _command(args: List[String], target: String) raises -> Int:
         return 0
     if cmd == "tick" and len(args) == 2:
         var s = Scheduler(url)
+        check_wait_limit(s.db.conn)
         s.wait_for_binaries = True
         tick(s, now())
         return 0
@@ -624,6 +626,8 @@ def _command(args: List[String], target: String) raises -> Int:
         if overlap_on():
             _ = drain_limit()
         var s = Scheduler(url)
+        # A pipeline with a concurrency key needs the wait limit (#397).
+        check_wait_limit(s.db.conn)
         s.say_pressure()
         s.contain()
         s.join()
@@ -1213,6 +1217,19 @@ def _config_check(
         print("morca:", path, "has", problems, "problem(s)", file=stderr)
         return 1
     var n = len(file.pipelines())
+    # Concurrency keys (#397) need the scheduler's wait limit: said here,
+    # where morca-stack apply looks for it before a deploy.
+    var keyed = file.entries("concurrency")
+    if len(keyed) > 0:
+        var at = String()
+        for e in keyed:
+            at.write(", " if at else "", e[0].removesuffix(" concurrency"))
+        print(
+            "morca: concurrency keys: ",
+            at,
+            "; the scheduler needs MORCA_HANDOVER_WAIT_SECONDS",
+            sep="",
+        )
     var line = String(path)
     if file.overlay:
         line.write(" with ", file.overlay)

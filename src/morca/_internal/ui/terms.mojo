@@ -591,6 +591,12 @@ def _key(key: String) -> StaticString:
             "Higher starts first when room is short: the scheduler takes the "
             "pipelines highest first, then by name."
         )
+    if key == "concurrency":
+        return (
+            "A key its runs hold while they run, shared with every pipeline "
+            "that declares it: at most limit of them run at once, across "
+            "every scheduler and worker."
+        )
     if key == "image":
         return "The container image its runs use."
     if key == "spot":

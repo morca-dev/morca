@@ -74,11 +74,12 @@ Each key can go in `[defaults]` or in `[pipelines.<name>]`.
 | `fill_budget_per_day` | number from 0 to 100000, US dollars | none | none | Estimated spend of fill runs a UTC day. Fill runs on EC2 or Kubernetes don't start without it. |
 | `fill_window` | string `"A..B"`, UTC hours: A from 0 to 23, B from 1 to 24 | `"0..24"`, all day | none | Fill runs start from hour A up to hour B. `"22..6"` wraps past midnight. |
 | `priority` | integer from -1000 to 1000 | 0 | none | Higher starts first when room is short. See [Priority](#priority). |
+| `concurrency` | table `{ key = "...", limit = N }`: a key of letters, digits, `_`, `-` and `.`, up to 64; a limit from 1 to 1000 | none | none | At most `limit` runs of every pipeline declaring `key` run at once, across the cluster. Needs `MORCA_HANDOVER_WAIT_SECONDS`. See [Concurrency keys](#concurrency-keys). |
 | `enabled` | boolean | `true` | none | `false`: `morca register` without binaries skips the pipeline (it prints `skipping <name>`); one already registered stays as it is. For a pipeline only some stacks run, turned on by [a stack's overlay](#a-stacks-overlay). |
 | `fill_lag` | string, a duration: a whole number of `s`, `m`, `h` or `d`, up to `31d`; or `0` | `0`, none | none | How long after its end a partition is filled. See [The lag](#the-lag). |
 
 `image` (`--image`) and `--spot` stay flags only. The `fill*` keys,
-`learn`, `priority` and `enabled` are the file's only: no flag sets them.
+`learn`, `priority`, `concurrency` and `enabled` are the file's only: no flag sets them.
 
 ### What is refused
 
@@ -89,6 +90,7 @@ Each key can go in `[defaults]` or in `[pipelines.<name>]`.
 - A secret ID outside `orca/`.
 - A `fill_window` like `"6..6"` or `"1..30"`, a negative `fill_budget_per_day`, or `fill_max_runs = 0`.
 - A `priority` that isn't an integer (`"high"`, `1.5`), or is outside -1000..1000.
+- A `concurrency` that isn't a table with both `key` (a string) and `limit` (an integer from 1 to 1000), or has other keys.
 - A `fill_lag` without a unit (`"2"`, `2`), with one morca doesn't know (`"2w"`), or over `31d`.
 - `fills = "all"` for a keyed pipeline, a sensor, or one with no first partition. `morca register` refuses it with the file and line, because it has to see the pipeline first; see [Fills](#fills).
 - An `env` name that isn't a valid variable name.
@@ -98,7 +100,7 @@ Each key can go in `[defaults]` or in `[pipelines.<name>]`.
 Each refusal names the file and line, and nothing is registered:
 
 ```text
-morca.toml:7: [pipelines.gharchive] has no key workrs (it has placement, head_type, worker_type, workers, worker_procs, max_runs, keys_per_run, cpus, memory_gb, learn, fills, fill_order, fill_max_runs, fill_budget_per_day, fill_window, fill_lag, priority, enabled, secrets and env)
+morca.toml:7: [pipelines.gharchive] has no key workrs (it has placement, head_type, worker_type, workers, worker_procs, max_runs, keys_per_run, cpus, memory_gb, learn, fills, fill_order, fill_max_runs, fill_budget_per_day, fill_window, fill_lag, priority, concurrency, enabled, secrets and env)
 morca.toml:3: [pipelines.toy] workers: not a count or a range MIN..MAX: 4..2
 ```
 
@@ -724,6 +726,63 @@ fills = "all"
 
 An older morca ignores `priority`: it starts the pipelines by name, as it
 did.
+
+## Concurrency keys
+
+`concurrency` limits how many runs hold a key at once, across the whole
+cluster (#397): every pipeline that declares the key, every scheduler
+instance (an old and a new one overlapping in a deploy) and every worker
+of a pool. The census's live poller must run once:
+
+```toml
+[pipelines.mojo_live]
+concurrency = { key = "mojo_live", limit = 1 }
+```
+
+Pipelines that share a key share its limit, so two pipelines writing one
+table can take turns:
+
+```toml
+[pipelines.load_a]
+concurrency = { key = "warehouse", limit = 1 }
+
+[pipelines.load_b]
+concurrency = { key = "warehouse", limit = 1 }
+```
+
+- **Where it's held.** A run holds its pipeline's key from its start until
+  it ends (or its process dies). A start counts the key's live runs in
+  Postgres, under a lock on the key, in the transaction that starts the
+  run, so two schedulers, or a scheduler and a worker's claim, never both
+  take the last slot. `max_runs` still applies to each pipeline.
+- **Why a run waits.** A queued run over the limit waits, and says which
+  run holds the key: `waiting: for concurrency key mojo_live (limit 1): run
+  12 of mojo_live holds it`, in `morca status <pipeline>`, on the run's
+  page and in its JSON (`held`, and `waits_on`, the run's id), and in the
+  runs list (`queued for run 12`).
+- **A new version waits for the old one.** After a deploy, the run of the
+  older version keeps its key until it ends; nothing is stopped. Its code
+  can see that it's outdated (`morca.outdated()`) and return once it has
+  finished its unit of work; the key frees up and the waiting run starts
+  on the new version.
+- **The wait limit.** A run that waits on a key held by a run of an older
+  version (one that's outdated: other code is registered, or its
+  scheduler drains) waits at most `MORCA_HANDOVER_WAIT_SECONDS`, then
+  fails, not to be retried: `timed out waiting for run 12 (version
+  aaaa1111aaaa): ...`. The old run is left alone. A run waiting on one of
+  the current version waits as long as it takes.
+- **The setting is required** once a pipeline declares a key: `morca
+  register` refuses such a pipeline, and `morca scheduler` and `morca tick`
+  refuse to start, when `MORCA_HANDOVER_WAIT_SECONDS` isn't set, or is 0,
+  negative or not a number. Without a key nothing needs it, and runs start
+  as before. On the Hetzner stack it's `HANDOVER_WAIT_SECONDS` in
+  hetzner.env ([docs/hetzner.md](hetzner.md#the-handover-wait-limit)).
+- **Runs started elsewhere.** A run started by hand in its own process
+  (`<binary> run`) holds the key while it runs, but doesn't wait for it.
+
+An older morca ignores `concurrency` and starts runs without the limit,
+as after a rollback. While it overlaps a newer one it starts nothing: only
+the leading scheduler starts runs.
 
 ## Keys per run
 

@@ -1,0 +1,1 @@
+- **Concurrency keys:** `concurrency = { key = "...", limit = N }` in morca.toml limits how many runs of every pipeline declaring the key run at once, across schedulers and workers; a run waiting on an older version's run fails after `MORCA_HANDOVER_WAIT_SECONDS` (`HANDOVER_WAIT_SECONDS` in hetzner.env), required once a pipeline declares a key. (#503)

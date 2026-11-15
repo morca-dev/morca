@@ -43,6 +43,7 @@ hourly:tests/hourly.mojo
 six-hourly:tests/six_hourly.mojo
 stop:tests/stop_pipeline.mojo
 longpoll:tests/outdated_pipeline.mojo
+longpoll2:tests/outdated_pipeline.mojo:run["longpoll2"]
 ds-first:tests/datasets/first.mojo
 ds-second:tests/datasets/second.mojo
 ds-third:tests/datasets/third.mojo

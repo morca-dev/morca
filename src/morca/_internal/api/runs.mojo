@@ -154,6 +154,8 @@ def json_run(mut out: String, r: RunRow):
         quote(r.placement) if r.placement else String("null"),
         ', "held": ',
         quote(r.held) if r.held and r.status == "queued" else String("null"),
+        ', "waits_on": ',
+        String(r.waits_on) if r.waits_on > 0 and r.held else String("null"),
         ', "usage": ',
         usage_json(r.usage),
         ', "code_version": ',

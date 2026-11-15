@@ -647,6 +647,25 @@ deploy that turns it on; one that had `OVERLAP=1` already overlaps, and
 the old scheduler it replaces, started without the limit, is stopped by
 its reaper once the limit has run out.
 
+#### The handover wait limit
+
+`HANDOVER_WAIT_SECONDS` in `hetzner.env` is required once a pipeline's
+morca.toml declares a [concurrency key](morca-toml.md#concurrency-keys)
+(#397): how long, in seconds, a run waiting on the key may wait for a run
+of an older version to end before it fails, "timed out waiting for run 12
+(version aaaa1111aaaa)". The old run is left alone; nothing is killed. A
+project without a key needs nothing. The census's `mojo_live` takes one, so
+its stacks need the setting: an hour (`3600`), say, well past the poll its
+old run finishes before it hands over.
+
+`deploy.sh` and `up.sh` refuse a value that isn't a whole number of
+seconds above 0, before they change anything on the server. Unset, the
+server's `morca-stack plan` and `apply` ask the new image's `morca config
+check` whether its morca.toml declares a key, and stop if it does, having
+changed nothing. The scheduler gets it as `MORCA_HANDOVER_WAIT_SECONDS`;
+`morca scheduler` and `morca register` refuse to go without it while a
+pipeline declares a key.
+
 ### The check after each deploy
 
 Every `deploy.sh` (a rollback too) ends with `morca-stack check`, a smoke
@@ -1408,6 +1427,7 @@ GHCR_TOKEN_FILE=...
 GITHUB_TOKEN_FILE=$HOME/.config/morca-hetzner/github-token     # or mojo_repos's and mojo_stats's runs fail
 CONFIG_OVERLAY_FILE=$HOME/.config/morca-hetzner/dev.overlay.toml
 DRAIN_SECONDS=3600                      # required: an old scheduler drains for an hour at most
+HANDOVER_WAIT_SECONDS=3600              # required with a concurrency key: a run waits an hour at most for an old one
 # No NTFY_TOPIC_FILE: no alerts. Or a topic of its own, never production's.
 # No POSTHOG_KEY: the dev pages stay out of the analytics.
 ```
