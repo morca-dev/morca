@@ -48,6 +48,7 @@ from iceberg.manifest import (
     read_manifest_list_bytes_cached,
 )
 from iceberg.metadata import Snapshot
+from iceberg.types import TK_LIST, TK_MAP, TK_PRIMITIVE, TK_STRUCT, TypeStore
 
 from morca._lake.datacache import DataCache
 from morca._lake.dataask import DataAsk, columns_of, iso_ms, parse_ask
@@ -82,6 +83,7 @@ def table_json(t: Table, snapshot: Int64, mut out: String) raises:
         ', "columns": [',
     )
     var cols = columns_of(schema)
+    var top = schema.columns()
     for i in range(len(cols)):
         ref c = cols[i]
         out.write(
@@ -96,8 +98,9 @@ def table_json(t: Table, snapshot: Int64, mut out: String) raises:
             "true" if c.required else "false",
             ', "doc": ',
             json_quote(c.doc) if c.doc else String("null"),
-            "}",
         )
+        _fields_json(schema.store, top[i].type, out)
+        out.write("}")
     var spec = m.spec()
     out.write(
         ']}, "partition_spec": {"spec_id": ', spec.spec_id, ', "fields": ['
@@ -144,6 +147,72 @@ def table_json(t: Table, snapshot: Int64, mut out: String) raises:
         n += 1
         k -= 1
     out.write("], ", '"snapshots_total": ', len(m.snapshots))
+
+
+def _field_json(
+    store: TypeStore,
+    id: Int,
+    name: String,
+    type: Int,
+    required: Bool,
+    doc: String,
+    mut out: String,
+):
+    out.write(
+        '{"id": ',
+        id,
+        ', "name": ',
+        json_quote(name),
+        ', "type": ',
+        json_quote(store.type_name(type)),
+        ', "required": ',
+        "true" if required else "false",
+        ', "doc": ',
+        json_quote(doc) if doc else String("null"),
+    )
+    _fields_json(store, type, out)
+    out.write("}")
+
+
+def _fields_json(store: TypeStore, type: Int, mut out: String):
+    """A nested type's own fields, as `, "fields": [...]` (a struct's, a
+    list's element, a map's key and value), each with its own; nothing for
+    a primitive."""
+    ref n = store.nodes[type]
+    if n.kind == TK_PRIMITIVE:
+        return
+    out.write(', "fields": [')
+    if n.kind == TK_STRUCT:
+        for i in range(len(n.fields)):
+            ref f = n.fields[i]
+            if i:
+                out.write(", ")
+            _field_json(
+                store,
+                f.id,
+                f.name,
+                f.type,
+                f.required,
+                f.doc if f.has_doc else String(),
+                out,
+            )
+    elif n.kind == TK_LIST:
+        _field_json(
+            store,
+            n.element_id,
+            "element",
+            n.element,
+            n.element_required,
+            String(),
+            out,
+        )
+    elif n.kind == TK_MAP:
+        _field_json(store, n.key_id, "key", n.key, True, String(), out)
+        out.write(", ")
+        _field_json(
+            store, n.value_id, "value", n.value, n.value_required, String(), out
+        )
+    out.write("]")
 
 
 # ── partitions, from the manifests ───────────────────────────────────────────

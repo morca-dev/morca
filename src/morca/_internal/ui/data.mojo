@@ -1,7 +1,8 @@
-"""A dataset's Data tab (#435), `/datasets/<name>?tab=data`: its schema
-and partition spec, its partitions from the manifests, a page of its rows
-(filtered, picked, sorted and paged), a quick chart of them, and the rows
-as CSV; the same as JSON at `/datasets/<name>/data.json`, and the download
+"""A dataset's Data tab (#435), `/datasets/<name>?tab=data`: the commit
+shown, picked in a bar at the top (`morca._internal.ui.data_bar`), then a
+page of its rows (filtered, picked, sorted and paged) and, a tab away, its
+schema (`morca._internal.ui.data_schema`); below them its partitions from
+the manifests and a quick chart of the rows; and the rows as CSV; the same as JSON at `/datasets/<name>/data.json`, and the download
 at `/datasets/<name>/data.csv`.
 
 The table is read by the project's `morca_maintain` (`morca._internal.views.data`),
@@ -17,12 +18,14 @@ from json import Value, loads
 
 from morca._internal.auth import login_required
 from morca._internal.dataset_config import dataset_public
-from morca._internal.html import Html, url_encode
+from morca._internal.html import Html, query_param, url_encode
 from morca._internal.json import quote
 from morca._internal.lineage import datasets as dataset_rows
 from morca._internal.metrics import bytes_text
 from morca._internal.state import State
+from morca._internal.ui.data_bar import PICK_JS, commit_bar, data_href
 from morca._internal.ui.data_chart import Point, chart_svg
+from morca._internal.ui.data_schema import schema_panel
 from morca._internal.ui.datasets import (
     dataset_href,
     dataset_tabs,
@@ -57,12 +60,6 @@ comptime _OP_NAMES = [
     ("in", "in"),
 ]
 
-comptime _SCHEMA_HELP = (
-    "The table's columns at the snapshot shown: each one's field id (how"
-    " Iceberg knows it, whatever its name), type, whether it may be null and"
-    " its doc string; then how the table is partitioned. schema and"
-    " partition_spec in the JSON."
-)
 comptime _PARTITIONS_HELP = (
     "One row per partition of the snapshot: its rows, data files and bytes,"
     " and the snapshot that last added a file to it, read from the manifests"
@@ -70,7 +67,8 @@ comptime _PARTITIONS_HELP = (
     " partitions in the JSON."
 )
 comptime _ROWS_HELP = (
-    "A page of the snapshot's rows. Filters on a partition's columns prune"
+    "A page of the commit's rows, each column's type under its name; its"
+    " schema in full on the Schema tab. Filters on a partition's columns prune"
     " partitions and files before any is read. Without a sort the rows come"
     " in the table's order and only the page is read; a sort reads every"
     " filtered row, up to a limit. rows in the JSON; Download CSV has the"
@@ -118,10 +116,6 @@ def _head(mut h: Html, name: String):
 def _qs(query: String) -> String:
     """`DataQuery.query`'s `&k=v...` as a query string's own: no `&`."""
     return String(query.removeprefix("&"))
-
-
-def _href(name: String, q: DataQuery, cursor: Int = 0) -> String:
-    return String(dataset_href(name), "?tab=data", q.query(cursor))
 
 
 def _wrap(
@@ -198,11 +192,12 @@ def data_page(
         if r.error:
             return Page(status, j^, page_html(title, "/datasets", h))
     var v = loads(r.json)
-    _snapshot_form(h, name, q, v)
-    _schema_card(h, v)
+    var view = query_param(url, "view")
+    commit_bar(h, name, q, v)
+    _data_card(h, name, q, v, limits, view == "schema", status == 400)
     _partitions_card(h, name, q, v)
-    _rows_card(h, name, q, v, limits)
     _chart_card(h, name, q, v)
+    h.raw("<script>", PICK_JS, "</script>")
     return Page(status, j^, page_html(title, "/datasets", h))
 
 
@@ -360,84 +355,6 @@ def _names(v: Value, ptr: String) raises -> List[String]:
     return out^
 
 
-def _snapshot_form(mut h: Html, name: String, q: DataQuery, v: Value) raises:
-    var current = v.at("/current")
-    var at = v.at("/snapshot")
-    h.raw('<form class="filters" method="get" action="')
-    h.text(dataset_href(name))
-    h.raw('" aria-label="Snapshot">')
-    _keep(h, q, False, True, True, True)
-    h.raw('<label>snapshot <select name="snapshot">')
-    h.raw('<option value="">current')
-    if not current.is_null():
-        h.raw(" (")
-        h.text(current.int_value())
-        h.raw(")")
-    h.raw("</option>")
-    for s in v.at("/snapshots").array_items():
-        var id = s.at("/snapshot").int_value()
-        var picked = q.snapshot and not at.is_null() and at.int_value() == id
-        h.raw('<option value="', id, '"', " selected" if picked else "", ">")
-        h.text(
-            id,
-            " · ",
-            s.at("/at").string_value(),
-            " · ",
-            s.at("/operation").string_value(),
-            " +",
-            s.at("/added_records").int_value(),
-        )
-        h.raw("</option>")
-    h.raw('</select></label><button type="submit">Show</button>')
-    if not at.is_null():
-        h.raw('<span class="filters__quick">')
-        h.link(
-            snapshot_href(SnapshotRef(name, at.int_value())),
-            String("Lineage of ", at.int_value()),
-        )
-        h.raw("</span>")
-    h.raw("</form>")
-
-
-def _schema_card(mut h: Html, v: Value) raises:
-    card_open(h, "schema", "Schema", _SCHEMA_HELP, "ui", facts=False)
-    h.raw(
-        '<div class="scroll"><table><thead><tr><th class="num">Field id</th>',
-        "<th>Column</th><th>Type</th><th>Required</th><th>Doc</th></tr>",
-        "</thead><tbody>",
-    )
-    for c in v.at("/schema/columns").array_items():
-        h.raw("<tr>")
-        h.num(c.at("/id").int_value())
-        h.raw("<td><code>")
-        h.text(c.at("/name").string_value())
-        h.raw("</code></td>")
-        h.mono(c.at("/type").string_value())
-        h.cell("yes" if c.at("/required").bool_value() else "no")
-        var doc = c.at("/doc")
-        h.cell(doc.string_value() if doc.is_string() else String())
-        h.raw("</tr>")
-    h.raw('</tbody></table></div><p class="card__sub">')
-    var fields = v.at("/partition_spec/fields").array_items()
-    if len(fields) == 0:
-        h.raw("Not partitioned.")
-    else:
-        h.raw("Partitioned by ")
-        for i in range(len(fields)):
-            ref f = fields[i]
-            h.raw(", " if i else "", "<code>")
-            h.text(f.at("/name").string_value())
-            h.raw("</code> (")
-            h.text(f.at("/transform").string_value(), " of ")
-            h.raw("<code>")
-            h.text(f.at("/source").string_value())
-            h.raw("</code>)")
-        h.raw(", spec ")
-        h.text(v.at("/partition_spec/spec_id").int_value())
-        h.raw(".")
-    h.raw("</p></section>")
-
-
 def _partitions_card(mut h: Html, name: String, q: DataQuery, v: Value) raises:
     var got = v.try_at("/partitions")
     if not got:
@@ -480,7 +397,7 @@ def _partitions_card(mut h: Html, name: String, q: DataQuery, v: Value) raises:
                     String(f.at("/source").string_value(), ":eq:", text)
                 )
                 h.raw('<td class="mono">')
-                h.link(String(_href(name, q2), "#rows"), text)
+                h.link(String(data_href(name, q2), "#rows"), text)
                 h.raw("</td>")
             else:
                 h.mono(text)
@@ -515,15 +432,77 @@ def _op_name(op: String) -> String:
     return op
 
 
-def _rows_card(
-    mut h: Html, name: String, q: DataQuery, v: Value, limits: DataLimits
+def _view_tab(
+    mut h: Html,
+    name: String,
+    q: DataQuery,
+    view: StaticString,
+    panel: StaticString,
+    label: StaticString,
+    on: Bool,
+):
+    h.raw('<a role="tab" class="vtabs__tab" data-view="', view, '" href="')
+    h.text(data_href(name, q), "&view=" if view != "data" else "")
+    if view != "data":
+        h.raw(view)
+    h.raw(
+        '" aria-selected="',
+        "true" if on else "false",
+        '" aria-controls="',
+        panel,
+        '">',
+        label,
+        "</a>",
+    )
+
+
+def _data_card(
+    mut h: Html,
+    name: String,
+    q: DataQuery,
+    v: Value,
+    limits: DataLimits,
+    schema: Bool,
+    bad: Bool,
+) raises:
+    """The Data and Schema tabs: the rows first, the schema a click away
+    (`?view=schema` to start there), switched without a reload."""
+    h.raw(
+        '<section class="card dview" id="data" data-tabs="morca.data.view"',
+        ' data-tabs-param="view" data-tabs-forget><div class="dview__head">',
+        '<div class="vtabs"><div role="tablist" aria-label="Data or schema">',
+    )
+    _view_tab(h, name, q, "data", "rows", "Data", not schema)
+    _view_tab(h, name, q, "schema", "schema", "Schema", schema)
+    h.raw("</div></div>")
+    help_tip(h, "card-rows", "Data", _ROWS_HELP, "ui")
+    h.raw(
+        '</div><div id="rows" role="tabpanel" class="dview__panel"',
+        " hidden" if schema else "",
+        ">",
+    )
+    _rows_panel(h, name, q, v, limits, bad)
+    h.raw(
+        '</div><div id="schema" role="tabpanel" class="dview__panel"',
+        "" if schema else " hidden",
+        ">",
+    )
+    schema_panel(h, v)
+    h.raw("</div></section>")
+
+
+def _rows_panel(
+    mut h: Html,
+    name: String,
+    q: DataQuery,
+    v: Value,
+    limits: DataLimits,
+    bad: Bool,
 ) raises:
     var cols = List[String]()
     for c in v.at("/schema/columns").array_items():
         cols.append(c.at("/name").string_value())
-    h.raw('<section class="card data__rows" id="rows"><h2>Rows')
-    help_tip(h, "card-rows", "Rows", _ROWS_HELP, "ui")
-    h.raw("</h2>")
+    h.raw('<div class="dview__tools">')
     # The filters, each with a link that drops it.
     if len(q.filters):
         h.raw('<ul class="data__chips" aria-label="Filters">')
@@ -548,7 +527,16 @@ def _rows_card(
             )
             h.raw('" aria-label="Remove this filter">×</a></li>')
         h.raw("</ul>")
-    h.raw('<form class="filters" method="get" action="')
+    h.raw('<details class="dfilter"', " open" if bad else "", "><summary>")
+    h.raw("Filter, columns, sort")
+    if len(q.columns) or q.sort:
+        h.raw(' <span class="muted">(')
+        if len(q.columns):
+            h.raw(len(q.columns), " columns", ", " if q.sort else "")
+        if q.sort:
+            h.text("sorted by ", q.sort)
+        h.raw(")</span>")
+    h.raw('</summary><form class="filters" method="get" action="')
     h.text(dataset_href(name))
     h.raw('#rows" aria-label="Filter rows">')
     _keep(h, q, True, True, False, True)
@@ -598,10 +586,12 @@ def _rows_card(
             h.raw('"', " selected" if q.sort == key else "", ">")
             h.text(c, d[1])
             h.raw("</option>")
-    h.raw('</select></label><button type="submit">Apply</button></form>')
+    h.raw(
+        '</select></label><button type="submit">Apply</button></form>',
+        "</details></div>",
+    )
     var rows = v.try_at("/rows")
     if not rows:
-        h.raw("</section>")
         return
     ref r = rows.value()
     rows_table(h, r, len(q.filters) > 0)
@@ -610,11 +600,11 @@ def _rows_card(
     var next = r.at("/next")
     h.raw('<nav class="pager" aria-label="Pages of rows">')
     if offset > 0:
-        pager_link(h, "", String(_href(name, q), "#rows"), "« First")
+        pager_link(h, "", String(data_href(name, q), "#rows"), "« First")
         pager_link(
             h,
             "prev",
-            String(_href(name, q, max(0, offset - q.n)), "#rows"),
+            String(data_href(name, q, max(0, offset - q.n)), "#rows"),
             "← Previous",
         )
     h.raw('<span class="pager__at">')
@@ -626,7 +616,7 @@ def _rows_card(
         pager_link(
             h,
             "next",
-            String(_href(name, q, Int(next.int_value())), "#rows"),
+            String(data_href(name, q, Int(next.int_value())), "#rows"),
             "Next →",
         )
     h.raw('<a href="')
@@ -640,12 +630,12 @@ def _rows_card(
     )
     h.raw('<a href="')
     h.text(String(dataset_href(name), "/data.json?", _qs(q.query(offset))))
-    h.raw('">JSON</a></nav></section>')
+    h.raw('">JSON</a></nav>')
 
 
 def rows_table(mut h: Html, r: Value, filtered: Bool) raises:
     """A read's `rows`: why it stopped, if it did, and the table of them
-    (or that there are none), each column titled with its type."""
+    (or that there are none), each column's type under its name."""
     var stopped = r.at("/stopped")
     if stopped.is_string():
         h.raw('<p class="card__warn">')
@@ -658,7 +648,7 @@ def rows_table(mut h: Html, r: Value, filtered: Bool) raises:
         h.raw(" match the filters." if filtered else ".")
         h.raw("</p>")
     else:
-        h.raw('<div class="scroll"><table><thead><tr>')
+        h.raw('<div class="scroll dtable"><table><thead><tr>')
         var types = List[String]()
         for c in r.at("/columns").array_items():
             types.append(c.at("/type").string_value())
@@ -673,7 +663,9 @@ def rows_table(mut h: Html, r: Value, filtered: Bool) raises:
             h.text(types[k])
             h.raw('">')
             h.text(names[k])
-            h.raw("</th>")
+            h.raw('<span class="dtype">')
+            h.text(types[k])
+            h.raw("</span></th>")
         h.raw("</tr></thead><tbody>")
         for row in list:
             h.raw("<tr>")
