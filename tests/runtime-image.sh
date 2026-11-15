@@ -108,6 +108,11 @@ run --entrypoint cat "$proj" /opt/morca/pipelines/toy.source.json | grep -q '"pi
 run --entrypoint toy "$proj" describe | grep -q '"pipeline": "toy"' || fail "toy describe"
 out=$(run --entrypoint toy "$proj" run --partitions 2024-01 2>&1) || fail "toy run: $out"
 [ "$(docker image inspect -f '{{.Config.Entrypoint}}' "$proj")" = "[/opt/morca/bin/morca]" ] || fail "the entrypoint"
+# No upgrade.toml in the project, none in the image, and no steps (#472).
+run --entrypoint sh "$proj" -c '[ ! -e /opt/morca/upgrade.toml ] && [ ! -e /opt/morca/CHANGELOG.md ]' \
+    || fail "an upgrade.toml or CHANGELOG.md the project hasn't"
+out=$(run "$proj" upgrade --from 0.0.1 --to 9.9.9 2>&1) || fail "morca upgrade without an upgrade.toml: $out"
+[ -z "$out" ] || fail "upgrade steps without an upgrade.toml: $out"
 # The runtime's morca, unchanged: the project has no bin/scheduler.mojo.
 a=$(run --entrypoint sha256sum "$img" /opt/morca/bin/morca | cut -d' ' -f1)
 b=$(run --entrypoint sha256sum "$proj" /opt/morca/bin/morca | cut -d' ' -f1)
