@@ -433,17 +433,20 @@ def sink_new(
     return sink
 
 
-def sink_schema(a: Api, sink: Int, stream_schema: Int) raises:
-    """`stream_schema` is the worker's, which outlives the sink."""
+def sink_schema(a: Api, sink: Int, stream: ImportedStream) raises:
+    """Checks `stream`'s schema, which the library reads during the call."""
     var c = _Call()
-    var rc = a.sink_schema(sink, stream_schema, c.err())
+    var rc = a.sink_schema(sink, stream.schema_address(), c.err())
     c.check(a, rc != 0)
 
 
-def sink_put(a: Api, sink: Int, array: Int) raises:
-    """Moves the `ArrowArray` at `array` to the library."""
+def sink_put(a: Api, sink: Int, stream: ImportedStream, array: Slots) raises:
+    """Moves the `ArrowArray` in `array` (10 slots), one of `stream`'s, to
+    the library, leaving `array` released; the library reads it with the
+    stream's schema during the call."""
+    debug_assert(array.n >= 10, "lake: an ArrowArray takes 10 slots")
     var c = _Call()
-    var rc = a.sink_put(sink, array, c.err())
+    var rc = a.sink_put(sink, array.addr, stream.schema_address(), c.err())
     c.check(a, rc != 0)
 
 

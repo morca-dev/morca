@@ -292,8 +292,8 @@ def lake_sink_schema(s: Int, schema: Int, err: Int) abi("C") -> Int32:
 
 
 @export("lake_sink_put")
-def lake_sink_put(s: Int, array: Int, err: Int) abi("C") -> Int32:
-    return lib.lake_sink_put(s, array, err)
+def lake_sink_put(s: Int, array: Int, schema: Int, err: Int) abi("C") -> Int32:
+    return lib.lake_sink_put(s, array, schema, err)
 
 
 @export("lake_sink_take")

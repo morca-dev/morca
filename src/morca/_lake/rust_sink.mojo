@@ -11,8 +11,9 @@ for the step's one `append_files`.
   `name` the dataset for messages, `dir` the call's output directory; 0 on
   error;
 - `lake_sink_schema(s, schema)`: checks the stream's schema, an
-  `ArrowSchema` the caller keeps (borrowed until the sink is freed);
-- `lake_sink_put(s, array)`: one `ArrowArray` of the stream, moved here
+  `ArrowSchema` the caller keeps;
+- `lake_sink_put(s, array, schema)`: one `ArrowArray` of the stream, read
+  with the stream's `schema` (the one checked), and moved here
   as the C Data Interface moves one: the sink copies the struct into
   storage of its own and marks the caller's released, so the caller frees
   only its storage, and the sink releases the array when the last batch
@@ -23,7 +24,9 @@ for the step's one `append_files`.
   count and rows, encoded, to `out`; frees the sink either way;
 - `lake_sink_free(s)`.
 
-Each fallible one takes `err` and returns 1 (0 for a handle) on error.
+Each fallible one takes `err` and returns 1 (0 for a handle) on error. A
+sink keeps no address of the caller's: what a call reads (a schema, a
+path) it reads during the call.
 """
 
 from std.memory import ArcPointer
@@ -54,8 +57,8 @@ struct RustSink(Movable):
     var flush_bytes: Int
     var writer: FileWriter
     var own: WorkerFiles
-    var stream_schema: Int
-    """The stream's `ArrowSchema`, borrowed; 0 until `check`."""
+    var checked: Bool
+    """Whether `check` has passed the stream's schema."""
     var streams: Bool
     """Whether the stream has columns: none says the worker only writes
     files."""
@@ -72,7 +75,7 @@ struct RustSink(Movable):
         self.own = WorkerFiles(table, name.copy(), dir^)
         self.name = name^
         self.flush_bytes = flush
-        self.stream_schema = 0
+        self.checked = False
         self.streams = False
         self.pending = List[ColumnTree]()
         self.pending_rows = 0
@@ -82,7 +85,6 @@ struct RustSink(Movable):
     def check(mut self, stream_schema: Int) raises:
         """Checks the stream's schema against the table's, before anything
         is written."""
-        self.stream_schema = stream_schema
         self.streams = _columns(stream_schema) > 0
         if self.streams:
             try:
@@ -94,15 +96,16 @@ struct RustSink(Movable):
                     ": ",
                     e,
                 )
+        self.checked = True
 
-    def put(mut self, array: Int) raises:
+    def put(mut self, array: Int, stream_schema: Int) raises:
         """Moves the stream's array at `array` here, aligns it to the table
         and writes what's pending once there's about `flush_bytes` of it."""
         var storage = _move_array(array)
         var owner = ArcPointer(ForeignBuffers(storage, True))
-        if self.stream_schema == 0:
+        if not self.checked:
             raise Error("lake: a batch reached the sink before its schema")
-        var batch = _import_batch(storage, self.stream_schema, owner)
+        var batch = _import_batch(storage, stream_schema, owner)
         _ = owner^
         if batch.num_rows == 0:
             return
@@ -241,10 +244,10 @@ def lake_sink_schema(s: Int, schema: Int, err: Int) abi("C") -> Int32:
         return 1
 
 
-def lake_sink_put(s: Int, array: Int, err: Int) abi("C") -> Int32:
+def lake_sink_put(s: Int, array: Int, schema: Int, err: Int) abi("C") -> Int32:
     """One array of the stream, moved here; 1 on error."""
     try:
-        _sink(s)[].put(array)
+        _sink(s)[].put(array, schema)
         return 0
     except e:
         _fail(err, e)

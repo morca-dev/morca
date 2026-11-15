@@ -30,7 +30,7 @@ library calls on the caller's thread, inside the call.
 
 from std.memory.alloc import unsafe_alloc
 
-comptime ABI_VERSION: UInt32 = 5
+comptime ABI_VERSION: UInt32 = 6
 """What `lake_abi_version()` returns. Bump it with any change to a signature,
 an encoding, the host block or who owns what. 2: batches given to the
 library are moved to it, not borrowed (arrow-mlake-mojo 0.3.0). 3: a data
@@ -39,7 +39,8 @@ options and row groups in `lake_writer_write`, a status from
 `lake_writer_finish`, and batch readers, schema fields, table exists and a
 table's files (#464). 4: `lake_expire` and `lake_data`, `morca_maintain`'s
 commands (#471). 5: the `lake_sink_*` functions, a Rust step's output
-(#474)."""
+(#474). 6: `lake_sink_put` takes the stream's schema with each array, so a
+sink keeps no address of the caller's between calls."""
 
 # Host block slots, as byte offsets.
 comptime H_STATE = 0
