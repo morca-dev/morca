@@ -243,6 +243,9 @@ instances are launched.
 
 Releasing and operations: https://mlake.dev/getting-started/maintain
 
+If the public API in `src/morca/__init__.mojo` changed, re-pin
+magmalake/skills' `ci/pixi.toml` and fix what its compile check fails on.
+
 ## Developing locally
 
 The tests and examples above run from a checkout of this repository, with the

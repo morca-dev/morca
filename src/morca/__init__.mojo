@@ -39,11 +39,11 @@ comes with a minor-version note in the changelog (changes/README.md).
 | `morca.ctx` | `Ctx`, what a step is given: its run, partition, attempt, logs and dista runtime |
 | `morca.partitions` | `Monthly`, `Daily`, `Hourly`, `Partitions`, `parse_partitions` |
 | `morca.keyed` | `Keyed`: partitions named by a dataset's column, not dates |
-| `morca.month`, `morca.day`, `morca.hour`, `morca.key`, `morca.name` | the partition keys: `Month`, `Day`, `Hour`, `Name`, `Key`, `TimeKey`, and their parsers |
+| `morca.month`, `morca.day`, `morca.hour`, `morca.key`, `morca.name` | the partition keys: `Month`, `Day`, `Hour`, `Name` (`Name.text` is the name as a `String`), `Key`, `TimeKey`, and their parsers |
 | `morca.schedule`, `morca.cron`, `morca.tz` | `Cron`, `Current`, `Previous`, `Fill`, `NoSchedule`, `Schedule`, `ScheduleLike`; `CronExpr`; `Zone`, `PosixTZ` |
 | `morca.civil` | `Civil`, `now`, `parse_time`, `utc` |
 | `morca.tasks` | `Tasks`, `TaskSet`, `NoTasks`, `workers`: a step's dista tasks |
-| `morca.tables` | Iceberg from steps, through liblake: `table`, `scan`, `append`, `commit`, `ensure_table`, `find_commit`, `append_files`, `write_files`, `replace_partitions`, `load_dataset`, `table_exists`; `Table`, `TableScan`, `BatchReader`, `Schema`, `PartitionSpec`, `BatchBuilder`, `FileWriter`, `DataFiles` |
+| `morca.tables` | Iceberg from steps, through liblake: `table`, `scan`, `append`, `commit`, `ensure_table`, `find_commit`, `append_files`, `write_files`, `replace_partitions`, `load_dataset`, `table_exists`; `column_of` (a batch column's index), `strings_of` and `ints_of` (a string or integer column's values, None for a null), `concat_batches` (batches as one); `Table`, `TableScan`, `BatchReader`, `Schema`, `PartitionSpec`, `BatchBuilder`, `FileWriter`, `DataFiles` |
 | `morca.rust_step` | steps written in Rust: `rust_step`, which runs a worker library and commits what it streams and the Parquet files it writes, and `RustRun` (docs/rust-workers.md) |
 | `morca.cli` | `morca_main`, the command line of a pipeline binary, and `report` |
 | `morca.command` | `morca_command`, the `morca` binary (scheduler, UI, registration) |

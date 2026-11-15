@@ -10,7 +10,7 @@ With `MORCA_RUNNER=ec2` the scheduler starts a run's start `s` as:
   `MORCA_EC2_WORKER_TYPE`; Spot with `--spot`), for a pipeline with tasks,
   started straight after with `DISTA_HEAD` at the head's private address.
 
-Each is tagged `orca.run`, `orca.start`, `morca.pipeline` and `orca.role`,
+Each is tagged `orca.run`, `orca.start`, `orca.pipeline` and `orca.role`,
 told to terminate when it shuts down, and started from user data that runs
 the pipeline's image (`MORCA_EC2_MODE=docker`, the default: `docker run
 --network host`, after `MORCA_EC2_PREAMBLE`, such as an ECR login) or the
