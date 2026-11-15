@@ -212,18 +212,34 @@ struct Enc(Movable, Sized):
         return len(self.buf)
 
 
-struct Dec:
-    """Reads what `Enc` wrote, from `n` bytes at `addr` (not copied: the
-    bytes must outlive it)."""
+comptime RawDec = Dec[ImmUntrackedOrigin]
+"""A `Dec` over bytes the other side handed over, at an address: they're
+valid for the call (or until the host's next callback), which the compiler
+can't check."""
+
+
+struct Dec[origin: ImmOrigin]:
+    """Reads what `Enc` wrote, without copying the bytes: `Dec(b)` borrows a
+    buffer of this side's, so the compiler keeps `b` alive while it reads;
+    `RawDec(addr, n)` reads bytes at an address."""
 
     var addr: Int
     var n: Int
     var pos: Int
+    var _bytes: Span[UInt8, Self.origin]
+    """What it borrows; empty for a `RawDec`."""
+
+    def __init__(out self, b: Span[UInt8, Self.origin]):
+        self.addr = Int(b.unsafe_ptr())
+        self.n = len(b)
+        self.pos = 0
+        self._bytes = b
 
     def __init__(out self, addr: Int, n: Int):
         self.addr = addr
         self.n = n
         self.pos = 0
+        self._bytes = Span[UInt8, Self.origin]()
 
     def _need(self, k: Int) raises:
         if k < 0 or self.pos + k > self.n:
@@ -292,7 +308,7 @@ def encode_map(d: Dict[String, String]) -> List[UInt8]:
 
 def decode_map(addr: Int, n: Int) -> Dict[String, String]:
     try:
-        var d = Dec(addr, n)
+        var d = RawDec(addr, n)
         return d.map()
     except:
         return Dict[String, String]()

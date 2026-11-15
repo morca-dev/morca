@@ -59,7 +59,8 @@ from morca._internal.notify import (
     resolve as resolve_alert,
     send_now,
 )
-from morca._internal.proc import absolute, binary_seconds, capture
+from morca._common.paths import absolute
+from morca._internal.proc import binary_seconds, capture
 from morca._internal.remote import (
     Api,
     api_command,

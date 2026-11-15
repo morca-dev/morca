@@ -74,8 +74,8 @@ from morca._internal.fill import (
     parse_fills,
 )
 from morca._internal.json import quote
+from morca._common.paths import absolute
 from morca._internal.proc import (
-    absolute,
     capture,
 )
 from morca._internal.resources import (

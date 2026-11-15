@@ -14,7 +14,7 @@ a file writer of a heap `FileWriter`, a batch reader of a heap
 **Maintenance.** `morca_maintain`'s two commands run here whole, so it
 compiles no iceberg (#471): `lake_expire` (snapshot expiry,
 `morca._lake.expire_impl`) and `lake_data` (the UI's data view,
-`morca._internal.dataread`).
+`morca._lake.dataread`).
 
 **Rust steps.** What `morca.rust_step` does with a worker's output, so a
 program with Rust steps compiles no iceberg either (#474): the `lake_sink_*`
@@ -52,7 +52,7 @@ from morca._lake.abi import (
     MODE_REPLACE,
     SNAP_CURRENT,
     SNAP_NONE,
-    Dec,
+    RawDec,
     Enc,
     bytes_of,
     free_text,
@@ -75,7 +75,7 @@ from morca._lake.rust_sink import (
     lake_sink_take,
 )
 import morca._lake.impl as tables
-from morca._internal.dataread import data_text
+from morca._lake.dataread import data_text
 
 
 # ── handles, errors, batches ────────────────────────────────────────────────
@@ -180,7 +180,7 @@ def _options(o: WriteOptions) -> Enc:
 
 
 def _options_of(addr: Int, n: Int) raises -> WriteOptions:
-    var d = Dec(addr, n)
+    var d = RawDec(addr, n)
     var o = WriteOptions()
     o.codec = d.str()
     o.row_group_rows = Int(d.int())
@@ -205,7 +205,7 @@ struct _ScanOpts(Movable):
     var paths: List[String]
 
     def __init__(out self, addr: Int, n: Int) raises:
-        var d = Dec(addr, n)
+        var d = RawDec(addr, n)
         self.snapshot = d.int()
         self.filter = d.str()
         self.columns = d.strs()
@@ -292,7 +292,7 @@ def lake_ensure_table(
         if spec_text:
             var doc = parse_json(spec_text)
             p = PartitionSpec.from_json(doc, doc.root)
-        var d = Dec(props, props_n)
+        var d = RawDec(props, props_n)
         var properties = d.map() if props_n > 0 else Dict[String, String]()
         return _new_table(
             tables.ensure_table(ctx, text_of(ds, ds_n), s, p, properties)
@@ -724,7 +724,7 @@ def lake_commit(
     try:
         var ctx = Host(host)
         ref t = _table(h)[]
-        var d = Dec(changes, changes_n)
+        var d = RawDec(changes, changes_n)
         var fc = FileChanges()
         var data = d.bytes()
         var deletes = d.bytes()
@@ -917,7 +917,7 @@ def lake_data(
     strings, those after `data`), to `out_block`; 1 on arguments it can't
     parse (a failed read is the output's `{"error": ...}`)."""
     try:
-        var d = Dec(args, args_n)
+        var d = RawDec(args, args_n)
         give_text(out_block, data_text(d.strs()))
         return 0
     except e:
