@@ -109,6 +109,7 @@ from morca._internal.auth import audit
 from morca._internal.tokens import revoke_user_tokens, user_tokens
 from morca._internal.web.server import DEFAULT_ADDR, serve_ui
 from morca._internal.web.drain import stop_asked, stop_signals
+from morca._internal.version import MORCA_VERSION
 from morca._internal.worker import worker_command
 from morca._internal.workers import (
     create_worker_token,
@@ -118,6 +119,7 @@ from morca._internal.workers import (
 )
 
 comptime USAGE = """usage:
+  morca version                     (the morca-mojo it was built from)
   morca locate <pipeline binary> [...] [--root <dir>]
   morca upgrade [--file <upgrade.toml>] [--from V] --to V [--when before|after]
                 (a release's upgrade steps, a line each, for deploy.sh;
@@ -424,6 +426,10 @@ def _command(args: List[String], target: String) raises -> Int:
         return api_command(api, args)
     if args[1] == "locate":
         return _locate(args)
+    if args[1] == "version" or args[1] == "--version":
+        # No database: which morca-mojo this is (#455).
+        print("morca", MORCA_VERSION)
+        return 0
     if args[1] == "upgrade":
         # A file only, for deploy.sh: no database (morca.upgrade).
         return upgrade_command(args)

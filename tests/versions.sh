@@ -188,4 +188,21 @@ echo "$page" | grep -qF 'document.addEventListener("morca:swap", () => { if (cur
 echo "$page" | grep -qF 'function morcaLead(doc)' || fail "the cards have no lead sentence"
 echo "$page" | grep -qF 'const doc = own || (isDef ? null : moduleDoc(src.lines));' || fail "a pipeline's card doesn't fall back to its module's docstring"
 kill "$pid"
-echo "ok   versions: a run links the commit it ran, the pipeline lists its versions"
+
+# The morca a pipeline was built with (#455): describe says it, `morca
+# version` prints this one's, and register refuses another's unless
+# MORCA_MIXED_VERSIONS=1, when it warns.
+want=$(sed -n '/^\[package\]/,/^\[/s/^version = "\(.*\)"$/\1/p' pixi.toml)
+[ "$(./build/morca version)" = "morca $want" ] || fail "morca version: $(./build/morca version 2>&1)"
+./build/toy describe | jq -e ".morca == \"$want\"" > /dev/null || fail "describe's morca: $(./build/toy describe | jq -c .morca)"
+./build/toy describe | sed -e 's/"pipeline": "toy"/"pipeline": "toy_old"/' -e 's/"morca": "[^"]*"}$/"morca": "0.0.1"}/' \
+    > build/toy-old.json
+printf '#!/bin/sh\ncat "%s"\n' "$PWD/build/toy-old.json" > build/toy-old
+chmod +x build/toy-old
+out=$(./build/morca register ./build/toy-old 2>&1) && fail "registered a pipeline of another morca: $out"
+echo "$out" | grep -qF "toy-old was built with morca 0.0.1 and this morca is $want: build the pipelines with" \
+    || fail "the refusal: $out"
+[ "$(q "SELECT count(*) FROM orca.pipelines WHERE name = 'toy_old'")" = 0 ] || fail "the refused pipeline is registered"
+out=$(MORCA_MIXED_VERSIONS=1 ./build/morca register ./build/toy-old 2>&1) || fail "MORCA_MIXED_VERSIONS=1 register: $out"
+echo "$out" | grep -qF "morca: warning: $PWD/build/toy-old was built with morca 0.0.1" || fail "no warning: $out"
+echo "ok   versions: a run links the commit it ran, the pipeline lists its versions, register checks the morca"

@@ -25,22 +25,14 @@ pixi shelf add morca-mojo
 ```
 
 A pipeline is a Mojo file ending in `morca_main[YourPipeline]()` (see
-`examples/`), and the `morca` command (scheduler, UI, registration) is two
-lines of your own (not in a file named `morca`, which would be the
-module `morca` itself):
-
-```mojo
-# bin/scheduler.mojo
-from morca.command import morca_command
-
-def main() raises:
-    morca_command()
-```
+`examples/`). The `morca` command (scheduler, UI, registration) and
+`morca_maintain` come prebuilt in the package's `bin/`, on the
+environment's `PATH`, so a project compiles only its own code
+([docs/binaries.md](docs/binaries.md)):
 
 ```sh
 mojo build pipelines/daily.mojo -o build/daily
-mojo build bin/scheduler.mojo -o build/morca
-./build/morca locate build/daily --root . && ./build/morca register ./build/daily
+pixi run morca locate build/daily --root . && pixi run morca register ./build/daily
 ```
 
 ## Public API
@@ -58,6 +50,7 @@ them comes with a note in the changelog. Everything under `morca._internal`
 
 | Page | What it covers |
 |---|---|
+| [docs/binaries.md](docs/binaries.md) | the prebuilt `morca` and `morca_maintain` in the package: using them, versions and `morca register`'s check, apps beside them |
 | [docs/morca-toml.md](docs/morca-toml.md) | `morca.toml`: every key, precedence, `morca config show` and `export`, and [fills](docs/morca-toml.md#fills) |
 | [docs/placement.md](docs/placement.md) | where a pipeline's runs run: `default`, `ec2`, `control` and `worker:<pool>`, and the control host's limits |
 | [docs/workers.md](docs/workers.md) | remote workers: `morca worker`, worker tokens, a worker on another machine, the run's state over the API |

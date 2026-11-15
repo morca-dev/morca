@@ -5,7 +5,8 @@
 # the commit it releases <version> (release.yml).
 #
 # One image per architecture, each on its own runner (no emulation), built
-# for a baseline CPU (MOJO_TARGET_CPU) from deploy/runtime/pixi.lock and
+# for a baseline CPU (the morca-mojo package's binaries, pixi.toml; a
+# project's image on it takes MOJO_TARGET_CPU) from deploy/runtime/pixi.lock and
 # tested with tests/runtime-image.sh, which on the architectures in
 # `project` also builds a scratch project's image on it. A push sends each
 # as <sha>-<arch>, and `manifest` joins them under <sha>.
@@ -57,7 +58,6 @@ jobs:
       - name: Build the runtime image
         run: |
           docker build -f deploy/runtime.Dockerfile \
-            --build-arg MOJO_TARGET_CPU=${{ matrix.cpu }} \
             --label org.opencontainers.image.source=https://github.com/${{ github.repository }} \
             --label org.opencontainers.image.revision="$SHA" \
             -t morca-runtime:ci .
