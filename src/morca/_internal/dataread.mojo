@@ -173,15 +173,22 @@ def warm_manifests(
     names in `cache`, for `partitions_json` and the rows' plan to share:
     from `disk` where it has them, the rest fetched at once and kept there.
     A manifest's bytes never change, so they're kept by its location."""
-    var lst: List[UInt8]
+    var mfs = List[ManifestFile]()
     var got = disk.get(snap.manifest_list)
+    var parsed = False
     if got:
-        lst = got.take()
-    else:
-        lst = t.io.read_all(snap.manifest_list)
+        # A kept list that doesn't parse is a miss: removed, fetched again.
+        try:
+            mfs = read_manifest_list_bytes_cached(got.value().copy(), cache)
+            cache.keep_file(snap.manifest_list, Span(got.value()))
+            parsed = True
+        except:
+            disk.drop(snap.manifest_list)
+    if not parsed:
+        var lst = t.io.read_all(snap.manifest_list)
         disk.put(snap.manifest_list, Span(lst))
-    cache.keep_file(snap.manifest_list, Span(lst))
-    var mfs = read_manifest_list_bytes_cached(lst^, cache)
+        cache.keep_file(snap.manifest_list, Span(lst))
+        mfs = read_manifest_list_bytes_cached(lst^, cache)
     var missing = List[String]()
     for mf in mfs:
         if cache.has_file(mf.manifest_path):
@@ -230,8 +237,10 @@ def partitions_json(
     )
     var kept = disk.get_text(key)
     if kept:
-        out.write(kept.value())
-        return
+        if _partitions_shape(kept.value()):
+            out.write(kept.value())
+            return
+        disk.drop(key)
     var mfs: List[ManifestFile]
     if snap.manifest_list:
         mfs = warm_manifests(t, snap, cache, disk)
@@ -241,6 +250,19 @@ def partitions_json(
     if t.metadata.table_uuid and snap.manifest_list:
         disk.put_text(key, text)
     out.write(text)
+
+
+def _partitions_shape(text: String) -> Bool:
+    """Whether kept partitions look as `_partitions` writes them."""
+    if not text.startswith('"partitions": [') or (
+        '], "partitions_total": ' not in text
+    ):
+        return False
+    try:
+        _ = Int(text[byte = text.rfind(" ") + 1 :])
+        return True
+    except:
+        return False
 
 
 def _partitions(
@@ -394,7 +416,23 @@ struct _Phases(Movable):
 
 
 def data_json(a: DataAsk) raises -> String:
-    """What `morca_maintain data` prints for `a`."""
+    """What `morca_maintain data` prints for `a`. A read that fails on what
+    the disk cache gave it, not on a mistake in what was asked (a `morca:`
+    error), is read again without it, and what it used is removed."""
+    var disk = DataCache.from_env()
+    try:
+        return _data_json(a, disk)
+    except e:
+        if len(disk.used) == 0 or String(e).startswith("morca:"):
+            raise e^
+        for k in disk.used:
+            disk.drop(k)
+        disk.used = List[String]()
+        disk.reading = False
+        return _data_json(a, disk)
+
+
+def _data_json(a: DataAsk, mut disk: DataCache) raises -> String:
     var ph = _Phases()
     var t = load_dataset(a.dataset)
     ph.mark("load", t)
@@ -402,7 +440,6 @@ def data_json(a: DataAsk) raises -> String:
     # which all plan the same snapshot; and the one on disk, across reads.
     var cache = ManifestCache()
     cache.max_file_bytes = MANIFEST_BYTES
-    var disk = DataCache.from_env()
     var out = String('{"dataset": ', json_quote(a.dataset), ", ")
     var scan = t.scan()
     if a.snapshot >= 0:

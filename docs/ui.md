@@ -380,6 +380,10 @@ requests it made.
 |---|---|---|
 | `MORCA_DATA_CACHE` | `$TMPDIR/morca-data-cache` | where; `off` for no cache |
 | `MORCA_DATA_CACHE_MB` | 256 | what it keeps; the least recently used goes first |
+| `MORCA_DATA_CACHE_MIN_FREE_MB` | 1 GB or 5% of the disk, the larger | the free space it leaves: below it, it writes nothing and shrinks |
+
+A kept file that was cut short or doesn't parse is removed and read from
+object storage again.
 
 A click on a Data link, or on one of the tab's forms, shows "Loading
 data…" and a bar along the top until the page comes.

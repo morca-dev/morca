@@ -19,6 +19,9 @@
 #   together, with the same rows as a read from the start; the manifests
 #   and the partitions are kept in MORCA_DATA_CACHE, so the next read
 #   fetches none; and a Data link marks the page as loading once clicked;
+# - the cache's own tests (tests/test_datacache.mojo); a kept file cut
+#   short, or one that doesn't parse, is fetched again; and below the
+#   free space to keep (MORCA_DATA_CACHE_MIN_FREE_MB) nothing is kept;
 # - a pipeline's Data tab: the first rows of each dataset it writes, through
 #   the same reader, linked to the dataset's Data tab;
 # - [datasets."lake.obs"] public = false hides the data from visitors not
@@ -37,6 +40,9 @@ scripts/mojo-build.sh -I src $DEP_INC tests/dataview/obs.mojo -o build/dv-obs &
 pids="$pids $!"
 # shellcheck disable=SC2086
 scripts/mojo-build.sh -I src $DEP_INC tests/dataview/many.mojo -o build/dv-many &
+pids="$pids $!"
+# shellcheck disable=SC2086
+scripts/mojo-build.sh -I src $DEP_INC tests/test_datacache.mojo -o build/test-datacache &
 pids="$pids $!"
 # shellcheck disable=SC2086
 scripts/mojo-build.sh -I src $DEP_INC bin/morca_maintain.mojo -o build/morca_maintain &
@@ -242,6 +248,48 @@ env MORCA_DATA_CACHE_MB=0.002 ./build/morca_maintain data lake.wide --snapshot "
 kept=$(find "$MORCA_DATA_CACHE" -type f -exec cat {} + | wc -c)
 [ "$kept" -le 2048 ] || fail "the cache past MORCA_DATA_CACHE_MB: $kept bytes"
 echo "ok   many files: later pages by count, manifests and partitions kept, the loading mark"
+
+# The cache when it's broken or the disk is low (#483).
+./build/test-datacache >> "$log" 2>&1 || fail "tests/test_datacache.mojo"
+reqs() { jq .timings.manifests.requests; }
+rows() { jq -c .rows.rows; }
+want=$(md lake.small --limit 30 | rows)
+[ "$(md lake.small --limit 30 | reqs)" -eq 0 ] || fail "lake.small isn't kept"
+# Every kept file cut short: each is a miss, removed and fetched again.
+for f in "$MORCA_DATA_CACHE"/*; do
+    head -c 9 "$f" > "$f.cut" && mv "$f.cut" "$f"
+done
+got=$(md lake.small --limit 30)
+[ "$(echo "$got" | rows)" = "$want" ] || fail "rows after the cache was cut short"
+[ "$(echo "$got" | reqs)" -gt 0 ] || fail "files cut short were read from the cache"
+[ "$(md lake.small --limit 30 | reqs)" -eq 0 ] || fail "files cut short weren't kept again"
+# Whole files that don't parse: the manifest list, the manifests and the
+# partitions, kept as garbage.
+meta=$(ls "$MORCA_WAREHOUSE"/lake/small/metadata/*.metadata.json | sort | tail -1)
+cur=$(jq -r '."current-snapshot-id"' "$meta")
+./build/test-datacache plant "$MORCA_DATA_CACHE" "$(jq -r --arg c "$cur" '.snapshots[] | select((."snapshot-id" | tostring) == $c) | ."manifest-list"' "$meta")" garbage \
+    || fail "plant a manifest list"
+got=$(md lake.small --limit 30)
+[ "$(echo "$got" | rows)" = "$want" ] && [ "$(echo "$got" | reqs)" -eq 1 ] || fail "a kept manifest list that doesn't parse: $(echo "$got" | jq -c .timings)"
+for m in "$MORCA_WAREHOUSE"/lake/small/metadata/*-m*.avro; do
+    ./build/test-datacache plant "$MORCA_DATA_CACHE" "$m" garbage || fail "plant $m"
+done
+uuid=$(jq -r '."table-uuid"' "$meta")
+./build/test-datacache plant "$MORCA_DATA_CACHE" "partitions-$uuid-$cur.json" '"partitions": [{"bro' || fail "plant partitions"
+got=$(md lake.small --limit 30)
+[ "$(echo "$got" | rows)" = "$want" ] || fail "rows over manifests kept as garbage: $(echo "$got" | jq -c '.error // .timings')"
+[ "$(echo "$got" | jq .partitions_total)" -eq 1 ] || fail "partitions kept as garbage"
+[ "$(echo "$got" | reqs)" -gt 1 ] || fail "manifests kept as garbage weren't fetched again: $(echo "$got" | jq -c .timings)"
+[ "$(md lake.small --limit 30 | reqs)" -eq 0 ] || fail "broken entries weren't kept again"
+# More free space to keep than the disk has: nothing is written, and the
+# cache empties itself.
+got=$(env MORCA_DATA_CACHE_MIN_FREE_MB=1000000000 ./build/morca_maintain data lake.wide --limit 5) || fail "a read low on space"
+[ "$(echo "$got" | jq '.rows.rows | length')" -eq 5 ] || fail "rows when low on space"
+[ -z "$(ls "$MORCA_DATA_CACHE")" ] || fail "the cache didn't empty itself low on space: $(ls "$MORCA_DATA_CACHE" | head -3)"
+[ "$(env MORCA_DATA_CACHE_MIN_FREE_MB=1000000000 ./build/morca_maintain data lake.small --limit 5 | reqs)" -gt 0 ] \
+    || fail "a read low on space found something kept"
+[ -z "$(ls "$MORCA_DATA_CACHE")" ] || fail "a read low on space kept what it read"
+echo "ok   the cache: files cut short or that don't parse are fetched again; low on space it writes nothing and empties"
 
 # public = false: hidden from visitors once login is on.
 printf '[pipelines.obs]\n\n[datasets."lake.obs"]\npublic = false\n' > "$conf"
