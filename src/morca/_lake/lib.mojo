@@ -16,6 +16,10 @@ compiles no iceberg (#471): `lake_expire` (snapshot expiry,
 `morca._lake.expire_impl`) and `lake_data` (the UI's data view,
 `morca._internal.dataread`).
 
+**Rust steps.** What `morca.rust_step` does with a worker's output, so a
+program with Rust steps compiles no iceberg either (#474): the `lake_sink_*`
+functions, in `morca._lake.rust_sink`, imported here.
+
 The ABI (`morca._lake.abi`) says how text, maps, out blocks, errors and the
 host block cross; each function's doc says what its failure value is.
 """
@@ -62,6 +66,14 @@ from morca._lake.expire import ExpireAsk
 from morca._lake.expire_impl import expire_dataset
 from morca._lake.host import Host
 from morca._lake.names import dataset_of
+from morca._lake.rust_sink import (
+    lake_sink_finish,
+    lake_sink_free,
+    lake_sink_new,
+    lake_sink_put,
+    lake_sink_schema,
+    lake_sink_take,
+)
 import morca._lake.impl as tables
 from morca._internal.dataread import data_text
 

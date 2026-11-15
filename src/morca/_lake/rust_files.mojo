@@ -6,7 +6,7 @@ for the step's one commit.
 A file is taken as the worker wrote it, not rewritten:
 
 - **its schema** must fit the table's by the stricter rule for files
-  (`morca._internal.rust_schema`): the table's field ids, and types
+  (`morca._lake.rust_schema`): the table's field ids, and types
   iceberg's reader reads as the table's;
 - **its partition** is read from its footer: for each field of the table's
   partition spec, the source column's statistics in every row group must
@@ -42,7 +42,7 @@ from parquet.schema import ParquetSchema
 from parquet.stats import ScalarValue, decode_stats
 from thrift import FileMetaData, read_footer
 
-from morca._internal.rust_schema import check_tree, file_tree
+from morca._lake.rust_schema import check_tree, file_tree
 
 
 struct WorkerFiles(Movable):

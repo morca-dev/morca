@@ -20,7 +20,10 @@
 # - a run whose process dies after the commit is resumed, streamed or in
 #   files: the retry finds the commit, the worker doesn't run again, and
 #   the table has one snapshot of the run;
-# - each call's output directory is gone after it.
+# - each call's output directory is gone after it;
+# - the proxy pipeline compiles no iceberg: the stream and the worker's
+#   files go through liblake (#474), and a -D MORCA_LAKE_SOURCE=1 build,
+#   with the library's code compiled in, runs the same.
 #
 # Run in the rust environment (pixi run -e rust test-rust-worker), which has
 # cargo and the data environment's tins.
@@ -63,8 +66,17 @@ echo "ok   the library exports only morca_worker_*, std linked in"
 
 scripts/embed-json.sh examples/rust-worker/schemas/numbers.json NUMBERS_SCHEMA > build/rust-worker/numbers_schema.mojo
 # shellcheck disable=SC2086
-scripts/mojo-build.sh -I src -I build/rust-worker $DEP_INC examples/rust-worker/numbers.mojo -o build/numbers
+scripts/mojo-build.sh -I src -I build/rust-worker $DEP_INC examples/rust-worker/numbers.mojo -o build/numbers &
+# shellcheck disable=SC2086
+scripts/mojo-build.sh -D MORCA_LAKE_SOURCE=1 -I src -I build/rust-worker $DEP_INC examples/rust-worker/numbers.mojo -o build/numbers-source &
+wait
+wait
 bin=./build/numbers
+# Functions of iceberg's own (see tests/lake.sh).
+iceberg_fns() { nm "$1" | awk '$3 ~ /^_?iceberg::/' | wc -l; }
+[ "$(iceberg_fns build/numbers)" -eq 0 ] || fail "build/numbers links iceberg's code"
+[ "$(iceberg_fns build/numbers-source)" -gt 0 ] || fail "-D MORCA_LAKE_SOURCE=1 didn't compile the library's code in"
+echo "ok   the proxy pipeline has none of iceberg's code; the source build has it"
 
 export MORCA_WAREHOUSE=$PWD/build/rust-worker/wh NUMBERS_LIB=$lib
 unset MORCA_DATABASE_URL MORCA_LOGS
@@ -202,6 +214,18 @@ grep -q "the worker's output is committed already; it doesn't run again" "$out" 
 grep -q "numbers worker 0.1.0" "$out" && fail "the files worker ran again"
 [ "$("$bin" check "$r" | head -1)" = "rows $((base + 3000)) snapshots 1" ] || fail "after the files resume: $("$bin" check "$r")"
 echo "ok   a crash after committing the worker's files is resumed without a second commit"
+
+# The library's code compiled in: a run that streams and writes files.
+base=$(rows)
+before=$(snaps)
+bin=./build/numbers-source
+run 2024-10 NUMBERS_PARAMS='{"mode": "mix", "rows": 1000}' || { cat "$out" >> "$log"; fail "the source build's run failed"; }
+cat "$out" >> "$log"
+grep -q "the Rust worker wrote 1000 rows in 2 data files (1 of its own)" "$out" || fail "the source build's log"
+[ "$(rows)" = $((base + 1000)) ] || fail "rows after the source build's run: $(rows)"
+[ "$(snaps)" = $((before + 1)) ] || fail "the source build's run made $(($(snaps) - before)) snapshots"
+echo "ok   with -D MORCA_LAKE_SOURCE=1 the same run commits the same"
+bin=./build/numbers
 
 left=$(find "$TMPDIR" -maxdepth 1 -name 'morca-rust-*' | head -3)
 [ -z "$left" ] || fail "output directories left behind: $left"
