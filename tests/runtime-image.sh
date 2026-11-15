@@ -21,8 +21,13 @@ fail() { echo "FAIL: $*"; exit 1; }
 run() { docker run --rm "$@"; }
 
 # Without arguments, each prints its usage (and exits non-zero).
-run "$img" 2>&1 | grep -q "morca locate" || fail "morca's usage"
-run --entrypoint morca_maintain "$img" 2>&1 | grep -q "expected .expire <dataset>" || fail "morca_maintain's usage"
+out=$(run "$img" 2>&1) || true
+echo "$out" | grep -q "morca locate" || fail "morca's usage: $out"
+# The morca-mojo package's morca (#455), of this checkout's version.
+want=$(sed -n '/^\[package\]/,/^\[/s/^version = "\(.*\)"$/\1/p' pixi.toml)
+[ "$(run "$img" version)" = "morca $want" ] || fail "morca version: $(run "$img" version 2>&1), not $want"
+out=$(run --entrypoint morca_maintain "$img" 2>&1) || true
+echo "$out" | grep -q "expected .expire <dataset>" || fail "morca_maintain's usage: $out"
 run --entrypoint /opt/morca/libexec/llvm-symbolizer "$img" --version | grep -q LLVM || fail "llvm-symbolizer"
 run --entrypoint git "$img" ls-remote https://github.com/morca-dev/morca HEAD | grep -q HEAD \
     || fail "git over HTTPS"
@@ -109,6 +114,7 @@ proj=runtime-project:ci
 run --entrypoint sh "$proj" -c '[ -x /opt/morca/bin/morca_maintain ] && [ -x /opt/morca/bin/git ]' || fail "the project's layout"
 run --entrypoint cat "$proj" /opt/morca/pipelines/toy.source.json | grep -q '"pipeline"' || fail "toy's source map"
 run --entrypoint toy "$proj" describe | grep -q '"pipeline": "toy"' || fail "toy describe"
+run --entrypoint toy "$proj" describe | grep -q "\"morca\": \"$want\"}\$" || fail "toy describe names no morca $want"
 out=$(run --entrypoint toy "$proj" run --partitions 2024-01 2>&1) || fail "toy run: $out"
 [ "$(docker image inspect -f '{{.Config.Entrypoint}}' "$proj")" = "[/opt/morca/bin/morca]" ] || fail "the entrypoint"
 # The oldest deploy/hetzner tools it works with (#461), the runtime's label inherited.
@@ -120,7 +126,8 @@ run --entrypoint sh "$proj" -c '[ ! -e /opt/morca/upgrade.toml ] && [ ! -e /opt/
     || fail "an upgrade.toml or CHANGELOG.md the project hasn't"
 out=$(run "$proj" upgrade --from 0.0.1 --to 9.9.9 2>&1) || fail "morca upgrade without an upgrade.toml: $out"
 [ -z "$out" ] || fail "upgrade steps without an upgrade.toml: $out"
-# The runtime's morca, unchanged: the project has no bin/scheduler.mojo.
+# The runtime's morca, unchanged: the project has no bin/scheduler.mojo, and
+# needs none (#455).
 a=$(run --entrypoint sha256sum "$img" /opt/morca/bin/morca | cut -d' ' -f1)
 b=$(run --entrypoint sha256sum "$proj" /opt/morca/bin/morca | cut -d' ' -f1)
 [ "$a" = "$b" ] || fail "the project's morca isn't the runtime's"

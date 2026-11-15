@@ -38,6 +38,7 @@ from morca.civil import Civil, now
 from morca.partitions import Monthly, Partitions
 from morca.schedule import Fill, NoSchedule, Previous, Schedule, ScheduleLike
 from morca._internal.source import source_commit, source_dirty, source_repo
+from morca._internal.version import MORCA_VERSION
 from morca.step import Gather, Mapped, StepLike, deferred_for, deferred_why
 from morca._internal.store import (
     DEFERRED,
@@ -215,7 +216,8 @@ struct Pipeline[
     def describe() -> String:
         """The DAG as JSON: the pipeline's name, its registry hash, its
         partitions, each step's name, kind, upstream, function, types and
-        datasets in run order, and its dista tasks."""
+        datasets in run order, its dista tasks, its source and the morca
+        version it was built with."""
         Self.check()
         var out = String("{")
         out.write('"pipeline": ', quote(Self.name), ", ")
@@ -281,7 +283,9 @@ struct Pipeline[
             out.write(", " if i > 0 else "", quote(names[i]))
         out.write('], "source": {"repo": ', quote(source_repo()))
         out.write(', "commit": ', quote(source_commit()))
-        out.write(', "dirty": ', "true" if source_dirty() else "false", "}}")
+        out.write(', "dirty": ', "true" if source_dirty() else "false", "}")
+        # Last, so `morca._internal.version.built_with` finds it from the end.
+        out.write(', "morca": ', quote(MORCA_VERSION), "}")
         return out^
 
     @staticmethod

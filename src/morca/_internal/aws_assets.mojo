@@ -661,9 +661,12 @@ comptime PROJECT_DOCKERFILE: StaticString = """# The image `morca aws push` buil
 # adds only the project's programs:
 #
 # - its apps, every bin/*.mojo, at /opt/morca/bin/<name> (`morca aws app` runs
-#   them). bin/scheduler.mojo, the two lines calling morca.command, becomes
-#   /opt/morca/bin/morca in place of the runtime's, and bin/morca_maintain.mojo
-#   /opt/morca/bin/morca_maintain; a project without them runs the runtime's.
+#   them). A project needs no `morca` of its own: the runtime's
+#   /opt/morca/bin/morca and morca_maintain are the morca-mojo package's,
+#   the ones its environment has in bin/ too (docs/binaries.md). A
+#   bin/scheduler.mojo, the two lines calling morca.command, still becomes
+#   /opt/morca/bin/morca in place of the runtime's, and
+#   bin/morca_maintain.mojo /opt/morca/bin/morca_maintain.
 # - its pipelines, every pipelines/*.mojo, at /opt/morca/pipelines/<name>,
 #   with the source map `morca locate` writes beside each.
 # - its morca.toml, if it has one, at /opt/morca/morca.toml, which
@@ -684,7 +687,8 @@ comptime PROJECT_DOCKERFILE: StaticString = """# The image `morca aws push` buil
 #
 # MORCA_VERSION is the morca-mojo the project pins, which `morca aws push`
 # reads from pixi.lock; the runtime and the project's pipelines are then the
-# same morca. By hand:
+# same morca. The build checks it: it stops when the runtime's `morca
+# version` isn't the project environment's (#455). By hand:
 #
 #     docker build -f project.Dockerfile --build-arg MORCA_VERSION=0.24.0 \\
 #         -t ghcr.io/<owner>/<project>:<version> .
@@ -722,19 +726,25 @@ RUN apt-get update && apt-get install -y --no-install-recommends gcc libc6-dev g
 WORKDIR /src/project
 COPY pixi.toml pixi.lock ./
 RUN pixi install --locked
-# The runtime's morca, for `morca locate` when the project has no bin/scheduler.mojo.
+# The runtime's morca: to check it's the project's morca-mojo (below), and
+# for `morca locate` with a morca-mojo from before it shipped one.
 COPY --from=runtime /opt/morca /opt/morca-runtime
 ARG MOJO_TARGET_CPU=neoverse-n1
 COPY . .
 RUN mkdir -p /out/bin /out/pipelines /out/config \\
     && for c in morca.toml upgrade.toml CHANGELOG.md; do [ ! -f "$c" ] || cp "$c" "/out/config/$c" || exit 1; done \\
-    && pixi run sh -c 'inc=""; [ -d src ] && inc="-I src"; \\
+    && pixi run sh -c 'if [ -x "$CONDA_PREFIX/bin/morca" ]; then ours=$("$CONDA_PREFIX/bin/morca" version) || exit 1; \\
+            theirs=$(LD_LIBRARY_PATH="$CONDA_PREFIX/lib:/opt/morca-runtime/lib" /opt/morca-runtime/bin/morca version 2> /dev/null) \\
+                || theirs="a morca from before morca version"; \\
+            [ "$ours" = "$theirs" ] || { echo "the runtime is $theirs and the project pins $ours: build with --build-arg MORCA_VERSION=${ours#morca }" >&2; exit 1; }; fi; \\
+        inc=""; [ -d src ] && inc="-I src"; \\
         for f in bin/*.mojo; do [ -f "$f" ] || continue; n=$(basename "$f" .mojo); [ "$n" = scheduler ] && n=morca; \\
             mojo build -g1 --target-cpu "$MOJO_TARGET_CPU" $inc "$f" -o "/out/bin/$n" || exit 1; done; \\
         for p in pipelines/*.mojo; do [ -f "$p" ] || continue; n=$(basename "$p" .mojo); \\
             mojo build -g1 --target-cpu "$MOJO_TARGET_CPU" $inc \\
                 "$p" -o "/out/pipelines/$n" || exit 1; done; \\
-        morca=/out/bin/morca; [ -x "$morca" ] || morca=/opt/morca-runtime/bin/morca; \\
+        morca=/out/bin/morca; [ -x "$morca" ] || morca="$CONDA_PREFIX/bin/morca"; \\
+        [ -x "$morca" ] || morca=/opt/morca-runtime/bin/morca; \\
         if ls /out/pipelines/* > /dev/null 2>&1; then \\
             LD_LIBRARY_PATH="$CONDA_PREFIX/lib:/opt/morca-runtime/lib" "$morca" locate /out/pipelines/* --root .; fi'
 # The line tables compressed, which llvm-symbolizer reads as they are.

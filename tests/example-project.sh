@@ -9,7 +9,8 @@
 # which must be on GitHub (CI's commit; MORCA_REV and MORCA_REPO say another).
 # Its one pipeline is examples/toy.mojo, its morca.toml configures it, its
 # upgrade.toml has a step for 0.1.0 and a CHANGELOG.md, which the image ships
-# (#472), and its `test` task builds the toy and runs a partition. Needs
+# (#472), and its `test` task builds the toy, runs a partition and checks
+# that the package's `morca` is the toy's morca (#455). Needs
 # pixi, for the lock.
 set -eu
 cd "$(dirname "$0")/.."
@@ -31,7 +32,16 @@ mojo-compiler = "==1.2.0"
 morca-mojo = { git = "$repo", rev = "$rev" }
 
 [tasks]
-test = "mkdir -p build && mojo build pipelines/toy.mojo -o build/toy && ./build/toy describe && ./build/toy run --partitions 2024-01"
+test = "mkdir -p build && mojo build pipelines/toy.mojo -o build/toy && ./build/toy describe && ./build/toy run --partitions 2024-01 && sh check-morca.sh"
+EOF
+# The package's own morca (#455), on the environment's PATH, compiled by
+# nobody here, and the toy built from the same morca-mojo.
+cat > "$dir/check-morca.sh" << 'EOF'
+set -eu
+[ -x "$CONDA_PREFIX/bin/morca" ] && [ -x "$CONDA_PREFIX/bin/morca_maintain" ] || { echo "no morca in the package"; exit 1; }
+built=$(./build/toy describe | sed -n 's/.*"morca": "\([^"]*\)"}$/\1/p')
+[ "$(morca version)" = "morca $built" ] || { echo "morca is $(morca version), the toy's $built"; exit 1; }
+echo "ok   the package's morca ($built) is the toy's"
 EOF
 cat > "$dir/morca.toml" << 'EOF'
 [defaults]
