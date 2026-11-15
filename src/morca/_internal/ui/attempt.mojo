@@ -8,12 +8,8 @@ from morca._internal.html import Html
 from morca._internal.json import quote
 from morca._internal.logs import read_location
 from morca._internal.state import State
-from morca._internal.ui.layout import (
-    LIVE_EVERY,
-    act_button,
-    not_found,
-    page_html,
-)
+from morca._internal.ui.layout import LIVE_EVERY, act_button, page_html
+from morca._internal.ui.errors import not_found
 from morca._internal.ui.parts import code_link, limit_facts, usage_facts
 from morca._internal.usage import bytes_text, usage_json
 from morca._internal.views.code import CodeLinks, code_of

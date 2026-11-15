@@ -70,7 +70,7 @@ from morca._internal.ui.datasets import (
     snapshot_page,
 )
 from morca._internal.ui.home import home, home_pipelines
-from morca._internal.ui.layout import not_found
+from morca._internal.ui.errors import not_found
 from morca._internal.ui.ops import (
     control_live,
     metrics_page,

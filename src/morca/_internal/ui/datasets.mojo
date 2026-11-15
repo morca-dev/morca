@@ -32,9 +32,9 @@ from morca._internal.ui.layout import (
     cmd_box,
     docs_link,
     help_tip,
-    not_found,
     page_html,
 )
+from morca._internal.ui.errors import not_found
 from morca._internal.dataset_config import private_datasets
 from morca._internal.ui.parts import code_link, data_link
 from morca._internal.ui.runs import pager_link

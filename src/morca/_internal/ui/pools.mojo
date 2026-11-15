@@ -29,7 +29,8 @@ from morca._internal.metrics import metrics_html, parse_samples
 from morca._internal.logs import read_location
 from morca._internal.sample import machine_name, metrics_location
 from morca._internal.state import State
-from morca._internal.ui.layout import card_open, fact_item, not_found, page_html
+from morca._internal.ui.layout import card_open, fact_item, page_html
+from morca._internal.ui.errors import not_found
 from morca._internal.ui.terms import header_help, value_help
 from morca._internal.views.pools import (
     EC2,

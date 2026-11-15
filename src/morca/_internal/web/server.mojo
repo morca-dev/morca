@@ -46,14 +46,8 @@ from morca._internal.json import quote
 from morca._internal.state import State
 from morca._internal.ui.coverage import COVERAGE_STYLE
 from morca._internal.ui.data_chart import CHART_STYLE
-from morca._internal.ui.layout import (
-    AUTH_SLOT,
-    HERE_SLOT,
-    USER_SLOT,
-    bad_request,
-    not_found,
-    page_html,
-)
+from morca._internal.ui.layout import AUTH_SLOT, HERE_SLOT, USER_SLOT, page_html
+from morca._internal.ui.errors import bad_request, not_found
 from morca._internal.ui.style import STYLE
 from morca._internal.ui.viz import VIZ_STYLE
 from morca._internal.web.auth import (

@@ -24,9 +24,9 @@ from morca._internal.ui.layout import (
     fact_item,
     fact_term,
     help_tip,
-    not_found,
     page_html,
 )
+from morca._internal.ui.errors import not_found
 from morca._internal.ui.machines import instances_html, machines_html
 from morca._internal.dataset_config import private_datasets
 from morca._internal.ui.parts import (

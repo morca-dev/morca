@@ -18,7 +18,7 @@ is 404.
 
 from morca._internal.html import query_param, url_decode
 from morca._internal.state import State
-from morca._internal.ui.layout import not_found
+from morca._internal.ui.errors import not_found
 from morca._internal.web.page import Page
 
 comptime GET = 1

@@ -31,13 +31,8 @@ from morca._internal.ui.datasets import (
     dataset_tabs,
     snapshot_href,
 )
-from morca._internal.ui.layout import (
-    HERE_SLOT,
-    card_open,
-    help_tip,
-    not_found,
-    page_html,
-)
+from morca._internal.ui.layout import HERE_SLOT, card_open, help_tip, page_html
+from morca._internal.ui.errors import not_found
 from morca._internal.ui.runs import grouped, pager_link
 from morca._internal.lineage import SnapshotRef
 from morca._internal.views.data import (
