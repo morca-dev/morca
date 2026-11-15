@@ -55,11 +55,14 @@ RUN for b in /out/bin/*; do objcopy --compress-debug-sections=zlib "$b" || exit 
 # Postgres. OpenSSL stays conda's: libcurl and libpq need 3.2. And liblake,
 # which morca.tables loads (#454), from morca-mojo's lib/: not stripped,
 # its line tables compressed like the binaries', so a crash inside it is
-# symbolised.
+# symbolised. ldd reads the package's binaries where they're installed, not
+# the copies in /out/bin: the package build gives them an rpath relative to
+# themselves ($ORIGIN/../lib), which from /out/bin finds nothing, and Mojo's
+# runtime (libKGENCompilerRTShared) would be left out (#455).
 RUN env=/src/project/.pixi/envs/default && mkdir -p /out/lib /out/libexec \
     && cp -L $env/bin/llvm-symbolizer /out/libexec/ \
     && loaded=$(ls $env/lib/libpq.so.5 $env/lib/libflare_*.so $env/lib/lib*mojo*.so 2>/dev/null) \
-    && ldd /out/bin/* /out/libexec/* $loaded 2> /dev/null \
+    && ldd $env/bin/morca $env/bin/morca_maintain $env/lib/liblake.so /out/libexec/* $loaded 2> /dev/null \
         | awk -v e="$env" '$3 ~ "^"e {print $3}' | grep -v -e '/libicu' -e '/libpsl' \
         | sort -u | xargs -r cp -L -t /out/lib \
     && cp -L -t /out/lib $loaded \

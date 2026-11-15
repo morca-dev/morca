@@ -21,11 +21,13 @@ fail() { echo "FAIL: $*"; exit 1; }
 run() { docker run --rm "$@"; }
 
 # Without arguments, each prints its usage (and exits non-zero).
-run "$img" 2>&1 | grep -q "morca locate" || fail "morca's usage"
+out=$(run "$img" 2>&1) || true
+echo "$out" | grep -q "morca locate" || fail "morca's usage: $out"
 # The morca-mojo package's morca (#455), of this checkout's version.
 want=$(sed -n '/^\[package\]/,/^\[/s/^version = "\(.*\)"$/\1/p' pixi.toml)
 [ "$(run "$img" version)" = "morca $want" ] || fail "morca version: $(run "$img" version 2>&1), not $want"
-run --entrypoint morca_maintain "$img" 2>&1 | grep -q "expected .expire <dataset>" || fail "morca_maintain's usage"
+out=$(run --entrypoint morca_maintain "$img" 2>&1) || true
+echo "$out" | grep -q "expected .expire <dataset>" || fail "morca_maintain's usage: $out"
 run --entrypoint /opt/morca/libexec/llvm-symbolizer "$img" --version | grep -q LLVM || fail "llvm-symbolizer"
 run --entrypoint git "$img" ls-remote https://github.com/morca-dev/morca HEAD | grep -q HEAD \
     || fail "git over HTTPS"
