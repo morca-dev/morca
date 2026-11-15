@@ -12,7 +12,7 @@ was registered with (`morca register --image`):
 | `workers` Pods, `morca-<run>-<start>-worker-<i>` | dista's workers, for a pipeline with tasks |
 
 All are labelled `orca.run`, `orca.start` (the run's start count),
-`morca.pipeline` and `orca.role`, and the head, its Service and the workers
+`orca.pipeline` and `orca.role`, and the head, its Service and the workers
 are owned by the Job, so deleting the Job deletes them. The Job has
 `activeDeadlineSeconds` (`MORCA_RUN_DEADLINE`, default a day) and
 `ttlSecondsAfterFinished` (10 minutes), and `backoffLimit: 0`, as morca

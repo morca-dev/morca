@@ -25,7 +25,7 @@ lineage and an `morca-full` with it?
   its own Postgres connection; the scheduler and the UI write SQL of their own.
 - **Lineage is not a layer on top.** `reads` and `commits` are what make a
   retry safe: pinned reads give a second attempt the inputs the first had, and
-  `find_commit` on the snapshot summary (`orca.run`, `morca.step`,
+  `find_commit` on the snapshot summary (`orca.run`, `orca.step`,
   `orca.partition`) is how a commit made just before a crash is recognised
   instead of repeated. DESIGN.md: "written from phase 1 because resuming needs
   them." A morca without lineage is a morca without safe retries.
