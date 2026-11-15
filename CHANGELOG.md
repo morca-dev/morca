@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.32.0 - 2026-11-15
+
+- **A faster Data tab:** a table of many small commits loads in about a second instead of five or more, its manifests and partitions kept on disk between reads (`MORCA_DATA_CACHE`), and a click on a Data link shows that it is loading. (#480)
+
+- **A Data tab on pipeline pages:** each dataset a pipeline writes, with its current snapshot and first rows, read as the dataset's own Data tab reads them, and a link there. (#481)
+
+- **The Data tab's cache keeps out of a full disk:** below `MORCA_DATA_CACHE_MIN_FREE_MB` free (1 GB or 5%, the larger) it writes nothing and shrinks, and a kept file cut short or broken is read again from object storage. (#484)
+
+- **Project images ship upgrade.toml:** `deploy/project.Dockerfile` copies a project's `upgrade.toml` and `CHANGELOG.md`, if it has them, to `/opt/morca`, so `deploy.sh` runs its upgrade steps. (#485)
+
+- **Hetzner test flake:** tests/hetzner.sh waits for the old scheduler's reaper to finish before reading its log. (#486)
+
+- **A data download on a full disk:** `data.csv` answers 503 saying its disk is full or can't be written, instead of the read crashing. (#487)
+
+- **`morca_maintain` on liblake:** snapshot expiry and the data view run inside liblake (ABI 4), so a project's `morca_maintain` no longer compiles iceberg; rebuild it with the matching liblake. (#PR)
+
 ## 0.31.0 - 2026-11-14
 
 - **Reliable git download in image builds:** retries across three kernel.org mirrors, sha256 checked. (#470)

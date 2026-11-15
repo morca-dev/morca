@@ -1,1 +1,0 @@
-- **The Data tab's cache keeps out of a full disk:** below `MORCA_DATA_CACHE_MIN_FREE_MB` free (1 GB or 5%, the larger) it writes nothing and shrinks, and a kept file cut short or broken is read again from object storage. (#484)

@@ -1,1 +1,0 @@
-- **A faster Data tab:** a table of many small commits loads in about a second instead of five or more, its manifests and partitions kept on disk between reads (`MORCA_DATA_CACHE`), and a click on a Data link shows that it is loading. (#480)
