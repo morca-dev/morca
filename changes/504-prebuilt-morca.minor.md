@@ -1,1 +1,0 @@
-- **morca ships prebuilt**: the package has `morca` and `morca_maintain` in its `bin/`, so a project can drop its `bin/scheduler.mojo` and `bin/morca_maintain.mojo`, and `morca register` refuses pipelines built from another morca-mojo (`MORCA_MIXED_VERSIONS=1` warns instead). (#504)

@@ -1,1 +1,0 @@
-- **Docs:** the snapshot summary keys are `orca.*`, the table of public helpers lists `strings_of`, `ints_of`, `column_of`, `concat_batches` and `Name.text`, and `Pipeline[workers=]` says where it applies. (#473)
