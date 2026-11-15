@@ -342,8 +342,9 @@ The scripts (`morca-hetzner`) have a version of their own,
 changes (CI fails a pull request that changes it without). A morca release
 attaches them as `morca-hetzner-<tools version>.tar.gz`, the same name as
 the release before when they didn't change, and as `morca-hetzner.tar.gz`.
-The tools' own versions start at 0.32.0, the first with the check below;
-the 0.31.0 tools, morca 0.31.0's tarball, still deploy today's images.
+The tools' own versions start at 0.33.0, the first with the check below
+(0.32.0 and older are the tarballs of morca releases of the same versions);
+the 0.31.0 and 0.32.0 tools still deploy today's images.
 
 The scripts and the server's morca are coupled (`morca-stack can-overlap`,
 `drain-old`, `register`, upgrade steps, a required setting such as
@@ -357,7 +358,7 @@ label from the registry (`curl`; a private image as `GHCR_USER` with
 `ghcr-token`) and stop when they're older:
 
 ```text
-deploy.sh: ghcr.io/morca-dev/census:a1b2c3d needs morca-hetzner >= 0.32.0, and these scripts are 0.31.0: get the newest with curl -fsSL https://github.com/morca-dev/morca/releases/latest/download/morca-hetzner.tar.gz | tar -xz, and run them from morca-hetzner-<version>/; nothing was changed on the server
+deploy.sh: ghcr.io/morca-dev/census:a1b2c3d needs morca-hetzner >= 0.34.0, and these scripts are 0.33.0: get the newest with curl -fsSL https://github.com/morca-dev/morca/releases/latest/download/morca-hetzner.tar.gz | tar -xz, and run them from morca-hetzner-<version>/; nothing was changed on the server
 ```
 
 So you need new tools only when that check says so, or when a release's

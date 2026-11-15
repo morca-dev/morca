@@ -178,7 +178,8 @@ LABEL org.opencontainers.image.title="morca-runtime" org.opencontainers.image.ve
 # it. Raise it, to the tools' new VERSION, when morca comes to need what
 # only newer tools do (a morca-stack command, a setting); it is never above
 # deploy/hetzner/VERSION (scripts/hetzner-version.sh). 0.31.0, morca
-# 0.31.0's tarball, from before the tools' own versions (#461), still works.
+# 0.31.0's tarball, from before the tools' own versions (#461), still works
+# (as does 0.32.0's).
 LABEL dev.morca.hetzner-min="0.31.0"
 # postgres.mojo and flare find what they dlopen under $CONDA_PREFIX/lib.
 ENV CONDA_PREFIX=/opt/morca LD_LIBRARY_PATH=/opt/morca/lib PATH=/opt/morca/bin:/opt/morca/pipelines:/usr/bin:/bin \
