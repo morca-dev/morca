@@ -110,7 +110,7 @@ test-steps = { cmd = "scripts/mojo-build.sh -I src $DEP_INC tests/test_steps.moj
 test-cron = { cmd = "scripts/mojo-build.sh -I src $DEP_INC tests/test_cron.mojo -o build/test-cron && ./build/test-cron" }
 test-warehouse = { cmd = "scripts/mojo-build.sh -I src $DEP_INC tests/test_warehouse.mojo -o build/test-warehouse && ./build/test-warehouse" }
 test-cli = { cmd = "tests/cli.sh" }
-test-hetzner = { cmd = "tests/hetzner.sh && tests/hetzner-stacks.sh" }
+test-hetzner = { cmd = "tests/hetzner.sh && tests/hetzner-stacks.sh && tests/hetzner-tools.sh && tests/hetzner-version.sh" }
 test-compile-fail = { cmd = "tests/compile_fail.sh" }
 # The executor over every store that needs no server (tests/store_suite.mojo),
 # then over Postgres, with what only Postgres has.

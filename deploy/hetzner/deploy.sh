@@ -1,5 +1,5 @@
 #!/bin/sh
-# deploy.sh [--dry-run] [--force] [--all] [--no-backup] [--timeout SECONDS] [--yes] [--confirmed ID,...] <morca-tag> [<app>=<tag> ...]
+# deploy.sh [--dry-run] [--force] [--all] [--no-backup] [--timeout SECONDS] [--yes] [--confirmed ID,...] [--skip-tools-check] <morca-tag> [<app>=<tag> ...]
 # deploy.sh [--dry-run] [--force] [--no-backup] [--timeout SECONDS] [--yes] --rollback
 #
 # Code changes: pulls the images at the tags and starts again the containers
@@ -91,6 +91,14 @@
 # and a failed one fails the deploy at the end, the rest deployed. A command
 # several of the versions ask for runs once, for all their ids (#343).
 #
+# Before anything else, it checks that these scripts are new enough for
+# the image (check_tools in lib.sh, #461): the image's dev.morca.hetzner-min
+# label, read from the registry, names the oldest morca-hetzner that knows
+# what its morca asks of the server, and an older one stops here, naming
+# that version and where to get it. An image without the label has no
+# minimum. Not for --rollback, whose tags these scripts deployed before;
+# --skip-tools-check skips it.
+#
 # It ends with morca-stack check (docs/hetzner.md#the-check-after-each-deploy):
 # the containers, one scheduler, the pipelines' binaries, and a canary run
 # for each of hetzner.env's CANARY; when the check fails the deploy fails,
@@ -140,7 +148,7 @@ while [ $# -gt 0 ]; do
     esac
     shift
 done
-usage="usage: deploy.sh [--dry-run] [--force] [--all] [--no-backup] [--timeout SECONDS] [--confirmed ID,...] <morca-tag> [<app>=<tag> ...] | --rollback"
+usage="usage: deploy.sh [--dry-run] [--force] [--all] [--no-backup] [--timeout SECONDS] [--confirmed ID,...] [--skip-tools-check] <morca-tag> [<app>=<tag> ...] | --rollback"
 if [ "$rollback" = 1 ]; then
     [ -z "$tag" ] && [ -z "$args" ] || die "--rollback takes no tags: it applies the ones deployed before"
     [ -z "$all" ] || die "--rollback replaces what differs from the tags before; --all isn't for it"
@@ -151,6 +159,7 @@ fi
 load_env
 need_settings
 need_tool hcloud ssh
+[ "$rollback" = 1 ] || check_tools "$tag"
 IP=$(server_ip)
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/morca-hetzner.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
