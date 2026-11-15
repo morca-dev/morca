@@ -7,6 +7,7 @@
 - **Data view on a full disk:** the cache stops writing and shrinks below `MORCA_DATA_CACHE_MIN_FREE_MB`, rereads broken files, and `data.csv` answers 503 instead of crashing. (#484, #487)
 - **Project images ship upgrade.toml** and CHANGELOG.md, so `deploy.sh` runs their upgrade steps. (#485)
 - **`morca_maintain` on liblake (ABI 4):** expiry and the data view no longer compile iceberg. (#488)
+- **Rust steps on liblake (ABI 5):** `morca.rust_step` no longer compiles iceberg. (#490)
 - Hetzner test flake fixed. (#486)
 
 ## 0.31.0 - 2026-11-14
