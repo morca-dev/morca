@@ -142,6 +142,7 @@ from dista import Codec
 from parquet import RecordBatch
 
 from morca.ctx import Ctx
+from morca._internal.lakehost import HostBlock
 from morca._lake.abi import (
     MODE_APPEND,
     MODE_BY_STEP,
@@ -155,7 +156,6 @@ from morca._lake.abi import (
 from morca._lake.client import (
     Api,
     Exported,
-    HostBlock,
     api,
     take_bytes,
     take_error,

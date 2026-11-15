@@ -44,7 +44,7 @@ from threads import AtomicFlag, ThreadHandle
 from threads.ffi import OpaquePtr, opaque_ptr
 
 from morca.ctx import Ctx
-from morca._internal.dlopen import open_library
+from morca._common.dlopen import open_library
 from morca._internal.json import quote
 
 comptime ABI_VERSION: UInt32 = 1

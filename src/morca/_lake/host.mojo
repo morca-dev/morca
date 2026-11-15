@@ -1,6 +1,6 @@
 """The library's view of the step: the methods of `morca.Ctx` that the tables
 code uses, each a call through the host block (`morca._lake.abi`). The
-wrapper fills the block (`morca._lake.client.HostBlock`)."""
+program fills the block (`morca._internal.lakehost.HostBlock`)."""
 
 from morca._lake.abi import (
     CheckDeclaredFn,

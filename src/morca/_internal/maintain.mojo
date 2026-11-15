@@ -100,7 +100,7 @@ def expire_dataset(ask: ExpireAsk) raises -> Expiry:
 
 def data_text(args: List[String]) raises -> String:
     """What `morca_maintain data` prints for `args` (those after `data`),
-    read inside liblake (`morca._internal.dataread`)."""
+    read inside liblake (`morca._lake.dataread`)."""
     var a = api()
     var e = Enc()
     e.strs(args)
@@ -126,7 +126,7 @@ def maintain_main() raises:
     for a in argv():
         args.append(String(a))
     if len(args) >= 3 and args[1] == "data":
-        # The UI's data view (morca._internal.dataread, in liblake).
+        # The UI's data view (morca._lake.dataread, in liblake).
         var rest = List[String]()
         for k in range(2, len(args)):
             rest.append(args[k])

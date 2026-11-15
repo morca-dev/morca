@@ -1,7 +1,7 @@
 """A dataset's data as its Data tab reads it (#435): what the URL asks for
 (`DataQuery`), the limits a public page keeps to (`DataLimits`), and the
 read itself, which runs in the project's `morca_maintain data`
-(`morca._internal.dataread`), since the `morca` binary doesn't link iceberg.
+(`morca._lake.dataread`), since the `morca` binary doesn't link iceberg.
 
 The read is a process of its own, started at a lower CPU priority and
 killed a few seconds past the time limit it was given, so a scan that
@@ -19,7 +19,7 @@ The limits, each from the UI's environment:
 | `MORCA_DATA_MEMORY_MB` | 256 | what a read may hold |
 
 What a read keeps on disk for the next, by snapshot, is
-`morca._internal.datacache`'s (`MORCA_DATA_CACHE`, `MORCA_DATA_CACHE_MB`).
+`morca._lake.datacache`'s (`MORCA_DATA_CACHE`, `MORCA_DATA_CACHE_MB`).
 """
 
 from std.os import getenv

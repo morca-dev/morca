@@ -14,7 +14,7 @@ a file writer of a heap `FileWriter`, a batch reader of a heap
 **Maintenance.** `morca_maintain`'s two commands run here whole, so it
 compiles no iceberg (#471): `lake_expire` (snapshot expiry,
 `morca._lake.expire_impl`) and `lake_data` (the UI's data view,
-`morca._internal.dataread`).
+`morca._lake.dataread`).
 
 **Rust steps.** What `morca.rust_step` does with a worker's output, so a
 program with Rust steps compiles no iceberg either (#474): the `lake_sink_*`
@@ -75,7 +75,7 @@ from morca._lake.rust_sink import (
     lake_sink_take,
 )
 import morca._lake.impl as tables
-from morca._internal.dataread import data_text
+from morca._lake.dataread import data_text
 
 
 # ── handles, errors, batches ────────────────────────────────────────────────

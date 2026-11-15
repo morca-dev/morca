@@ -49,9 +49,9 @@ from iceberg.manifest import (
 )
 from iceberg.metadata import Snapshot
 
-from morca._internal.datacache import DataCache
-from morca._internal.dataask import DataAsk, columns_of, iso_ms, parse_ask
-from morca._internal.datarows import chart_json, csv_json, rows_json
+from morca._lake.datacache import DataCache
+from morca._lake.dataask import DataAsk, columns_of, iso_ms, parse_ask
+from morca._lake.datarows import chart_json, csv_json, rows_json
 from morca._lake.impl import load_dataset
 
 comptime SNAPSHOTS_SHOWN = 100

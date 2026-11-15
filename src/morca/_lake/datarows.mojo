@@ -1,4 +1,4 @@
-"""The rows of the UI's data view (#435, `morca._internal.dataread`): a
+"""The rows of the UI's data view (#435, `morca._lake.dataread`): a
 page of the filtered rows, in a sort's order; the chart of them; and the
 download, as CSV. Each read stops at its cap, its time limit or its memory
 limit, and says which in `stopped`; a sort holds every row it reads, so the
@@ -24,8 +24,8 @@ from iceberg.values import iso_text
 from parquet import RecordBatch
 from parquet.display import scalar_json
 
-from morca._internal.datacache import write_file
-from morca._internal.dataask import (
+from morca._lake.datacache import write_file
+from morca._lake.dataask import (
     NESTED,
     Column,
     DataAsk,

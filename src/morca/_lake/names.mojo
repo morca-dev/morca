@@ -4,7 +4,7 @@ No iceberg here."""
 
 from std.os import getenv
 
-from morca._internal.proc import absolute
+from morca._common.paths import absolute
 
 
 def warehouse() -> String:

@@ -1,4 +1,4 @@
-"""What the UI's data view (`morca._internal.dataread`) keeps on local disk
+"""What the UI's data view (`morca._lake.dataread`) keeps on local disk
 between reads (#478): files of a table that never change once written,
 by their location (manifest lists and manifests), and what was worked out
 from one snapshot (its partitions), by the table and the snapshot. A
@@ -26,7 +26,7 @@ or nothing. Each file ends with its length and a hash of its bytes, and
 one that doesn't match (truncated, or changed) is removed and read as a
 miss. A file that can't be read or written is a miss, never an error; a
 read that fails on what the cache gave it is read again without it
-(`morca._internal.dataread`), the files it used removed.
+(`morca._lake.dataread`), the files it used removed.
 """
 
 from std.ffi import c_int, external_call
