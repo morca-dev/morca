@@ -4,8 +4,9 @@ before the lib-tin (#454), over iceberg, parquet and objectstore. The step's
 and the rest call back into the program for the checks and records `Ctx`
 keeps. The module doc of `morca.tables` says what each does.
 
-morca's own tools that need iceberg's types (`morca_maintain`, the data
-view) import this directly; pipelines go through `morca.tables`.
+Pipelines and `morca_maintain` go through the library (`morca.tables`,
+`lake_expire`, `lake_data`); only the library and Rust steps
+(`morca.rust_step`) import this.
 """
 
 from std.memory.alloc import unsafe_alloc

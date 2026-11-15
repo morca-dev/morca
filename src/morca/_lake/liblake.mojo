@@ -263,3 +263,17 @@ def lake_files_decode(
     buf: Int, n: Int, pos: Int, out_block: Int, err: Int
 ) abi("C") -> Int32:
     return lib.lake_files_decode(buf, n, pos, out_block, err)
+
+
+@export("lake_expire")
+def lake_expire(
+    ask: Int, ask_n: Int, out_block: Int, err: Int
+) abi("C") -> Int32:
+    return lib.lake_expire(ask, ask_n, out_block, err)
+
+
+@export("lake_data")
+def lake_data(
+    args: Int, args_n: Int, out_block: Int, err: Int
+) abi("C") -> Int32:
+    return lib.lake_data(args, args_n, out_block, err)

@@ -1,7 +1,7 @@
 """Table maintenance for a project's datasets: snapshot expiry.
 
 The `morca` binary doesn't link iceberg, so expiry runs in a binary of the
-project's own that does: `bin/morca_maintain.mojo`,
+project's own, `bin/morca_maintain.mojo`,
 
 ```mojo
 from morca.maintain import maintain_main
@@ -30,21 +30,17 @@ defaults (`write.metadata.delete-after-commit.enabled`,
 `write.metadata.previous-versions-max`) when it lacks them, so its own
 commit already deletes the old metadata files it drops from the log. `--report` lists `metadata/` before and
 after, to count its files.
+
+Both commands run inside liblake (`lake_expire`, `lake_data`, #471), as
+`morca.tables` does, so `morca_maintain` compiles no iceberg; with
+`-D MORCA_LAKE_SOURCE=1` the library's code is compiled in instead.
 """
 
 from std.sys import argv
-from std.time import perf_counter_ns
 
-from iceberg.catalog.filesystem import Table
-from iceberg.io import dirname
-from iceberg.maintain import (
-    MAX_SNAPSHOT_AGE_MS,
-    ExpirePolicy,
-    ExpireResult,
-)
-
-from morca._internal.dataread import data_main
-from morca._lake.impl import load_dataset, table_defaults
+from morca._lake.abi import Enc, Slots
+from morca._lake.client import api, take_bytes, take_error
+from morca._lake.expire import ExpireAsk, Expiry
 
 
 comptime USAGE = """usage:
@@ -82,144 +78,40 @@ def parse_duration_ms(text: String) raises -> Int64:
         raise Error("morca: not a duration: ", text, " (30d, 12h, 90m, ms)")
 
 
-@fieldwise_init
-struct Expiry(Copyable, Movable, Writable):
-    """What one dataset's expiry did, for the line `morca_maintain` prints."""
-
-    var dataset: String
-    var skipped: String
-    """Why nothing was decided (no policy), or empty."""
-    var result: ExpireResult
-    var snapshots_before: Int
-    var snapshots_after: Int
-    var metadata_files_before: Int
-    """-1 when not counted (no `--report`)."""
-    var metadata_files_after: Int
-    var log_after: Int
-    var seconds: Float64
-
-    def write_to(self, mut w: Some[Writer]):
-        if self.skipped:
-            w.write("kept ", self.dataset, ": ", self.skipped)
-            return
-        ref r = self.result
-        w.write(
-            "dry run " if r.dry_run else "expired ",
-            self.dataset,
-            ": snapshots ",
-            self.snapshots_before,
-            " -> ",
-            self.snapshots_after,
-            " (",
-            len(r.expired),
-            " expired",
-        )
-        if len(r.removed_refs) > 0:
-            w.write(", refs removed:")
-            for n in r.removed_refs:
-                w.write(" ", n)
-        w.write(
-            "); would delete " if r.dry_run else "); deleted ",
-            len(r.deleted_files),
-            " data/delete files, ",
-            len(r.deleted_manifests),
-            " manifests and lists, ",
-            len(r.deleted_statistics),
-            " statistics; read ",
-            r.manifest_lists_read,
-            " manifest lists and ",
-            r.manifests_read,
-            " manifests",
-        )
-        if r.reachable:
-            w.write(" (branches or tags: every retained manifest read)")
-        w.write("; metadata-log ", self.log_after)
-        if self.metadata_files_before >= 0:
-            w.write(
-                ", metadata files ",
-                self.metadata_files_before,
-                " -> ",
-                self.metadata_files_after,
-            )
-        w.write("; ", self.seconds, " s")
+def expire_dataset(ask: ExpireAsk) raises -> Expiry:
+    """Expires `ask.dataset`'s snapshots, inside liblake
+    (`morca._lake.expire_impl`): older than `ask.older_than_ms` ago (or by
+    the table's properties when that is -1), keeping at least `ask.keep`
+    (or the table's `history.expire.min-snapshots-to-keep`) and every
+    snapshot in `ask.retain`."""
+    var a = api()
+    var e = ask.encode()
+    var got = Slots()
+    var err = Slots()
+    var rc = a.expire(e.addr(), len(e), got.addr, err.addr)
+    _ = e^
+    if rc != 0:
+        raise take_error(a, err)
+    var b = take_bytes(a, got)
+    var expiry = Expiry.decode(Int(b.unsafe_ptr()), len(b))
+    _ = b^  # read through its address above
+    return expiry^
 
 
-def _metadata_files(table: Table) raises -> Int:
-    var names = table.io.list_names(dirname(table.metadata_location))
-    var n = 0
-    for k in range(len(names)):
-        if names[k].endswith(".metadata.json"):
-            n += 1
-    return n
-
-
-def expire_dataset(
-    dataset: String,
-    older_than_ms: Int64 = -1,
-    keep: Int = -1,
-    retain: List[Int64] = List[Int64](),
-    if_policy: Bool = False,
-    dry_run: Bool = False,
-    report: Bool = False,
-) raises -> Expiry:
-    """Expires `dataset`'s snapshots: older than `older_than_ms` ago (or by
-    the table's properties when that is -1), keeping at least `keep` (or the
-    table's `history.expire.min-snapshots-to-keep`) and every snapshot in
-    `retain`. The metadata is committed first, then the files nothing
-    retained points at are deleted."""
-    var t0 = perf_counter_ns()
-    var table = load_dataset(dataset)
-    var before = len(table.metadata.snapshots)
-    var files_before = _metadata_files(table) if report else -1
-    if (
-        if_policy
-        and older_than_ms < 0
-        and table.metadata.property_(MAX_SNAPSHOT_AGE_MS, "") == ""
-    ):
-        return Expiry(
-            dataset,
-            String("no ", MAX_SNAPSHOT_AGE_MS, " property"),
-            ExpireResult(),
-            before,
-            before,
-            files_before,
-            files_before,
-            len(table.metadata.metadata_log),
-            0.0,
-        )
-    # The expiry's commit trims the metadata log like any other; with the
-    # files that fall off it deleted only under delete-after-commit, a table
-    # without morca's metadata defaults would leave them unreferenced for
-    # good. So it gets them in the same commit.
-    var defaults = table_defaults()
-    for key in [
-        String("write.metadata.delete-after-commit.enabled"),
-        String("write.metadata.previous-versions-max"),
-    ]:
-        if key not in table.metadata.properties:
-            table.metadata.properties[key] = defaults[key]
-    var policy = ExpirePolicy.from_properties(table.metadata)
-    if older_than_ms >= 0:
-        policy.older_than_ms = policy.now_ms - older_than_ms
-    if keep >= 0:
-        policy.keep_last = keep
-    for id in retain:
-        policy.retain.append(id)
-    var result = table.expire(policy, dry_run)
-    if not dry_run:
-        table.refresh()
-    return Expiry(
-        dataset,
-        String(),
-        result^,
-        before,
-        len(table.metadata.snapshots) if not dry_run else before
-        - len(result.expired),
-        files_before,
-        _metadata_files(table) if report else -1,
-        len(table.metadata.metadata_log),
-        Float64(perf_counter_ns() - t0) / 1e9,
-    )
+def data_text(args: List[String]) raises -> String:
+    """What `morca_maintain data` prints for `args` (those after `data`),
+    read inside liblake (`morca._internal.dataread`)."""
+    var a = api()
+    var e = Enc()
+    e.strs(args)
+    var got = Slots()
+    var err = Slots()
+    var rc = a.data(e.addr(), len(e), got.addr, err.addr)
+    _ = e^
+    if rc != 0:
+        raise take_error(a, err)
+    var b = take_bytes(a, got)
+    return String(unsafe_from_utf8=Span(b))
 
 
 def _usage(msg: String = ""):
@@ -234,11 +126,11 @@ def maintain_main() raises:
     for a in argv():
         args.append(String(a))
     if len(args) >= 3 and args[1] == "data":
-        # The UI's data view (morca._internal.dataread).
+        # The UI's data view (morca._internal.dataread, in liblake).
         var rest = List[String]()
         for k in range(2, len(args)):
             rest.append(args[k])
-        data_main(rest)
+        print(data_text(rest))
         return
     if len(args) < 3 or args[1] != "expire":
         _usage()
@@ -277,5 +169,7 @@ def maintain_main() raises:
             _usage()
             raise Error("morca_maintain: unknown argument: ", a)
     print(
-        expire_dataset(dataset, older, keep, retain, if_policy, dry_run, report)
+        expire_dataset(
+            ExpireAsk(dataset, older, keep, retain^, if_policy, dry_run, report)
+        )
     )
