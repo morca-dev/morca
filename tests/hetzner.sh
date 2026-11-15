@@ -106,6 +106,8 @@ export FAKE
 trap 'rm -rf "$FAKE"' EXIT INT TERM
 export PATH="$PWD/tests/hetzner:$PATH"
 export MORCA_STACK_TEST=1 MORCA_STACK_REGISTER_TRIES=1 MORCA_CONF="$FAKE/conf" MORCA_DATA="$FAKE/data" MORCA_STATE="$FAKE/state"
+# No waits between a failed upload's tries; drain-old polls every second.
+export MORCA_STACK_RETRY_SECONDS=0 MORCA_STACK_DRAIN_POLL_SECONDS=1
 mkdir -p "$MORCA_CONF"
 # The host: cgroup v2 with the memory controller, and 8 GB.
 export MORCA_HOST_CGROUP="$FAKE/cgroup" MORCA_MEMINFO="$FAKE/meminfo"
@@ -152,6 +154,12 @@ fail() {
 stack() { sh deploy/hetzner/server/morca-stack "$@"; }
 deploy() { sh deploy/hetzner/deploy.sh "$@" > "$FAKE/out" 2>&1; }
 has() { grep -q -- "$1" "$FAKE/out" || fail "no '$1' in the output"; }
+# next_second: waits for the clock's next second, so what is stamped after
+# it (a backup, an old scheduler's name) differs from all before.
+next_second() {
+    ns=$(date +%s)
+    while [ "$(date +%s)" = "$ns" ]; do sleep 0.05; done
+}
 # add_setting KEY=VALUE: a line of hetzner.env's EXTRA_ENV_FILE, and the
 # server's settings.env as a deploy would write it (for morca-stack apply).
 add_setting() {
@@ -278,7 +286,7 @@ rm "$FAKE/backup-fails"
 # (#425); an upload that fails once is tried again.
 cp "$MORCA_CONF/stack.conf" "$FAKE/stack.conf.before"
 echo BACKUP_KEEP=1 >> "$MORCA_CONF/stack.conf"
-sleep 1 # a stamp of its own
+next_second
 touch "$FAKE/bucket/20200101T000000Z.dump" "$FAKE/s3-rm-fails"
 echo 1 > "$FAKE/s3-cp-fails"
 stack backup-now > "$FAKE/out" 2>&1 || fail "a failed prune failed the backup: $(cat "$FAKE/out")"
@@ -289,12 +297,12 @@ has "morca-stack: backed up to s3://bkt/backups/pg/"
 [ -f "$FAKE/bucket/20200101T000000Z.dump" ] || fail "the old dump went"
 # The next prune deletes it; an upload that keeps failing fails the backup.
 rm "$FAKE/s3-rm-fails"
-sleep 1
+next_second
 stack backup-now > "$FAKE/out" 2>&1 || fail "backup-now"
 [ -f "$FAKE/bucket/20200101T000000Z.dump" ] && fail "the next prune kept the old dump"
 [ "$(ls "$FAKE/bucket" | grep -c '\.dump$')" = 1 ] || fail "BACKUP_KEEP=1 kept $(ls "$FAKE/bucket")"
 echo 3 > "$FAKE/s3-cp-fails"
-sleep 1
+next_second
 stack backup-now > "$FAKE/out" 2>&1 && fail "a backup whose upload failed three times"
 has "couldn't upload 2.*\.dump"
 rm "$FAKE/s3-cp-fails"
@@ -383,12 +391,6 @@ grep -q 'morca register' "$FAKE/docker.log" && fail "a console-only deploy regis
 has "the scheduler wasn't replaced: the pipelines stay registered as they are"
 [ "$(stack tags)" = "morca eee5555, console hhh8888" ] || fail "tags after a console deploy: $(stack tags)"
 
-# A deploy of what runs: nothing replaced, no backup, no pause.
-: > "$FAKE/docker.log"
-deploy eee5555 console=hhh8888 || fail "a deploy of what runs"
-has "nothing to replace: not backing up"
-grep -q 'pg_dump\|run -d\|morca pause' "$FAKE/docker.log" && fail "a deploy of what runs did something"
-
 # deploy.sh brings the server's settings in line with hetzner.env before
 # it plans: a key added there (POSTHOG_KEY) reaches settings.env, by name
 # only in the output, the containers whose env file it changes are
@@ -411,11 +413,14 @@ grep -q 'exec scheduler morca pause' "$FAKE/docker.log" || fail "a settings chan
 grep -q 'exec scheduler morca register' "$FAKE/docker.log" || fail "not registered after a settings change"
 grep -q 'unpause toy' "$FAKE/docker.log" || fail "not unpaused after a settings change"
 [ "$(stack tags)" = "morca eee5555, console hhh8888" ] || fail "a settings change moved the tags: $(stack tags)"
-# Nothing differs: nothing changes, nothing is replaced.
+# A deploy of what runs, the settings in line: nothing changes, nothing is
+# replaced, no backup, no pause.
+: > "$FAKE/docker.log"
 deploy eee5555 console=hhh8888 || fail "a deploy with the settings in line"
 has "names only, never values):"
 has "^  unchanged$"
 has "nothing to replace: not backing up"
+grep -q 'pg_dump\|run -d\|morca pause' "$FAKE/docker.log" && fail "a deploy of what runs did something"
 # The stack's overlay (#332): CONFIG_OVERLAY_FILE (relative to hetzner.env)
 # is sent as overlay/morca.overlay.toml, settings.env names it, the image's
 # morca checks it before anything changes, and the scheduler gets it
@@ -1010,7 +1015,7 @@ grep -qx MORCA_IMAGE=img:rrr8888 "$MORCA_CONF/morca.env" || fail "no MORCA_IMAGE
 has "leading image=img:rrr8888 "
 # A second deploy while it drains overlaps again: the scheduler it replaces
 # drains under a name of its own, beside the first, which keeps its own.
-sleep 1
+next_second
 deploy sss9999 || fail "a deploy while an old scheduler drains"
 has "the new scheduler starts beside the old one, which drains its runs"
 second=$(ls "$FAKE/containers" | grep '^scheduler-old-' | grep -vx "$first" || true)
