@@ -26,14 +26,13 @@
 # (AVX2) on amd64.
 #
 # The stages are ordered for the layer cache: `env` is the pixi environment
-# and depends only on morca's pixi.toml, src/, bin/ and the lock; `curl` and
+# and depends only on morca's pixi.toml, src/ and the lock; `curl` and
 # `git` start from it.
 FROM ghcr.io/prefix-dev/pixi:0.78.0-bookworm AS env
 RUN apt-get update && apt-get install -y --no-install-recommends gcc libc6-dev git ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 COPY pixi.toml /src/morca/pixi.toml
 COPY src /src/morca/src
-COPY bin /src/morca/bin
 # At /src/project, the directory deploy/project.Dockerfile builds a project
 # in, so the CA bundle paths compiled into conda's libcurl and OpenSSL are
 # the same in both (below).
