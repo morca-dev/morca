@@ -1023,16 +1023,18 @@ has "check: info  $first: draining 2 run(s) (outdated)"
 has "check: info  $second: draining 2 run(s) (outdated)"
 has "check: all ok"
 # Each one's reaper removes it once its last run has ended and it exits.
+# Wait for the reaper itself to end (its pid file goes last), not only for
+# the container to go: it logs the removal just after it (#453).
 echo exited > "$FAKE/containers/$first/status"
 i=0
-while [ -d "$FAKE/containers/$first" ]; do
+while [ -d "$FAKE/containers/$first" ] || [ -f "$MORCA_STATE/reap-$first.pid" ]; do
     i=$((i + 1)); [ "$i" -lt 100 ] || fail "$first wasn't removed once it exited"; sleep 0.1
 done
 [ -d "$FAKE/containers/$second" ] || fail "$second was removed while it drained"
 grep -q "$first drained and removed" "$MORCA_STATE/reap-$first.log" || fail "the reaper's log: $(cat "$MORCA_STATE/reap-$first.log")"
 echo exited > "$FAKE/containers/$second/status"
 i=0
-while [ -d "$FAKE/containers/$second" ]; do
+while [ -d "$FAKE/containers/$second" ] || [ -f "$MORCA_STATE/reap-$second.pid" ]; do
     i=$((i + 1)); [ "$i" -lt 100 ] || fail "$second wasn't removed once it exited"; sleep 0.1
 done
 # drain-old --timeout waits, and stops one still running after it.
