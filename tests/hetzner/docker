@@ -43,8 +43,10 @@
 # NAME|P95_MB|RUNS|MEMORY_GB.
 echo "docker $*" >> "$FAKE/docker.log"
 echo "docker $*" >> "$FAKE/docker.all"
-touch "$FAKE/paused"
-mkdir -p "$FAKE/bucket" "$FAKE/containers" "$FAKE/images"
+# Builtins where the fake can (no touch, mkdir or cat on the common paths):
+# morca-stack calls it thousands of times a run.
+[ -e "$FAKE/paused" ] || : > "$FAKE/paused"
+[ -d "$FAKE/images" ] || mkdir -p "$FAKE/bucket" "$FAKE/containers" "$FAKE/images"
 unpause() { grep -vx "$1" "$FAKE/paused" > "$FAKE/paused.new" || true; mv "$FAKE/paused.new" "$FAKE/paused"; }
 image_id() {
     f=$FAKE/images/$(echo "$1" | tr '/:' '__')
@@ -201,7 +203,9 @@ case "$all" in
         n=$2
         shift 5
         echo "probe $n $1 $2" >> "$FAKE/docker.log"
-        [ -d "$C/$n" ] && [ "$(cat "$C/$n/status")" = running ] || exit 1
+        [ -d "$C/$n" ] || exit 1
+        read -r st < "$C/$n/status"
+        [ "$st" = running ] || exit 1
         h=$FAKE/health/${n%-next}
         if [ -f "$h" ]; then cat "$h"; else echo 200; fi
         ;;
@@ -216,18 +220,24 @@ case "$all" in
     "inspect -f {{.Config.Image}} {{.State.Status}} {{.State.FinishedAt}} "*)
         d=$C/${all##* }
         [ -d "$d" ] || exit 1
-        echo "$(cat "$d/image") $(cat "$d/status") $(cat "$d/finished" 2> /dev/null || echo 0001-01-01T00:00:00Z)"
+        read -r im < "$d/image"
+        read -r st < "$d/status"
+        fin=0001-01-01T00:00:00Z
+        [ ! -f "$d/finished" ] || read -r fin < "$d/finished"
+        echo "$im $st $fin"
         ;;
     "inspect -f {{.State.Status}} "*)
         d=$C/${all##* }
         [ -d "$d" ] || exit 1
-        cat "$d/status"
+        read -r st < "$d/status"
+        echo "$st"
         ;;
     "inspect -f {{.State.ExitCode}} "*) echo 1 ;;
     "inspect -f {{.State.Running}} "*)
         d=$C/${all##* }
         [ -d "$d" ] || exit 1
-        if [ "$(cat "$d/status")" = running ]; then echo true; else echo false; fi
+        read -r st < "$d/status"
+        if [ "$st" = running ]; then echo true; else echo false; fi
         ;;
     "inspect "*) [ -d "$C/${all##* }" ] || exit 1 ;;
     # morca config apps: $FAKE/apps-decl's lines (none without it); exit 2,
