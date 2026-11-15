@@ -412,7 +412,9 @@ jobs:
       morca-ref: ${{ github.sha }}
       build-runtime: true
       # The toy runs, and the image has the project's morca.toml where
-      # MORCA_CONFIG says, which a bare `morca register` reads (#424).
+      # MORCA_CONFIG says, which a bare `morca register` reads (#424), its
+      # upgrade.toml, whose steps deploy.sh reads with `morca upgrade`, and
+      # its CHANGELOG.md (#472).
       smoke: |
         docker run --rm --entrypoint toy "$IMAGE" run --partitions 2024-01
         shown=$(docker run --rm "$IMAGE" config show --file)
@@ -420,6 +422,12 @@ jobs:
         case "$shown" in "# /opt/morca/morca.toml"*) ;; *) echo "::error::no /opt/morca/morca.toml"; exit 1 ;; esac
         case "$shown" in *pipelines.toy*) ;; *) echo "::error::the image's morca.toml has no toy"; exit 1 ;; esac
         docker run --rm "$IMAGE" config check
+        steps=$(docker run --rm "$IMAGE" upgrade --from 0.0.1 --to 0.1.0 --when after)
+        echo "$steps"
+        printf '%s\n' "$steps" | awk -F '\t' '$1 == "step" && $2 == "0.1.0-toy" && $3 == "after" && $4 == "run" { ok = 1 } END { exit !ok }' \
+            || { echo "::error::no 0.1.0-toy step from the image's upgrade.toml"; exit 1; }
+        docker run --rm --entrypoint cat "$IMAGE" /opt/morca/CHANGELOG.md | grep -q '^## 0.1.0 ' \
+            || { echo "::error::no /opt/morca/CHANGELOG.md"; exit 1; }
 
   project-test:
     needs: [changes, release]

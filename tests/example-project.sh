@@ -7,8 +7,10 @@
 #
 # It adds this commit of morca-mojo as `pixi shelf add` pins it, by revision,
 # which must be on GitHub (CI's commit; MORCA_REV and MORCA_REPO say another).
-# Its one pipeline is examples/toy.mojo, its morca.toml configures it, and its
-# `test` task builds the toy and runs a partition. Needs pixi, for the lock.
+# Its one pipeline is examples/toy.mojo, its morca.toml configures it, its
+# upgrade.toml has a step for 0.1.0 and a CHANGELOG.md, which the image ships
+# (#472), and its `test` task builds the toy and runs a partition. Needs
+# pixi, for the lock.
 set -eu
 cd "$(dirname "$0")/.."
 dir=${1:?usage: sh tests/example-project.sh <dir>}
@@ -39,5 +41,20 @@ placement = "control"
 max_runs = 2
 cpus = "1..2"
 memory_gb = "0.5..2"
+EOF
+cat > "$dir/upgrade.toml" << 'EOF'
+[[version]]
+version = "0.1.0"
+
+[[version.step]]
+id = "0.1.0-toy"
+run = "morca backfill --rerun toy 2024-01"
+EOF
+cat > "$dir/CHANGELOG.md" << 'EOF'
+# Changelog
+
+## 0.1.0 (2026-11-14)
+
+- **The toy**: a first pipeline.
 EOF
 pixi lock --manifest-path "$dir/pixi.toml"

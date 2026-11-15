@@ -641,7 +641,10 @@ what [promote.sh](#a-dev-stack) reads.
 
 A release that needs something done around its deploy says so in its
 image, at `/opt/morca/upgrade.toml` (`MORCA_UPGRADE`), and `deploy.sh` shows
-or runs it. Examples are a backfill after the deploy, or a check before it
+or runs it. A project keeps it as `upgrade.toml` at its root, which
+[`deploy/project.Dockerfile`](../deploy/project.Dockerfile) copies there
+(a project's own `Dockerfile.morca` must copy it too); without one a deploy
+has no steps. Examples are a backfill after the deploy, or a check before it
 such as a new secret, outbound HTTPS to a new host, or a minimum morca:
 
 ```toml
@@ -1174,7 +1177,9 @@ project's image builds `FROM` it and adds only its own programs:
 `pipelines/*.mojo` into `/opt/morca/bin` and `/opt/morca/pipelines`, with the
 libraries they link, and copies the project's `morca.toml` to
 `/opt/morca/morca.toml` with `MORCA_CONFIG` naming it, so `morca-stack
-register` (a bare `morca register`) reads it. `MORCA_VERSION` picks the runtime: the morca-mojo
+register` (a bare `morca register`) reads it. Its `upgrade.toml` and
+`CHANGELOG.md`, if it has them, go to `/opt/morca` too, the first named by
+`MORCA_UPGRADE` ([upgrade steps](#a-releases-upgrade-steps)). `MORCA_VERSION` picks the runtime: the morca-mojo
 version the project pins (`morca aws push` reads it from `pixi.lock`), so
 the runtime and the pipelines are the same morca. Moving the project to a
 new morca moves its image to that release's runtime. A

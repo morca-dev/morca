@@ -66,8 +66,10 @@ dies on a CAX with SIGILL; see [Images](hetzner.md#images)), and
    `ghcr.io/morca-dev/morca-runtime:<version>`, or from the project's own
    `dockerfile`. morca's Dockerfile puts the project's `morca.toml`, if
    it has one, at `/opt/morca/morca.toml` and sets `MORCA_CONFIG` to it,
-   which `morca-stack register` needs; a project's own Dockerfile must do
-   the same. The build args are `MOJO_TARGET_CPU`, `MORCA_SOURCE` (the
+   which `morca-stack register` needs, and its `upgrade.toml` and
+   `CHANGELOG.md`, if it has them, in `/opt/morca`, where `deploy.sh` reads
+   the [upgrade steps](hetzner.md#a-releases-upgrade-steps); a project's own
+   Dockerfile must do the same. The build args are `MOJO_TARGET_CPU`, `MORCA_SOURCE` (the
    repository's URL), `MORCA_COMMIT` (the commit), the version as
    `version-arg`, `MORCA_VERSION` and `MORCA_RUNTIME`, and `build-args`;
 4. runs the image's `morca config check` on each of `configs`;
