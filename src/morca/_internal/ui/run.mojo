@@ -11,7 +11,7 @@ from morca._internal.ui.cluster import cluster_html
 from morca._internal.views.cluster import cluster_rows
 from morca._internal.dag import DagStep, aggregate, dag_svg
 from morca._internal.html import Html, url_encode
-from morca._internal.lineage import SnapshotRef
+from morca._internal.db.lineage import SnapshotRef
 from morca._internal.logs import location_exists, read_location, run_dir
 from morca._internal.metrics import InstanceMetrics, metrics_svg, read_metrics
 from morca._internal.state import State
@@ -47,7 +47,8 @@ from morca._internal.ui.step_cards import cards_script
 from morca._internal.ui.viz import timeline_section
 from morca._internal.usage import cpu_text
 from morca._internal.views.code import code_links
-from morca._internal.views.pipelines import StepDef, step_defs
+from morca._internal.views.pipelines import step_defs
+from morca._internal.db.pipelines_view import StepDef
 from morca._internal.views.runs import (
     RunRow,
     RunView,

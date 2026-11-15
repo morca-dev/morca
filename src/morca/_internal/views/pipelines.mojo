@@ -23,7 +23,7 @@ from morca._internal.coverage import Coverage, coverage
 from morca.cron import CronExpr
 from morca._internal.fill import FillStatus, fill_status
 from morca._internal.follow import Follow, follow
-from morca._internal.lineage import SnapshotRef
+from morca._internal.db.lineage import SnapshotRef
 from morca._internal.db.fill_requests import requested
 from morca._internal.db.live import live_runs
 from morca._internal.recommend import Recommendation
@@ -43,12 +43,12 @@ from morca._internal.state import State
 from morca.tz import Zone
 from morca._internal.views.runs import (
     RunsPage,
-    VersionRow,
     runs_page,
     runs_query,
     utc_text,
     version_rows,
 )
+from morca._internal.db.run_view import VersionRow
 from morca._internal.views.start import StartPreview, start_preview
 
 

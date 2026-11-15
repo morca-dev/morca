@@ -8,12 +8,12 @@ import morca._internal.db.run_view as run_db
 
 from morca._internal.sample import fixed1
 from morca._internal.state import State
-from morca._internal.store import Usage
+from morca._internal.db.run_rows import Usage
 from morca._internal.ui.step_cards import AttemptCard, StepCard, duration_text
 from morca._internal.ui.terms import value_help
 from morca._internal.usage import bytes_text, cpu_text
 from morca._internal.views.code import CodeLinks
-from morca._internal.views.pipelines import StepDef
+from morca._internal.db.pipelines_view import StepDef
 
 
 comptime STEP_RUNS = 20

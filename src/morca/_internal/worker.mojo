@@ -78,7 +78,7 @@ from morca._internal.cgroup import (
 from morca._internal.cgroup import put as put_cgroup
 from morca._internal.cgroup import start_limit_mb
 from morca._internal.run_cpu import CpuKnobs
-from morca._internal.control import fetch_secret
+from morca._internal.control import fetch_secret, pool_problem
 from morca._internal.http_store import Body, StateApi
 from morca._internal.logs import run_dir
 from morca._internal.pressure import (
@@ -102,12 +102,7 @@ from morca._internal.sample import (
 )
 from morca._internal.store import FINAL
 from morca._internal.usage import Meter, marks_json
-from morca._internal.workers import (
-    WorkerRun,
-    pool_problem,
-    version_refusal,
-    worker_run_of,
-)
+from morca._internal.workers import WorkerRun, version_refusal, worker_run_of
 
 comptime WORKER_USAGE = """usage:
   morca worker --pool <pool> [--remote <url>] [--token-file <path>]

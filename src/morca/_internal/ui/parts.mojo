@@ -8,12 +8,13 @@ from morca._internal.html import Html, url_encode
 from morca._internal.resources import gb_text
 from morca._internal.sample import fixed1
 from morca._internal.source import commit_url, web_url
-from morca._internal.store import Usage
+from morca._internal.db.run_rows import Usage
 from morca._internal.ui.layout import act_button, fact_item
 from morca._internal.usage import bytes_text, cpu_text, usage_text
 from morca._internal.views.code import CodeLinks, CodeRef, RunCode
 from morca._internal.views.commands import cancel_cli, retry_cli, shell_quote
-from morca._internal.views.runs import RunResources, RunRow, VersionRow
+from morca._internal.views.runs import RunResources, RunRow
+from morca._internal.db.run_view import VersionRow
 
 
 def dataset_links(mut h: Html, names: List[String]):

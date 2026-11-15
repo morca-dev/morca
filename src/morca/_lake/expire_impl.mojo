@@ -11,7 +11,8 @@ from iceberg.io import dirname
 from iceberg.maintain import MAX_SNAPSHOT_AGE_MS, ExpirePolicy
 
 from morca._lake.expire import ExpireAsk, Expiry
-from morca._lake.impl import load_dataset, table_defaults
+from morca._lake.impl import load_dataset
+from morca._lake.names import table_defaults
 
 
 def _metadata_files(table: Table) raises -> Int:

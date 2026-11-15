@@ -15,10 +15,9 @@ from std.testing import (
 from json import loads
 
 from morca._internal.sample import parse_pid_usage, tree_usage
-from morca._internal.store import Usage
+from morca._internal.db.run_rows import Usage
 from morca._internal.usage import (
     MAX_MARKS,
-    AttemptSpan,
     Mark,
     Meter,
     attribute,
@@ -30,6 +29,7 @@ from morca._internal.usage import (
     usage_of,
     usage_text,
 )
+from morca._internal.db.usage import AttemptSpan
 
 comptime MB = 1024 * 1024
 

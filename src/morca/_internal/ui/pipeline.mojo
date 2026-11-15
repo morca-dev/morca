@@ -63,16 +63,14 @@ from morca._internal.views.pipelines import (
     Fire,
     KeyCounts,
     PipelineAsk,
-    PipelineRow,
     PipelineView,
-    StepDef,
-    UsageSummary,
     fill_of,
     next_fires,
     pipeline_coverage,
     pipeline_rows,
 )
-from morca._internal.views.runs import VersionRow
+from morca._internal.db.pipelines_view import PipelineRow, StepDef, UsageSummary
+from morca._internal.db.run_view import VersionRow
 from morca._internal.views.steps import step_cards_of
 from morca._internal.web.page import Page
 from morca._internal.timekeys import is_time_kind

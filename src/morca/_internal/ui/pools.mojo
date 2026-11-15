@@ -38,7 +38,6 @@ from morca._internal.views.pools import (
     SELF_HOSTED,
     Machine,
     PoolCount,
-    WorkerRun,
     filtered,
     kind_of,
     machine,
@@ -48,6 +47,7 @@ from morca._internal.views.pools import (
     run_pipeline,
     worker_runs,
 )
+from morca._internal.db.machines_view import WorkerRun
 from morca._internal.views.runs import step_spans
 from morca._internal.watchdog import active_trips, banner_html
 from morca._internal.web.page import Page

@@ -26,6 +26,12 @@ go in the PR.
   `morca._internal` and the public modules may import both. `_lake` never
   imports `_internal`, `morca.ctx` or another public module, even for one
   helper: what both need goes in `_common`.
+- **Import from the defining module.** `from m import x` names the module
+  that defines `x`, not one that imports it and passes it on; only a
+  package's `__init__.mojo` may re-export. That's why `morca.tables`,
+  `morca.store` and the other public modules imported for what they pass on
+  from `_lake` or `_internal` are packages. CI's `customs` job
+  (github.com/magmalake/customs) checks this and the cycles above.
 
 ## Migrations
 

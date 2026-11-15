@@ -19,10 +19,10 @@ from morca._internal.views.commands import backfill_cmd, run_cmd
 from morca._internal.views.pipelines import (
     KeyCounts,
     PipelineAsk,
-    PipelineRow,
     PipelineView,
     pipeline_rows,
 )
+from morca._internal.db.pipelines_view import PipelineRow
 from morca._internal.views.start import StartPreview, preview_line
 from morca._internal.web.page import Page
 

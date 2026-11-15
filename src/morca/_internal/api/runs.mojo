@@ -8,13 +8,12 @@ from morca._internal.metrics import InstanceMetrics, peaks_json
 from morca._internal.source import commit_url
 from morca._internal.usage import usage_json
 from morca._internal.views.runs import (
-    InstanceRow,
     RunRow,
     RunView,
     RunsPage,
-    VersionRow,
     cluster_log_name,
 )
+from morca._internal.db.run_view import InstanceRow, VersionRow
 
 
 def json_version(mut out: String, v: VersionRow):

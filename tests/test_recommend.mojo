@@ -10,12 +10,12 @@ from morca._internal.recommend import (
     LEARNED,
     MIN_RUNS,
     Recommendation,
-    RunPeaks,
     memory_gb_text,
     percentile,
     recommend,
     resolve_request,
 )
+from morca._internal.db.recommend import RunPeaks
 from morca._internal.resources import Request, Room, admit
 
 comptime MB = 1048576.0

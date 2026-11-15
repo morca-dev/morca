@@ -51,16 +51,14 @@ from morca._internal.store import (
     RUNNING,
     SKIPPED,
     SUCCEEDED,
-    RunInfo,
     RunResult,
     RunStore,
     status_list,
-    StepInfo,
     StepRun,
     TableSnapshot,
-    Usage,
     process_owner,
 )
+from morca._internal.db.run_rows import RunInfo, StepInfo, Usage
 
 
 comptime _MIGRATION_LOCK = 0x6F726361  # "orca"

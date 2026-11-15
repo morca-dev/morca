@@ -49,7 +49,8 @@ from morca._internal.aws import aws_command
 from morca._internal.aws_replace import replace_control
 from morca.civil import now
 from morca._internal.expiry import expirable, expire_argv, maintain_binary
-from morca._internal.lineage import Made, SnapshotRef, back, forward, latest
+from morca._internal.lineage import back, forward, latest
+from morca._internal.db.lineage import Made, SnapshotRef
 from morca._internal.locate import locate
 from morca._internal.pause import retire
 from morca._internal.notify import (

@@ -5,10 +5,6 @@ the durations a snooze takes."""
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
 from morca._internal.watchdog import (
-    Counts,
-    Lease,
-    Quiet,
-    Unmet,
     check_text,
     checks_json,
     cost_rate,
@@ -26,6 +22,7 @@ from morca._internal.watchdog import (
     parse_duration,
     past_names,
 )
+from morca._internal.db.watchdog import Counts, Lease, Quiet, Unmet
 
 
 def _all() -> List[String]:

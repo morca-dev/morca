@@ -46,16 +46,14 @@ from morca._internal.store import (
     FINAL,
     Backoff,
     Recorder,
-    RunInfo,
     RunResult,
     RunStore,
-    StepInfo,
     StepRun,
     SUCCEEDED,
     Store,
     TableSnapshot,
-    Usage,
 )
+from morca._internal.db.run_rows import RunInfo, StepInfo, Usage
 
 comptime STORE_PATH = "/api/worker/store/"
 """Where a store call goes on the UI: this and the call's name."""

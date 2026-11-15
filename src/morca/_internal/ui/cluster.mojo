@@ -4,7 +4,7 @@ spread over (`morca._internal.views.cluster`)."""
 from morca._internal.html import Html
 from morca._internal.json import quote
 from morca._internal.ui.layout import card_open
-from morca._internal.views.cluster import ClusterRow
+from morca._internal.db.run_view import ClusterRow
 
 comptime _HELP = (
     "This run's dista cluster spread over several workers of its pool"

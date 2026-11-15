@@ -1,8 +1,8 @@
 """Rebuilds and lineage as JSON."""
 
 from morca._internal.json import quote
-from morca._internal.lineage import Made
-from morca._internal.sensors import Rebuild
+from morca._internal.db.lineage import Made
+from morca._internal.db.rebuilds import Rebuild
 
 
 def json_rebuild(mut out: String, r: Rebuild):

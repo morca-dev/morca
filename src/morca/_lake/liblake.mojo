@@ -1,17 +1,19 @@
 """liblake's root (#454): the library's C symbols, each forwarding to its
-function in `morca._lake.lib`. `mojo build --emit shared-lib` exports only
-the root module's `@export` functions, and an `@export` function is
-compiled into every program that imports its module, so the exports live
-here, where only the library's build reaches them, and `morca._lake.lib`
-(which `-D MORCA_LAKE_SOURCE=1` builds call directly) has none.
+function in `morca._lake.lib`, or in `morca._lake.rust_sink` for a Rust
+step's `lake_sink_*`. `mojo build --emit shared-lib` exports only the root
+module's `@export` functions, and an `@export` function is compiled into
+every program that imports its module, so the exports live here, where
+only the library's build reaches them, and `morca._lake.lib` (which
+`-D MORCA_LAKE_SOURCE=1` builds call directly) has none.
 
     scripts/build-liblake.sh   # mojo build --emit shared-lib -g1 ... this file
 
-Keep it in step with `morca._lake.lib`: one forwarder per `lake_*`
-function there, with its signature.
+Keep it in step with `morca._lake.lib` and `morca._lake.rust_sink`: one
+forwarder per `lake_*` function there, with its signature.
 """
 
 import morca._lake.lib as lib
+import morca._lake.rust_sink as rust_sink
 
 
 @export("lake_abi_version")
@@ -283,29 +285,29 @@ def lake_data(
 def lake_sink_new(
     h: Int, name: Int, name_n: Int, dir: Int, dir_n: Int, flush: Int, err: Int
 ) abi("C") -> Int:
-    return lib.lake_sink_new(h, name, name_n, dir, dir_n, flush, err)
+    return rust_sink.lake_sink_new(h, name, name_n, dir, dir_n, flush, err)
 
 
 @export("lake_sink_schema")
 def lake_sink_schema(s: Int, schema: Int, err: Int) abi("C") -> Int32:
-    return lib.lake_sink_schema(s, schema, err)
+    return rust_sink.lake_sink_schema(s, schema, err)
 
 
 @export("lake_sink_put")
 def lake_sink_put(s: Int, array: Int, schema: Int, err: Int) abi("C") -> Int32:
-    return lib.lake_sink_put(s, array, schema, err)
+    return rust_sink.lake_sink_put(s, array, schema, err)
 
 
 @export("lake_sink_take")
 def lake_sink_take(s: Int, path: Int, path_n: Int, err: Int) abi("C") -> Int32:
-    return lib.lake_sink_take(s, path, path_n, err)
+    return rust_sink.lake_sink_take(s, path, path_n, err)
 
 
 @export("lake_sink_finish")
 def lake_sink_finish(s: Int, out_block: Int, err: Int) abi("C") -> Int32:
-    return lib.lake_sink_finish(s, out_block, err)
+    return rust_sink.lake_sink_finish(s, out_block, err)
 
 
 @export("lake_sink_free")
 def lake_sink_free(s: Int) abi("C"):
-    lib.lake_sink_free(s)
+    rust_sink.lake_sink_free(s)

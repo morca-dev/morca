@@ -12,12 +12,12 @@ from morca._internal.state import State
 from morca._internal.timeline import workers_svg
 from morca._internal.ui.layout import card_open
 from morca._internal.views.runs import (
-    InstanceRow,
     RunRow,
     cluster_log_name,
     live_status,
     step_spans,
 )
+from morca._internal.db.run_view import InstanceRow
 
 
 comptime _MACHINES_HELP = (
