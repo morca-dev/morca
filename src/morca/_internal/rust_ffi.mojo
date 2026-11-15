@@ -14,7 +14,8 @@ field; the strings it points to are NUL-terminated copies `WorkerCall`
 keeps. The callbacks (`_on_log`, `_on_progress`, `_on_metric`) are `abi("C")`
 functions that the worker calls on the thread that called it, which is the
 step's; they write to the step's log through its `Ctx`, whose address the
-host block holds.
+host block holds. A `WorkerCall` borrows that `Ctx`, as a reference does,
+so the compiler keeps it alive while the call is.
 
 **Files.** Each call has an output directory of its own, under `$TMPDIR`
 (else `/tmp`), for the Parquet files a worker writes; `_on_add_file`
@@ -45,6 +46,7 @@ from threads.ffi import OpaquePtr, opaque_ptr
 
 from morca.ctx import Ctx
 from morca._common.dlopen import open_library
+from morca._lake.abi import Slots
 from morca._internal.json import quote
 
 comptime ABI_VERSION: UInt32 = 1
@@ -205,8 +207,11 @@ def secrets_json() -> String:
 # --- the callbacks, on the step's thread ---
 
 
-def _ctx_of(host: Int) -> Pointer[Ctx, MutAnyOrigin]:
-    return Pointer[Ctx, MutAnyOrigin](unsafe_from_address=_get_int(host, 0))
+def _ctx_of(host: Int) -> Pointer[Ctx, ImmUntrackedOrigin]:
+    """The `Ctx` the call borrows: the callbacks only log, which reads it."""
+    return Pointer[Ctx, ImmUntrackedOrigin](
+        unsafe_from_address=_get_int(host, 0)
+    )
 
 
 def _on_log(host: Int, msg: Int, n: Int) abi("C") -> None:
@@ -313,12 +318,15 @@ def _watch(arg: OpaquePtr) -> OpaquePtr:
     return arg
 
 
-struct WorkerCall(Movable):
-    """One call of a worker: its context, its stop flag's thread and, once
-    `start` has run it, the stream it returned. Destroying it releases the
-    stream (which ends the worker's side of the call), stops the thread
-    and frees the context, in that order."""
+struct WorkerCall[mut: Bool, //, origin: Origin[mut=mut]](Movable):
+    """One call of a worker, over a borrow of the step's `Ctx`: its
+    context, its stop flag's thread and, once `start` has run it, the
+    stream it returned. Destroying it releases the stream (which ends the
+    worker's side of the call), stops the thread and frees the context, in
+    that order."""
 
+    var _ctx: Pointer[Ctx, Self.origin]
+    """The `Ctx` the callbacks log to, by its address in `host`."""
     var lib: WorkerLib
     var strings: List[List[UInt8]]
     var context: Int
@@ -339,11 +347,12 @@ struct WorkerCall(Movable):
     def __init__(
         out self,
         var lib: WorkerLib,
-        ref ctx: Ctx,
+        ref[Self.origin] ctx: Ctx,
         params: String,
         step_version: Int,
         stop_when: StopFn,
     ) raises:
+        self._ctx = Pointer(to=ctx)
         self.output_dir = _output_dir()
         self.lib = lib^
         self.strings = List[List[UInt8]]()
@@ -353,7 +362,7 @@ struct WorkerCall(Movable):
         self.stream_block = 0
         self.stream = None
         self.reported = OwnedPointer(Reported(self.output_dir.copy()))
-        _put_int(self.host, 0, Int(Pointer(to=ctx)))
+        _put_int(self.host, 0, Int(self._ctx))
         _put_int(self.host, 16, Int(Pointer(to=self.reported[])))
         Pointer[StopFn, MutUntrackedOrigin](
             unsafe_from_address=self.watch + 16
@@ -393,6 +402,7 @@ struct WorkerCall(Movable):
         self.watcher = ThreadHandle.spawn[_watch](opaque_ptr(self.watch))
 
     def __init__(out self, *, deinit move: Self):
+        self._ctx = move._ctx
         self.lib = move.lib^
         self.strings = move.strings^
         self.context = move.context
@@ -437,20 +447,21 @@ struct WorkerCall(Movable):
         )
         return _cstring(msg)
 
-    def next_array(mut self, storage: Int) raises -> Bool:
-        """Pulls the stream's next `ArrowArray` into the 80 bytes at
-        `storage`, not imported (`morca.rust_step` moves it to liblake);
-        False at the end of the stream. Raises if `get_next` fails, and
-        `last_error` says why in the worker's words."""
+    def next_array(mut self, mut storage: Slots) raises -> Bool:
+        """Pulls the stream's next `ArrowArray` into `storage` (10 slots),
+        not imported (`morca.rust_step` moves it to liblake); False at the
+        end of the stream. Raises if `get_next` fails, and `last_error`
+        says why in the worker's words."""
+        debug_assert(storage.n >= 10, "an ArrowArray takes 10 slots")
         var f = _get_int(self.stream_block, 8)
         var rc = Pointer(to=f).unsafe_bitcast[_GetNextFn]()[](
-            self.stream_block, storage
+            self.stream_block, storage.addr
         )
         if rc != 0:
             raise Error(
                 "the stream's get_next failed (", rc, "): ", self.last_error()
             )
-        return _get_int(storage, 64) != 0
+        return storage[8] != 0
 
     def start(mut self) raises:
         """Calls `morca_worker_run` and takes the stream it returns; raises

@@ -29,7 +29,8 @@ wait
 wait
 
 out=$(LAKE_LIB="$PWD/build/libfake_lake.$ext" ./build/lake-load-one a.b)
-echo "$out" | grep -q "has ABI version 999, and this morca speaks 5" \
+abi=$(sed -n 's/^comptime ABI_VERSION: UInt32 = \([0-9]*\).*/\1/p' src/morca/_lake/abi.mojo)
+echo "$out" | grep -q "has ABI version 999, and this morca speaks $abi" \
     || fail "a library of another ABI version wasn't refused: $out"
 out=$(LAKE_LIB="$PWD/build/no-such-liblake.$ext" ./build/lake-load-one a.b)
 echo "$out" | grep -q "can't load $PWD/build/no-such-liblake.$ext" \

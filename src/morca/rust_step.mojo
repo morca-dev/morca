@@ -81,7 +81,7 @@ does (`morca._lake.rust_sink`, #474), so a program with Rust steps
 compiles no iceberg; this module runs the worker and pulls its stream.
 """
 
-from arrow_mlake.carrow_import import release_c_array
+from arrow_mlake.carrow_import import ImportedStream, release_c_array
 
 from morca.ctx import Ctx
 from morca._internal.handover import outdated
@@ -153,7 +153,7 @@ def rust_step(
         _refused(call)
         raise e^
     _take(call, sink)
-    sink.check(call.stream.value().schema_address())
+    sink.check(call.stream.value())
 
     # Each array is pulled into `storage` and moved to the library, which
     # leaves the struct released (`morca._lake.rust_sink`).
@@ -161,7 +161,7 @@ def rust_step(
     while True:
         var more: Bool
         try:
-            more = call.next_array(storage.addr)
+            more = call.next_array(storage)
         except e:
             _refused(call)
             var plain = call.last_error()
@@ -178,7 +178,7 @@ def rust_step(
             raise e^
         if not more:
             break
-        sink.put(storage.addr)
+        sink.put(call.stream.value(), storage)
     var stopped = call.stopping()
     _ = call^
     var got = sink^.finish()
@@ -228,13 +228,13 @@ struct _Sink(Movable):
             self._api, table.handle, name, dir, flush_bytes
         )
 
-    def check(mut self, stream_schema: Int) raises:
-        """Checks the stream's schema, which must outlive the sink."""
-        calls.sink_schema(self._api, self.handle, stream_schema)
+    def check(mut self, stream: ImportedStream) raises:
+        """Checks `stream`'s schema against the table's."""
+        calls.sink_schema(self._api, self.handle, stream)
 
-    def put(mut self, array: Int) raises:
-        """Moves the `ArrowArray` at `array` to the library."""
-        calls.sink_put(self._api, self.handle, array)
+    def put(mut self, stream: ImportedStream, array: Slots) raises:
+        """Moves `stream`'s `ArrowArray` in `array` to the library."""
+        calls.sink_put(self._api, self.handle, stream, array)
 
     def take(mut self, path: String) raises:
         calls.sink_take(self._api, self.handle, path)
@@ -252,14 +252,14 @@ struct _Sink(Movable):
         self._api.sink_free(self.handle)
 
 
-def _refused(call: WorkerCall) raises:
+def _refused(call: WorkerCall[_]) raises:
     """Raises why morca refused a file the worker reported, if it did."""
     var why = call.refused()
     if why:
         raise Error(why)
 
 
-def _take(mut call: WorkerCall, mut sink: _Sink) raises:
+def _take(mut call: WorkerCall[_], mut sink: _Sink) raises:
     """Hands the library the files the worker reported since last time."""
     _refused(call)
     for p in call.take_files():

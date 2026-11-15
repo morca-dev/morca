@@ -143,7 +143,7 @@ struct Api(Copyable, Movable):
     var data: Call4Fn
     var sink_new: SinkNewFn
     var sink_schema: MetaFn
-    var sink_put: MetaFn
+    var sink_put: Call4Fn
     var sink_take: Call4Fn
     var sink_finish: MetaFn
     var sink_free: FreeFn
@@ -191,7 +191,7 @@ struct Api(Copyable, Movable):
             data=_sym[Call4Fn](lib, "lake_data"),
             sink_new=_sym[SinkNewFn](lib, "lake_sink_new"),
             sink_schema=_sym[MetaFn](lib, "lake_sink_schema"),
-            sink_put=_sym[MetaFn](lib, "lake_sink_put"),
+            sink_put=_sym[Call4Fn](lib, "lake_sink_put"),
             sink_take=_sym[Call4Fn](lib, "lake_sink_take"),
             sink_finish=_sym[MetaFn](lib, "lake_sink_finish"),
             sink_free=_sym[FreeFn](lib, "lake_sink_free"),
@@ -240,7 +240,7 @@ struct Api(Copyable, Movable):
         data: Call4Fn,
         sink_new: SinkNewFn,
         sink_schema: MetaFn,
-        sink_put: MetaFn,
+        sink_put: Call4Fn,
         sink_take: Call4Fn,
         sink_finish: MetaFn,
         sink_free: FreeFn,
