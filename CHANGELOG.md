@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.33.0 - 2026-11-15
+
+- **Data tab layout:** the table first, a commit picker at the top (searchable, in the URL), and Data/Schema tabs with column types under the headers. (#501)
+- **morca ships prebuilt:** the package has `morca` and `morca_maintain` in `bin/`; `morca register` refuses pipelines built from another morca-mojo (`MORCA_MIXED_VERSIONS=1` warns). (#504)
+- **Concurrency keys:** `concurrency = { key, limit }` in morca.toml caps runs across pipelines, schedulers and workers; a run waiting on an older version's run fails after `MORCA_HANDOVER_WAIT_SECONDS`, required once a key is declared. (#503)
+- **Hetzner tools versioned on their own** (`deploy/hetzner/VERSION`, now 0.34.0), and deploys stop when the image needs newer tools; 0.33.0 images need 0.34.0. (#489, #494, #503)
+- Docs: summary keys are `orca.*`, more public helpers listed, `workers=` explained. (#473)
+- Faster pool and Hetzner tests; the runtime image is tagged on manifest lists too. (#491, #493)
+
 ## 0.32.0 - 2026-11-15
 
 - **Faster Data tab:** manifests read once, in parallel, and cached on disk (`MORCA_DATA_CACHE`); a loading indicator on click. (#480)

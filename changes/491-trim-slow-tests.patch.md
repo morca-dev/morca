@@ -1,1 +1,0 @@
-- **Faster pool and Hetzner tests:** test-pool and test-hetzner wait for what they check instead of fixed grace periods and retry pauses. (#491)
