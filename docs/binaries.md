@@ -5,8 +5,8 @@ is, with the compiler it pins (#455):
 
 | In the package | Built from | What it is |
 |---|---|---|
-| `bin/morca` | `src/morca/_bin/morca_main.mojo` (bin/scheduler.mojo's two lines) | the scheduler, the UI, registration and the other commands (`morca.command`) |
-| `bin/morca_maintain` | `src/morca/_bin/maintain_main.mojo` (bin/morca_maintain.mojo's) | snapshot expiry and the UI's data reads (`morca.maintain`), which `morca` runs beside itself |
+| `bin/morca` | `src/morca_bin.mojo` (bin/scheduler.mojo's two lines) | the scheduler, the UI, registration and the other commands (`morca.command`) |
+| `bin/morca_maintain` | `src/morca_maintain_bin.mojo` (bin/morca_maintain.mojo's) | snapshot expiry and the UI's data reads (`morca.maintain`), which `morca` runs beside itself |
 | `lib/liblake.so` (`.dylib`) | `src/morca/_lake/liblake.mojo` | the lake library `morca.tables` loads (#454) |
 | `lib/mojo/morca.mojoc` | `src/morca` | the package pipelines and apps import |
 

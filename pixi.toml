@@ -40,9 +40,9 @@ extra-args = ["-I", "$PREFIX/lib/mojo"]
 # the .so on Linux, in the .dSYM `mojo build` writes beside it on macOS.
 #
 # And morca's own `morca` and `morca_maintain` in the package's bin/, built
-# the same way from src/morca/_bin (bin/scheduler.mojo and
-# bin/morca_maintain.mojo inside the package, where Mojo finds `morca`; #455,
-# docs/binaries.md): a project runs them instead of compiling morca's
+# the same way from src/morca_bin.mojo and src/morca_maintain_bin.mojo
+# (bin/scheduler.mojo's and bin/morca_maintain.mojo's lines, beside the
+# package, where Mojo finds `morca`; #455, docs/binaries.md): a project runs them instead of compiling morca's
 # control plane itself, and `morca register` refuses pipelines built from
 # another morca-mojo (morca._internal.version).
 
@@ -58,12 +58,12 @@ extra-args = ["--emit", "shared-lib", "-g1", "--target-cpu", "x86-64-v3", "-I", 
 
 [[package.build.target.linux-64.config.bins]]
 name = "morca"
-path = "src/morca/_bin/morca_main.mojo"
+path = "src/morca_bin.mojo"
 extra-args = ["-g1", "--target-cpu", "x86-64-v3", "-I", "src", "-I", "$PREFIX/lib/mojo"]
 
 [[package.build.target.linux-64.config.bins]]
 name = "morca_maintain"
-path = "src/morca/_bin/maintain_main.mojo"
+path = "src/morca_maintain_bin.mojo"
 extra-args = ["-g1", "--target-cpu", "x86-64-v3", "-I", "src", "-I", "$PREFIX/lib/mojo"]
 
 [package.build.target.linux-aarch64.config.pkg]
@@ -78,12 +78,12 @@ extra-args = ["--emit", "shared-lib", "-g1", "--target-cpu", "neoverse-n1", "-I"
 
 [[package.build.target.linux-aarch64.config.bins]]
 name = "morca"
-path = "src/morca/_bin/morca_main.mojo"
+path = "src/morca_bin.mojo"
 extra-args = ["-g1", "--target-cpu", "neoverse-n1", "-I", "src", "-I", "$PREFIX/lib/mojo"]
 
 [[package.build.target.linux-aarch64.config.bins]]
 name = "morca_maintain"
-path = "src/morca/_bin/maintain_main.mojo"
+path = "src/morca_maintain_bin.mojo"
 extra-args = ["-g1", "--target-cpu", "neoverse-n1", "-I", "src", "-I", "$PREFIX/lib/mojo"]
 
 [package.build.target.osx-arm64.config.pkg]
@@ -98,12 +98,12 @@ extra-args = ["--emit", "shared-lib", "-g1", "--target-cpu", "apple-m1", "-I", "
 
 [[package.build.target.osx-arm64.config.bins]]
 name = "morca"
-path = "src/morca/_bin/morca_main.mojo"
+path = "src/morca_bin.mojo"
 extra-args = ["-g1", "--target-cpu", "apple-m1", "-I", "src", "-I", "$PREFIX/lib/mojo"]
 
 [[package.build.target.osx-arm64.config.bins]]
 name = "morca_maintain"
-path = "src/morca/_bin/maintain_main.mojo"
+path = "src/morca_maintain_bin.mojo"
 extra-args = ["-g1", "--target-cpu", "apple-m1", "-I", "src", "-I", "$PREFIX/lib/mojo"]
 
 [package.host-dependencies]
