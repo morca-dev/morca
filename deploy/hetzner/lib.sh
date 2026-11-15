@@ -13,12 +13,15 @@
 #   the server on ssh's standard input.
 
 HERE=$(cd "$(dirname "$0")" && pwd)
-# The release these scripts are from, when they're a release's tarball
-# (package.sh writes VERSION); none in a checkout.
+# These scripts' own version (#461): deploy/hetzner/VERSION, which moves
+# only when deploy/hetzner changes (scripts/hetzner-version.sh), and which
+# package.sh copies into a release's tarball. Not morca's version: a morca
+# release that changes nothing here ships the same tools again.
 SCRIPTS_VERSION=
 [ ! -r "$HERE/VERSION" ] || SCRIPTS_VERSION=$(cat "$HERE/VERSION")
 DRY_RUN=0
 YES=0
+SKIP_TOOLS_CHECK=0
 
 die() {
     echo "$(basename "$0"): $*" >&2
@@ -219,9 +222,189 @@ parse_common() { # sets REST to the arguments not handled here
         case "$a" in
             --dry-run) DRY_RUN=1 ;;
             --yes | -y) YES=1 ;;
+            --skip-tools-check) SKIP_TOOLS_CHECK=1 ;;
             *) REST="$REST $a" ;;
         esac
     done
+}
+
+# --- the tools' version against the image's minimum (#461) -------------------
+# A morca image says which of these scripts it needs: its label
+# dev.morca.hetzner-min, the oldest morca-hetzner version that knows what
+# its morca asks of the server (deploy/runtime.Dockerfile sets it; a
+# project's image built FROM morca-runtime inherits it). check_tools reads
+# it from the registry, not the server, so it runs before anything there
+# is touched, and before up.sh makes a server at all. An image without the
+# label (from before it) has no minimum.
+TOOLS_MIN_LABEL=dev.morca.hetzner-min
+TOOLS_URL=https://github.com/morca-dev/morca/releases/latest/download/morca-hetzner.tar.gz
+
+# version_lt A B: version A (1.2.3) is older than B.
+version_lt() {
+    awk -v a="$1" -v b="$2" 'BEGIN {
+        na = split(a, x, "."); nb = split(b, y, "."); n = na > nb ? na : nb
+        for (i = 1; i <= n; i++) { if (x[i] + 0 < y[i] + 0) exit 0; if (x[i] + 0 > y[i] + 0) exit 1 }
+        exit 1 }'
+}
+
+# reg_curl PATH: GET https://R_HOST/v2/R_REPO/PATH into $R_DIR/body (headers
+# in $R_DIR/headers), printing the HTTP status. The token goes in curl's
+# config on standard input, not its arguments.
+reg_curl() {
+    {
+        printf 'header = "Accept: %s"\n' "$R_ACCEPT"
+        [ -z "$R_TOKEN" ] || printf 'header = "Authorization: Bearer %s"\n' "$R_TOKEN"
+    } | curl -sS -L --max-time 60 -K - -D "$R_DIR/headers" -o "$R_DIR/body" -w '%{http_code}' \
+        "https://$R_HOST/v2/$R_REPO/$1"
+}
+
+# ghcr_token: the ghcr-token secret's value (SECRETS_FILE's, or
+# GHCR_TOKEN_FILE's), or nothing. Never printed but to curl's config.
+ghcr_token() {
+    if in_secrets ghcr-token && [ -n "$SECRETS_JSON" ]; then
+        printf '%s' "$SECRETS_JSON" | jq -j '.["ghcr-token"]'
+    elif [ -n "${GHCR_TOKEN_FILE:-}" ] && [ -r "$GHCR_TOKEN_FILE" ]; then
+        if is_sops "$GHCR_TOKEN_FILE"; then sops -d "$GHCR_TOKEN_FILE"; else cat "$GHCR_TOKEN_FILE"; fi
+    fi
+}
+
+# reg_token: a pull token from the realm the last 401's WWW-Authenticate
+# names, as GHCR_USER on ghcr.io (with ghcr-token) or anonymously.
+reg_token() {
+    h=$(tr -d '\r' < "$R_DIR/headers" | sed -n 's/^[Ww][Ww][Ww]-[Aa][Uu][Tt][Hh][Ee][Nn][Tt][Ii][Cc][Aa][Tt][Ee]: *[Bb]earer *//p' | tail -n 1)
+    realm=$(echo "$h" | sed -n 's/.*realm="\([^"]*\)".*/\1/p')
+    service=$(echo "$h" | sed -n 's/.*service="\([^"]*\)".*/\1/p')
+    [ -n "$realm" ] || {
+        R_ERR="$R_HOST asks for a login it doesn't say how to get"
+        return 1
+    }
+    tok_=
+    [ "$R_HOST" != ghcr.io ] || [ -z "${GHCR_USER:-}" ] || tok_=$(ghcr_token) || tok_=
+    R_TOKEN=$({
+        [ -z "$tok_" ] || printf 'user = "%s:%s"\n' "$GHCR_USER" "$tok_"
+    } | curl -fsS --max-time 60 -K - "$realm?service=$service&scope=repository:$R_REPO:pull" \
+        | jq -r '.token // .access_token // empty') || R_TOKEN=
+    tok_=
+    [ -n "$R_TOKEN" ] || {
+        R_ERR="no pull token from $realm${GHCR_USER:+ as $GHCR_USER}"
+        return 1
+    }
+}
+
+# reg_get PATH: reg_curl, logging in once on a 401; fails with R_ERR set
+# unless the answer is a 200.
+reg_get() {
+    code=$(reg_curl "$1") || {
+        R_ERR="couldn't reach $R_HOST"
+        return 1
+    }
+    if [ "$code" = 401 ] && [ -z "$R_TOKEN" ]; then
+        reg_token || return 1
+        code=$(reg_curl "$1") || {
+            R_ERR="couldn't reach $R_HOST"
+            return 1
+        }
+    fi
+    case $code in
+        200) ;;
+        401 | 403) R_ERR="$R_HOST refused $R_REPO (HTTP $code: a private image needs GHCR_USER and ghcr-token)" && return 1 ;;
+        404) R_ERR="no $R_REPO:$R_TAG on $R_HOST (HTTP 404)" && return 1 ;;
+        *) R_ERR="$R_HOST answered HTTP $code for $1" && return 1 ;;
+    esac
+}
+
+# image_min IMAGE TAG: the image's dev.morca.hetzner-min label, or nothing
+# when it has none; on failure, why, and non-zero. For a multi-platform
+# image, the server's platform's (cax: arm64, otherwise amd64).
+image_min() {
+    R_TAG=$2
+    R_TOKEN=
+    R_ERR=
+    first=${1%%/*}
+    case $1 in
+        */*)
+            case $first in
+                *.* | *:* | localhost) R_HOST=$first R_REPO=${1#*/} ;;
+                *) R_HOST=docker.io R_REPO=$1 ;;
+            esac
+            ;;
+        *) R_HOST=docker.io R_REPO=$1 ;;
+    esac
+    if [ "$R_HOST" = docker.io ]; then
+        R_HOST=registry-1.docker.io
+        case $R_REPO in */*) ;; *) R_REPO=library/$R_REPO ;; esac
+    fi
+    case $SERVER_TYPE_SMALL in cax*) arch=arm64 ;; *) arch=amd64 ;; esac
+    R_DIR=$(mktemp -d "${TMPDIR:-/tmp}/morca-hetzner-registry.XXXXXX")
+    R_ACCEPT="application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json"
+    # Not image_min_; st=$?: under set -e that exits a $(...) at once.
+    if image_min_ "$arch"; then st=0; else st=1; fi
+    [ "$st" = 0 ] || echo "$R_ERR"
+    rm -rf "$R_DIR"
+    R_TOKEN=
+    return "$st"
+}
+
+image_min_() {
+    reg_get "manifests/$R_TAG" || return 1
+    if jq -e '.manifests' "$R_DIR/body" > /dev/null 2>&1; then
+        d_=$(jq -r --arg a "$1" '[.manifests[] | select(.platform.os == "linux")]
+            | (map(select(.platform.architecture == $a)) + .)[0].digest // empty' "$R_DIR/body")
+        [ -n "$d_" ] || {
+            R_ERR="$R_REPO:$R_TAG has no linux image"
+            return 1
+        }
+        reg_get "manifests/$d_" || return 1
+    fi
+    d_=$(jq -r '.config.digest // empty' "$R_DIR/body" 2> /dev/null)
+    [ -n "$d_" ] || {
+        R_ERR="$R_REPO:$R_TAG's manifest names no config"
+        return 1
+    }
+    reg_get "blobs/$d_" || return 1
+    jq -r --arg l "$TOOLS_MIN_LABEL" '.config.Labels[$l] // empty' "$R_DIR/body" 2> /dev/null || {
+        R_ERR="$R_REPO:$R_TAG's config isn't JSON"
+        return 1
+    }
+}
+
+# check_tools TAG: these scripts are at least the version MORCA_IMAGE:TAG
+# needs, or it stops, naming that version and where to get it. Run before
+# anything on the server is touched. A dry run only warns when the
+# registry can't be read (it doesn't decrypt the ghcr-token);
+# --skip-tools-check skips it.
+check_tools() {
+    img_=$MORCA_IMAGE:$1
+    me_=$(basename "$0")
+    if [ "$SKIP_TOOLS_CHECK" = 1 ]; then
+        echo "$me_: --skip-tools-check: not checking which morca-hetzner $img_ needs" >&2
+        return 0
+    fi
+    if [ -z "$SCRIPTS_VERSION" ]; then
+        echo "$me_: warning: no VERSION beside these scripts, so not checking which morca-hetzner $img_ needs" >&2
+        return 0
+    fi
+    case $1 in
+        *"<"*)
+            echo "# a dry run doesn't know the tag ($1): not checking which morca-hetzner it needs" >&2
+            return 0
+            ;;
+    esac
+    need_tool curl jq
+    if ! min_=$(image_min "$MORCA_IMAGE" "$1"); then
+        if [ "$DRY_RUN" = 1 ]; then
+            echo "# warning: couldn't read which morca-hetzner $img_ needs: $min_" >&2
+            return 0
+        fi
+        die "couldn't read which morca-hetzner $img_ needs from its registry: $min_; nothing was changed on the server (--skip-tools-check goes on without the check)"
+    fi
+    if [ -z "$min_" ]; then
+        echo "$me_: $img_ names no minimum morca-hetzner (no $TOOLS_MIN_LABEL label: an image from before it): going on with $SCRIPTS_VERSION" >&2
+    elif version_lt "$SCRIPTS_VERSION" "$min_"; then
+        die "$img_ needs morca-hetzner >= $min_, and these scripts are $SCRIPTS_VERSION: get the newest with curl -fsSL $TOOLS_URL | tar -xz, and run them from morca-hetzner-<version>/; nothing was changed on the server"
+    else
+        echo "$me_: $img_ needs morca-hetzner >= $min_: these are $SCRIPTS_VERSION" >&2
+    fi
 }
 
 # check_args: morca-stack check's arguments from hetzner.env: a --canary for

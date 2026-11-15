@@ -37,6 +37,9 @@ run --entrypoint sh "$img" -c '[ -s /opt/morca/ssl/cacert.pem ] && [ -s /src/pro
 # tests run in the containers, util-linux's setpriv, and the base's time
 # zones and CA certificates.
 run --entrypoint test "$img" -x /opt/morca/bin/morca || fail "test -x, as morca-stack checks an image"
+# The oldest deploy/hetzner tools it works with, which deploy.sh reads (#461).
+[ -n "$(docker image inspect -f '{{index .Config.Labels "dev.morca.hetzner-min"}}' "$img")" ] \
+    || fail "no dev.morca.hetzner-min label"
 out=$(run --entrypoint sh "$img" -c 'for t in sh cat test timeout nc printf tr mount setpriv ldd grep sed awk cut sha256sum env; do
     command -v "$t" > /dev/null || echo "no $t"; done
     /usr/bin/setpriv --help 2>&1 | grep -q -e --bounding-set || echo "/usr/bin/setpriv has no --bounding-set"
@@ -108,6 +111,10 @@ run --entrypoint cat "$proj" /opt/morca/pipelines/toy.source.json | grep -q '"pi
 run --entrypoint toy "$proj" describe | grep -q '"pipeline": "toy"' || fail "toy describe"
 out=$(run --entrypoint toy "$proj" run --partitions 2024-01 2>&1) || fail "toy run: $out"
 [ "$(docker image inspect -f '{{.Config.Entrypoint}}' "$proj")" = "[/opt/morca/bin/morca]" ] || fail "the entrypoint"
+# The oldest deploy/hetzner tools it works with (#461), the runtime's label inherited.
+min=$(sed -n 's/^LABEL dev\.morca\.hetzner-min="\(.*\)"$/\1/p' deploy/runtime.Dockerfile)
+[ "$(docker image inspect -f '{{index .Config.Labels "dev.morca.hetzner-min"}}' "$proj")" = "$min" ] \
+    || fail "the project's image has no dev.morca.hetzner-min $min"
 # No upgrade.toml in the project, none in the image, and no steps (#472).
 run --entrypoint sh "$proj" -c '[ ! -e /opt/morca/upgrade.toml ] && [ ! -e /opt/morca/CHANGELOG.md ]' \
     || fail "an upgrade.toml or CHANGELOG.md the project hasn't"

@@ -1,5 +1,5 @@
 # A GitHub release for each morca version, with the Hetzner deploy tooling
-# (deploy/hetzner/package.sh) as its assets, so deploying needs no checkout
+# (deploy/hetzner/package.sh, under the tools' own version) as its assets, so deploying needs no checkout
 # of morca (#247), and its runtime image, morca-runtime:<version>: the
 # image CI on main built, tested and pushed for the released commit
 # (morca-runtime:<sha>, runtime-image.yml), tagged again, not rebuilt.
@@ -73,12 +73,21 @@ jobs:
           # A version from before the runtime image has none to tag.
           echo "runtime=$([ -f deploy/runtime.Dockerfile ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
 
+      # Under the tools' own version (#461), deploy/hetzner/VERSION, which
+      # moves only when deploy/hetzner changes: a release that changes
+      # nothing there attaches the same morca-hetzner-<tools>.tar.gz as the
+      # one before. Asset names are per release, so the same name on two
+      # releases doesn't collide. A commit from before VERSION: the morca
+      # version, as then.
       - name: The deploy tooling's tarball
         run: |
           # A commit from before package.sh: the default branch's packages it.
           [ -f deploy/hetzner/package.sh ] || git show "origin/$DEFAULT_BRANCH:deploy/hetzner/package.sh" > deploy/hetzner/package.sh
-          sh deploy/hetzner/package.sh "$VERSION" "$RUNNER_TEMP/assets"
-          tar -tzvf "$RUNNER_TEMP/assets/morca-hetzner-$VERSION.tar.gz"
+          tools=$VERSION
+          [ ! -s deploy/hetzner/VERSION ] || tools=$(cat deploy/hetzner/VERSION)
+          echo "TOOLS=$tools" >> "$GITHUB_ENV"
+          sh deploy/hetzner/package.sh "$tools" "$RUNNER_TEMP/assets" "$VERSION"
+          tar -tzvf "$RUNNER_TEMP/assets/morca-hetzner-$tools.tar.gz"
 
       # The notes: the version's section of CHANGELOG.md, and how to get the
       # scripts.
@@ -89,13 +98,13 @@ jobs:
           [ -s "$notes" ] || echo "See [CHANGELOG.md](https://github.com/$GITHUB_REPOSITORY/blob/v$VERSION/CHANGELOG.md)." > "$notes"
           cat >> "$notes" << EOF
 
-          **Deploying on Hetzner** ([docs/hetzner.md](https://github.com/$GITHUB_REPOSITORY/blob/v$VERSION/docs/hetzner.md)), with no checkout of morca:
+          **Deploying on Hetzner** ([docs/hetzner.md](https://github.com/$GITHUB_REPOSITORY/blob/v$VERSION/docs/hetzner.md)), with no checkout of morca: the deploy tools are morca-hetzner $TOOLS. You need new ones only when deploy.sh says so, or the changelog names a change to them.
 
           \`\`\`sh
-          curl -fsSL https://github.com/$GITHUB_REPOSITORY/releases/download/v$VERSION/morca-hetzner-$VERSION.tar.gz | tar -xz
+          curl -fsSL https://github.com/$GITHUB_REPOSITORY/releases/download/v$VERSION/morca-hetzner-$TOOLS.tar.gz | tar -xz
           \`\`\`
           EOF
-          set -- "$RUNNER_TEMP/assets/morca-hetzner-$VERSION.tar.gz" "$RUNNER_TEMP/assets/morca-hetzner.tar.gz"
+          set -- "$RUNNER_TEMP/assets/morca-hetzner-$TOOLS.tar.gz" "$RUNNER_TEMP/assets/morca-hetzner.tar.gz"
           # Run again (an upload that failed), the release gets the assets anew.
           # Otherwise gh makes the tag v<version> at the commit, and the release.
           if gh release view "v$VERSION" > /dev/null 2>&1; then

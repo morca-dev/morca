@@ -1,20 +1,25 @@
 #!/bin/sh
-# package.sh VERSION [OUTDIR]
+# package.sh VERSION [OUTDIR] [MORCA_VERSION]
 #
 # The deploy tooling as a release asset, so that deploying needs no checkout
 # of morca: OUTDIR (default .) gets morca-hetzner-VERSION.tar.gz and the
 # same content as morca-hetzner.tar.gz (for releases/latest/download/). Both
 # unpack to morca-hetzner-VERSION/: the scripts, server/, cloud-init.yaml,
 # hetzner.env.example, a README and a VERSION file, which the scripts print
-# beside the stack's name. The scripts read hetzner.env next to them, or
-# $HETZNER_ENV, as from the checkout. .github/workflows/release.yml runs this.
+# beside the stack's name and check images against (check_tools, #461). The
+# scripts read hetzner.env next to them, or $HETZNER_ENV, as from the
+# checkout. .github/workflows/release.yml runs this with VERSION the tools'
+# own (deploy/hetzner/VERSION) and MORCA_VERSION the morca release they're
+# attached to, whose docs the README links (default VERSION).
 set -eu
 [ $# -ge 1 ] && [ -n "$1" ] || {
-    echo "usage: package.sh VERSION [OUTDIR]" >&2
+    echo "usage: package.sh VERSION [OUTDIR] [MORCA_VERSION]" >&2
     exit 2
 }
 version=${1#v}
 out=${2:-.}
+release=${3:-$version}
+release=${release#v}
 src=$(cd "$(dirname "$0")" && pwd)
 mkdir -p "$out"
 out=$(cd "$out" && pwd)
@@ -32,11 +37,13 @@ for f in morca-stack secret-fetch orca-backup.service orca-backup.timer; do
 done
 echo "$version" > "$dir/VERSION"
 cat > "$dir/README.md" << EOF
-# morca on Hetzner Cloud, $version
+# morca on Hetzner Cloud, tools $version
 
-morca's deploy/hetzner at v$version: the scripts that make, deploy,
-rescale, back up and tear down a morca stack on one Hetzner Cloud server.
-The guide: https://github.com/morca-dev/morca/blob/v$version/docs/hetzner.md
+morca's deploy/hetzner, tools version $version (as of morca $release): the
+scripts that make, deploy, rescale, back up and tear down a morca stack on
+one Hetzner Cloud server. They stop before deploying an image that needs
+newer ones, saying which.
+The guide: https://github.com/morca-dev/morca/blob/v$release/docs/hetzner.md
 
 \`\`\`sh
 cp hetzner.env.example hetzner.env   # or point HETZNER_ENV at a copy outside this directory

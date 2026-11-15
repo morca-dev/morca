@@ -7,7 +7,9 @@
 # check (morca-stack checked) and refuses unless that check passed on the
 # tags it runs now, then runs deploy.sh with those tags ("T", or "T
 # console=U" when an app runs another) and the other flags given
-# (--force, --all, --no-backup, --timeout S, --yes).
+# (--force, --all, --no-backup, --timeout S, --yes, --skip-tools-check).
+# deploy.sh checks that these scripts are new enough for dev's image before
+# it touches this stack's server (check_tools in lib.sh, #461).
 #
 # The dev stack's own per-laptop file (<its NAME>.local.env) is read as
 # usual; HETZNER_LOCAL_ENV, if set, applies to both stacks.
@@ -89,6 +91,7 @@ else
 fi
 [ "$DRY_RUN" = 0 ] || pass="$pass --dry-run"
 [ "$YES" = 0 ] || pass="$pass --yes"
+[ "$SKIP_TOOLS_CHECK" = 0 ] || pass="$pass --skip-tools-check"
 echo "promote.sh: deploy.sh$pass $dargs (settings $target)" >&2
 # shellcheck disable=SC2086
 exec sh "$HERE/deploy.sh" $pass $dargs
