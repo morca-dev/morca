@@ -1,0 +1,1 @@
+- **Rust steps on liblake:** `morca.rust_step` writes and commits a worker's output inside liblake (ABI 5), so a pipeline with Rust steps no longer compiles iceberg; rebuild it with the matching liblake. (#PR)

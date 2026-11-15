@@ -76,28 +76,20 @@ directory goes with the call, whatever's in it.
 
 Not yet: a step's input stream (the worker gets none), several outputs,
 and Rust steps as dista tasks (`Mapped` over tasks); see
-docs/rust-workers.md. This module compiles iceberg into the program: it
-writes the stream itself, rather than through liblake as `morca.tables`
-does.
+docs/rust-workers.md. Steps 4 to 7 run in liblake, as `morca.tables`
+does (`morca._lake.rust_sink`, #474), so a program with Rust steps
+compiles no iceberg; this module runs the worker and pulls its stream.
 """
 
-from iceberg.catalog.filesystem import Table as IcebergTable
-from iceberg.io import FileIO
-from iceberg.nested import ColumnTree, concat_tree, subtree_copy
-from iceberg.write import align_batch
-from arrow_mlake.carrow import CArrowSchema
-from parquet import RecordBatch
+from arrow_mlake.carrow_import import release_c_array
 
 from morca.ctx import Ctx
 from morca._internal.handover import outdated
 from morca._internal.rust_ffi import StopFn, WorkerCall, WorkerLib
-from morca._internal.rust_files import WorkerFiles
-from morca._internal.rust_schema import check_schema, prim_fits
-from morca._lake.client import HostBlock
-from morca._lake.host import Host
-from morca._lake.impl import DataFiles, FileWriter, append_files, find_commit
+from morca._lake.abi import Dec, Slots
+from morca._lake.client import Api, take_bytes, take_error
 from morca._lake.names import dataset_of
-from morca.tables import Table
+from morca.tables import DataFiles, Table, append_files, find_commit
 
 comptime DEFAULT_FLUSH_BYTES = 64 * 1024 * 1024
 """About how much of the worker's output `rust_step` gathers into a file."""
@@ -134,50 +126,15 @@ def rust_step(
 ) raises -> RustRun:
     """Runs the Rust worker in `library` and commits what it streams to
     `table` in one snapshot (the module's doc says how)."""
-    var location = table.metadata.location
-    var ice = _load(location)
-    var host = HostBlock(ctx)
-    var run = _rust_step(
-        Host(host.addr),
-        ctx,
-        library,
-        ice,
-        params,
-        step_version,
-        stop_when,
-        flush_bytes,
-    )
-    _ = host^
     table.refresh()
-    return run^
-
-
-def _load(location: String) raises -> IcebergTable:
-    if "://" in location and not location.startswith("file://"):
-        return IcebergTable.load(location, FileIO())
-    return IcebergTable.load_local(String(location.removeprefix("file://")))
-
-
-def _rust_step(
-    var hctx: Host,
-    mut ctx: Ctx,
-    library: String,
-    mut table: IcebergTable,
-    params: String,
-    step_version: Int,
-    stop_when: StopFn,
-    flush_bytes: Int,
-) raises -> RustRun:
-    table.refresh()
-    if find_commit(hctx, table) >= 0:
-        var id = append_files(hctx, table, DataFiles())
+    if find_commit(ctx, table) >= 0:
+        var id = append_files(ctx, table, DataFiles())
         ctx.log(
             "the worker's output is committed already; it doesn't run again"
         )
         return RustRun(id, 0, 0, 0, False, True)
     var dataset = dataset_of(table.metadata.location)
     var name = dataset if dataset else table.metadata.location
-    var schema = table.metadata.schema()
 
     var call = WorkerCall(
         WorkerLib(library), ctx, params, step_version, stop_when
@@ -187,34 +144,23 @@ def _rust_step(
             "running the Rust worker ", call.lib.path, " ", call.lib.describe
         )
     )
-    var own = WorkerFiles(table, name, call.output_dir)
+    var sink = _Sink(table, name, call.output_dir, flush_bytes)
     try:
         call.start()
     except e:
         # A file morca refused is why the worker failed; say it first.
         _refused(call)
         raise e^
-    _take(call, own)
-    ref stream = call.stream.value()
-    # A stream of no columns carries no rows: the worker's are in files.
-    var streams = _columns(stream.schema_address()) > 0
-    if streams:
-        try:
-            check_schema(stream.schema_address(), schema)
-        except e:
-            raise Error(
-                "morca: the Rust worker's output doesn't fit ", name, ": ", e
-            )
+    _take(call, sink)
+    sink.check(call.stream.value().schema_address())
 
-    var writer = FileWriter(table)
-    var pending = List[ColumnTree]()
-    var pending_rows = 0
-    var pending_bytes = 0
-    var rows = 0
+    # Each array is pulled into `storage` and moved to the library, which
+    # leaves the struct released (`morca._lake.rust_sink`).
+    var storage = Slots(10)
     while True:
-        var got: Optional[RecordBatch]
+        var more: Bool
         try:
-            got = stream.next()
+            more = call.next_array(storage.addr)
         except e:
             _refused(call)
             var plain = call.last_error()
@@ -224,51 +170,21 @@ def _rust_step(
                 " failed: ",
                 plain if plain else String(e),
             )
-        _take(call, own)
-        if not got:
-            break
-        var batch = got.take()
-        if batch.num_rows == 0:
-            continue
-        if not streams:
-            raise Error(
-                "morca: the Rust worker streamed rows of no columns to ", name
-            )
-        var cols: List[ColumnTree]
         try:
-            cols = align_batch(batch, schema)
+            _take(call, sink)
         except e:
-            raise Error(
-                "morca: a batch of the Rust worker doesn't fit ", name, ": ", e
-            )
-        if pending_rows == 0:
-            pending = cols^
-        else:
-            for k in range(len(pending)):
-                concat_tree(
-                    pending[k].arena,
-                    pending[k].root,
-                    cols[k].arena,
-                    cols[k].root,
-                )
-        pending_rows += batch.num_rows
-        pending_bytes += _bytes(batch)
-        rows += batch.num_rows
-        if pending_bytes >= flush_bytes:
-            writer.put(_batch_of(pending, pending_rows))
-            pending = List[ColumnTree]()
-            pending_rows = 0
-            pending_bytes = 0
-    if pending_rows > 0:
-        writer.put(_batch_of(pending, pending_rows))
+            release_c_array(storage.addr)  # the array not moved yet
+            raise e^
+        if not more:
+            break
+        sink.put(storage.addr)
     var stopped = call.stopping()
     _ = call^
-    var files = writer^.finish()
-    var n_own = len(own.files)
-    files.add(DataFiles(own.files.copy()))
-    rows += own.rows
-    var n_files = len(files)
-    var id = append_files(hctx, table, files)
+    var got = sink^.finish()
+    var n_own = got.n_own
+    var rows = got.rows + got.own_rows
+    var n_files = len(got.files)
+    var id = append_files(ctx, table, got.files)
     ctx.log(
         String(
             "the Rust worker wrote ",
@@ -282,7 +198,80 @@ def _rust_step(
             " (stopped early)" if stopped else "",
         )
     )
+    table.refresh()
     return RustRun(id, rows, n_files, n_own, stopped, False)
+
+
+@fieldwise_init
+struct _Output(Movable):
+    """What the sink wrote and took, for the commit."""
+
+    var files: DataFiles
+    var rows: Int
+    """Rows streamed."""
+    var n_own: Int
+    var own_rows: Int
+
+
+struct _Sink(Movable):
+    """liblake's sink for the worker's output (`morca._lake.rust_sink`)."""
+
+    var handle: Int
+    var _api: Api
+
+    def __init__(
+        out self, table: Table, name: String, dir: String, flush_bytes: Int
+    ) raises:
+        self._api = table._api.copy()
+        var err = Slots()
+        self.handle = self._api.sink_new(
+            table.handle,
+            Int(name.unsafe_ptr()),
+            name.byte_length(),
+            Int(dir.unsafe_ptr()),
+            dir.byte_length(),
+            flush_bytes,
+            err.addr,
+        )
+        if self.handle == 0:
+            raise take_error(self._api, err)
+
+    def check(mut self, stream_schema: Int) raises:
+        """Checks the stream's schema, which must outlive the sink."""
+        var err = Slots()
+        if self._api.sink_schema(self.handle, stream_schema, err.addr) != 0:
+            raise take_error(self._api, err)
+
+    def put(mut self, array: Int) raises:
+        """Moves the `ArrowArray` at `array` to the library."""
+        var err = Slots()
+        if self._api.sink_put(self.handle, array, err.addr) != 0:
+            raise take_error(self._api, err)
+
+    def take(mut self, path: String) raises:
+        var err = Slots()
+        var rc = self._api.sink_take(
+            self.handle, Int(path.unsafe_ptr()), path.byte_length(), err.addr
+        )
+        if rc != 0:
+            raise take_error(self._api, err)
+
+    def finish(deinit self) raises -> _Output:
+        var got = Slots()
+        var err = Slots()
+        if self._api.sink_finish(self.handle, got.addr, err.addr) != 0:
+            raise take_error(self._api, err)
+        var b = take_bytes(self._api, got)
+        var d = Dec(Int(b.unsafe_ptr()), len(b))
+        var files = DataFiles(d.bytes())
+        var rows = Int(d.int())
+        var n_own = Int(d.int())
+        var own_rows = Int(d.int())
+        _ = b^  # decoded before it goes: `Dec` doesn't copy
+        return _Output(files^, rows, n_own, own_rows)
+
+    def __deinit__(deinit self):
+        self._api.sink_free(self.handle)
 
 
 def _refused(call: WorkerCall) raises:
@@ -292,35 +281,8 @@ def _refused(call: WorkerCall) raises:
         raise Error(why)
 
 
-def _take(mut call: WorkerCall, mut own: WorkerFiles) raises:
-    """Takes the files the worker reported since last time."""
+def _take(mut call: WorkerCall, mut sink: _Sink) raises:
+    """Hands the library the files the worker reported since last time."""
     _refused(call)
     for p in call.take_files():
-        own.take(p)
-
-
-def _columns(schema: Int) -> Int:
-    """How many columns the `ArrowSchema` at `schema` has."""
-    return Int(
-        Pointer[CArrowSchema, MutUntrackedOrigin](
-            unsafe_from_address=schema
-        )[].n_children
-    )
-
-
-def _bytes(batch: RecordBatch) -> Int:
-    """About how many bytes `batch`'s buffers hold."""
-    var n = 0
-    for a in batch.arena.nodes:
-        n += len(a.values) + len(a.validity)
-        n += 4 * len(a.offsets) + 8 * len(a.large_offsets)
-    return n
-
-
-def _batch_of(cols: List[ColumnTree], rows: Int) raises -> RecordBatch:
-    """Aligned columns as one batch, for the writer."""
-    var b = RecordBatch()
-    for c in cols:
-        b.roots.append(subtree_copy(c.arena, c.root, b.arena))
-    b.num_rows = rows
-    return b^
+        sink.take(p)
