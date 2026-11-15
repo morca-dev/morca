@@ -1,0 +1,1 @@
+- **`morca_maintain` on liblake:** snapshot expiry and the data view run inside liblake (ABI 4), so a project's `morca_maintain` no longer compiles iceberg; rebuild it with the matching liblake. (#PR)

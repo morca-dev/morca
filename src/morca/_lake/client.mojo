@@ -97,7 +97,8 @@ comptime WriterOptionsFn = def(Int, Int) thin abi("C") -> None
 comptime WriterFinishFn = def(Int, Int, Int) thin abi("C") -> Int32
 comptime Call4Fn = def(Int, Int, Int, Int) thin abi("C") -> Int32
 """A call of four integers and a status: `lake_reader_next`,
-`lake_schema_fields`, `lake_table_exists`, `lake_delete_file`."""
+`lake_schema_fields`, `lake_table_exists`, `lake_delete_file`,
+`lake_expire`, `lake_data`."""
 comptime FilesInfoFn = def(Int, Int, Int, Int) thin abi("C") -> Int32
 comptime ConcatFn = def(Int, Int, Int, Int, Int, Int) thin abi("C") -> Int32
 comptime DecodeFn = def(Int, Int, Int, Int, Int) thin abi("C") -> Int32
@@ -169,6 +170,8 @@ struct Api(Copyable, Movable):
     var delete_file: Call4Fn
     var writer_options: WriterOptionsFn
     var writer_close: StatusFn
+    var expire: Call4Fn
+    var data: Call4Fn
 
     @staticmethod
     def from_library(lib: OwnedDLHandle) raises -> Self:
@@ -209,6 +212,8 @@ struct Api(Copyable, Movable):
             delete_file=_sym[Call4Fn](lib, "lake_delete_file"),
             writer_options=_sym[WriterOptionsFn](lib, "lake_writer_options"),
             writer_close=_sym[StatusFn](lib, "lake_writer_close"),
+            expire=_sym[Call4Fn](lib, "lake_expire"),
+            data=_sym[Call4Fn](lib, "lake_data"),
         )
 
     def __init__(
@@ -250,6 +255,8 @@ struct Api(Copyable, Movable):
         delete_file: Call4Fn,
         writer_options: WriterOptionsFn,
         writer_close: StatusFn,
+        expire: Call4Fn,
+        data: Call4Fn,
     ):
         self.free_text = free_text
         self.load = load
@@ -287,6 +294,8 @@ struct Api(Copyable, Movable):
         self.delete_file = delete_file
         self.writer_options = writer_options
         self.writer_close = writer_close
+        self.expire = expire
+        self.data = data
 
 
 struct _Loaded(Movable):
@@ -387,6 +396,8 @@ def api() raises -> Api:
             delete_file=lib.lake_delete_file,
             writer_options=lib.lake_writer_options,
             writer_close=lib.lake_writer_close,
+            expire=lib.lake_expire,
+            data=lib.lake_data,
         )
     else:
         var p = _get_global["MORCA_LAKE_LIB", _init, _keep]()
