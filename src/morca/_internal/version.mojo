@@ -19,11 +19,11 @@ comptime MORCA_VERSION = "0.32.0"
 def built_with(describe: String) -> String:
     """The morca version a pipeline's `describe` (JSON) names, or empty for
     a binary from before describe said it (morca-mojo 0.32.0 and older)."""
-    comptime key = '"morca": "'
+    comptime key: StaticString = '"morca": "'
     var at = describe.rfind(key)
     if at < 0:
         return ""
-    var start = at + len(key)
+    var start = at + key.byte_length()
     var end = describe.find('"', start)
     if end < 0:
         return ""
