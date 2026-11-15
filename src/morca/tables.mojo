@@ -15,8 +15,9 @@ def load(mut ctx: Ctx, raw: RawFile) raises -> Loaded:
   attempt read, or its current snapshot if this is the first attempt, which
   is then recorded. A retry or a resume of the step sees the same data,
   whatever was committed in between.
-- **`append`** and **`commit`** put `morca.*` properties in the summary of the
-  snapshot they commit (`Ctx.summary`): pipeline, run, step, partition,
+- **`append`** and **`commit`** put `orca.*` properties (`orca.run`, `orca.pipeline`, ...; stored names stay
+  `orca`, #384) in the summary of the snapshot they commit (`Ctx.summary`):
+  pipeline, run, step, partition,
   attempt, commit number, code, and the snapshots read. Before writing
   anything, they look through the table's snapshots for one this step
   already made in this run (`Ctx.made`). If an attempt committed and was

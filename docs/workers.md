@@ -92,7 +92,11 @@ so the fill goes on on the other machine.
 A pipeline with dista tasks can spread one run's cluster over several
 workers of its pool (#268). `workers = N` (or `--workers N`) on a pipeline
 placed `worker:<pool>` lets each run use up to N more machines than the one
-that starts it; without it, a run stays on one machine, as before.
+that starts it; without it, a run stays on one machine, as before. This is
+what `Pipeline[workers=]` means on a pool. A local run forks `MORCA_WORKERS`
+dista workers (default 4) and ignores the pipeline's `workers`; `workers`
+applies on EC2 (worker instances), on Kubernetes (dista workers) and on a
+pool (extra machines).
 
 ```toml
 [pipelines.fanout]

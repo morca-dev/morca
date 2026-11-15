@@ -87,8 +87,13 @@ struct Pipeline[
     queues, and so do a fill and, above 1, a sensor (#240; morca.toml's
     `keys_per_run` overrides it): one for time keys by default, tens to hundreds for keyed
     partitions (`morca.keyed`), whose runs then each go through many keys.
-    On Kubernetes, a run of a pipeline with `tasks` gets a cluster of
-    `workers` dista workers (`morca._internal.kube`); locally it forks `MORCA_WORKERS`.
+    `workers` counts the dista workers of a pipeline with `tasks`, but not
+    on a local run, which forks `MORCA_WORKERS` (default 4) whatever `workers`
+    is. On EC2 a run starts `workers` worker instances
+    (`morca._internal.ec2`), on Kubernetes a cluster of `workers` dista
+    workers (`morca._internal.kube`), and on a worker pool `workers` is how
+    many more machines than the one that claims it a run may add
+    (docs/workers.md).
 
     The scheduler runs at most `max_runs` of its runs at once, and starts a
     failed scheduled or backfilled run again up to `run_retries` times, with
