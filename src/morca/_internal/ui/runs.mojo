@@ -28,6 +28,7 @@ from morca._internal.ui.parts import runs_table_html
 from morca._internal.ui.recent import recent_table
 from morca._internal.views.code import runs_code
 from morca._internal.views.runs import (
+    BULK_MAX,
     RUNS_PAGE,
     RunsPage,
     RunsQuery,
@@ -36,7 +37,6 @@ from morca._internal.views.runs import (
     runs_query,
 )
 from morca._internal.web.page import Page
-from morca._internal.api.actions import BULK_MAX
 
 
 comptime RUN_STATUSES: List[String] = [

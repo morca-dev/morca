@@ -46,14 +46,10 @@ from morca._internal.views.runs import (
     VersionRow,
     runs_page,
     runs_query,
+    utc_text,
     version_rows,
 )
 from morca._internal.views.start import StartPreview, start_preview
-
-
-def utc_text(t: Int64) -> String:
-    """Seconds since the epoch as `YYYY-MM-DDTHH:MM:SSZ`."""
-    return String(Civil.of(t), "Z")
 
 
 @fieldwise_init

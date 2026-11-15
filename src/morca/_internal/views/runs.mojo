@@ -36,7 +36,12 @@ from morca._internal.metrics import InstanceMetrics, StepSpan, read_metrics
 from morca._internal.resources import Grant
 from morca._internal.state import State
 from morca._internal.store import Usage
-from morca._internal.views.pipelines import utc_text
+from morca.civil import Civil
+
+
+def utc_text(t: Int64) -> String:
+    """Seconds since the epoch as `YYYY-MM-DDTHH:MM:SSZ`."""
+    return String(Civil.of(t), "Z")
 
 
 @fieldwise_init
@@ -764,6 +769,11 @@ def runs_page(mut db: State, var q: RunsQuery) raises -> RunsPage:
     # Each status's, under the other filters.
     var counts = runs_db.status_counts(db.conn, f)
     return RunsPage(q^, rs^, total, newer, older, counts^)
+
+
+comptime BULK_MAX = 2000
+"""The most runs one action from a list does: more is refused, to be
+narrowed with the filters."""
 
 
 def run_ids(mut db: State, q: RunsQuery, limit: Int) raises -> List[Int]:

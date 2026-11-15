@@ -14,7 +14,7 @@ from morca._internal.fill import status_json
 from morca._internal.follow import follow_json
 from morca._internal.json import quote
 from morca._internal.state import State
-from morca._internal.ui.layout import bad_request, not_found
+from morca._internal.ui.errors import bad_request, not_found
 from morca._internal.views.commands import backfill_cmd, run_cmd
 from morca._internal.views.pipelines import (
     KeyCounts,

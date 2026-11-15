@@ -42,8 +42,10 @@ from morca._internal.html import Html, query_values, url_encode
 from morca._internal.json import quote
 from morca._internal.state import State
 from morca._internal.ui.datasets import dataset_href
-from morca._internal.ui.layout import bad_request, page_html
+from morca._internal.ui.layout import page_html
+from morca._internal.ui.errors import bad_request
 from morca._internal.views.runs import (
+    BULK_MAX,
     count_runs,
     int_or_zero,
     run_ids,
@@ -324,11 +326,6 @@ def cancel(mut db: State, call: Call) raises -> Page:
 
 
 # ── runs picked from a list ──────────────────────────────────────────────────
-
-
-comptime BULK_MAX = 2000
-"""The most runs one action from a list does: more is refused, to be
-narrowed with the filters."""
 
 
 def _ids_json(mut j: String, ids: List[Int]):
