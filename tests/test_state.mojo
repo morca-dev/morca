@@ -159,7 +159,7 @@ def test_floors_are_filled_in_for_an_older_database() raises:
             "SELECT count(*) AS n FROM orca.schema_version WHERE min_binary ="
             " 24"
         ),
-        39,
+        40,
     )
     assert_equal(
         _count(
