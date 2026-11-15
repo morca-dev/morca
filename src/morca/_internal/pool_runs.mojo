@@ -11,6 +11,8 @@ import morca._internal.db.audit as audit_db
 import morca._internal.db.pool_runs as pool_runs_db
 import morca._internal.db.starting as starting_db
 from morca._internal.db.live import hold_behind
+from morca._internal.db.concurrency import ALL
+from morca._internal.key_wait import key_room
 from morca._internal.scheduler import (
     Scheduler,
     _WORKER_OWNER,
@@ -55,7 +57,28 @@ def _requeue_for_workers(
         tx, p.name, self.stale, p.run_retries, now, waiting, dead
     )
     pool_runs_db.hold_unheld(tx, p.name, waiting)
+    # Its concurrency key (#397): a worker claims none of its runs while
+    # the key has no room (`_claim_run`); they say which run they wait on,
+    # and fail once they've waited the wait limit on an older version's.
+    var timed_out = List[Int]()
+    var error = String()
+    if p.concurrency_key and not p.paused:
+        var k = key_room(
+            tx,
+            p.name,
+            p.concurrency_key,
+            p.concurrency_limit,
+            self.stale,
+            dead,
+            ALL,
+            True,
+            waiting,
+        )
+        timed_out = k.timed_out.copy()
+        error = k.error
     tx.commit()
+    for t in timed_out:
+        print(String("run ", t, " of ", p.name, " failed: ", error))
     _say_lost(p, pool, lost)
     if n > 0:
         print("requeued", n, "runs of", p.name, "for pool", pool)

@@ -260,6 +260,48 @@ def test_priority() raises:
     _refused("[pipelines.a]\npriority = 1001\n", "from -1000 to 1000")
 
 
+def test_concurrency() raises:
+    # `concurrency` (#397): a key and a limit, from [defaults] or the
+    # pipeline's table, kept as key:limit; no flag sets it.
+    var f = ProjectConfig(
+        String(
+            '[defaults]\nconcurrency = { key = "lake", limit = 2 }\n',
+            "[pipelines.a]\n",
+            '[pipelines.b]\nconcurrency = { key = "mojo_live", limit = 1 }\n',
+        ),
+        "morca.toml",
+    )
+    var a = resolve("a", RegisterFlags(), f)
+    assert_equal(a.text("concurrency"), "lake:2")
+    assert_equal(a.values["concurrency"].copy().detail, "[defaults]")
+    var b = resolve("b", RegisterFlags(), f)
+    assert_equal(b.text("concurrency"), "mojo_live:1")
+    assert_equal(b.values["concurrency"].copy().detail, "[pipelines.b]")
+    var none = resolve("c", RegisterFlags(), ProjectConfig())
+    assert_equal(none.text("concurrency"), "")
+    _refused("[pipelines.a]\nconcurrency = 1\n", "concurrency is a table")
+    _refused(
+        '[pipelines.a]\nconcurrency = { key = "k" }\n',
+        "needs both key and limit",
+    )
+    _refused(
+        '[pipelines.a]\nconcurrency = { key = "k", limit = 0 }\n',
+        "limit is a count from 1 to 1000",
+    )
+    _refused(
+        '[pipelines.a]\nconcurrency = { key = "k", limit = "1" }\n',
+        "limit is a count, not",
+    )
+    _refused(
+        '[pipelines.a]\nconcurrency = { key = "a b", limit = 1 }\n',
+        "key is letters, digits",
+    )
+    _refused(
+        '[pipelines.a]\nconcurrency = { key = "k", limit = 1, wait = 2 }\n',
+        "has key and limit, not wait",
+    )
+
+
 def test_learned_requests() raises:
     # `auto` and `auto..MAX` (morca.recommend), and `learn`.
     var f = ProjectConfig(

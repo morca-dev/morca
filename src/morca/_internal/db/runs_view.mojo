@@ -67,6 +67,8 @@ struct RunRecord(Copyable, Movable):
     var memory_bytes: Int
     var request_source: String
     var request_runs: Int
+    var waits_on: Int
+    """The run whose concurrency key a queued one waits on (#397), or 0."""
 
 
 comptime _WAITING = (
@@ -128,7 +130,7 @@ def _run_select() -> String:
         " AS waiting, ",
         _SECONDS,
         " AS seconds, coalesce(placement, '') AS placement,",
-        " coalesce(held, '') AS held,",
+        " coalesce(held, '') AS held, coalesce(waits_on, 0) AS waits_on,",
         _GRANT_COLUMNS,
         _USAGE_COLUMNS,
         " FROM orca.runs",
@@ -166,6 +168,7 @@ def _record(r: Row, id: Int) raises -> RunRecord:
         Int(r.int64("memory_bytes")),
         r.text("request_source"),
         Int(r.int64("request_runs")),
+        Int(r.int64("waits_on")),
     )
 
 

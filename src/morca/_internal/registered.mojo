@@ -113,6 +113,11 @@ struct Registered(Copyable, Movable):
     var priority: Int
     """`priority` in morca.toml (#421), 0 by default: the scheduler's pass
     starts the pipelines highest first."""
+    var concurrency_key: String
+    """`concurrency`'s key in morca.toml (#397, `morca._internal.concurrency`),
+    or empty: its runs and those of every pipeline of the key hold at most
+    `concurrency_limit` of it at once."""
+    var concurrency_limit: Int
 
     def request(self) raises -> Request:
         """As declared: `auto` not resolved (`run_request` does)."""
@@ -312,6 +317,8 @@ def registered(mut db: State, only: String = "") raises -> List[Registered]:
                 r.learned_key,
                 r.max_runs_auto,
                 r.priority,
+                r.concurrency_key,
+                r.concurrency_limit,
             )
         )
     # A fixed count, or no tasks: no scaling.

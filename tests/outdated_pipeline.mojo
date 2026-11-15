@@ -1,4 +1,5 @@
-"""A long run that polls, for tests/outdated.sh (#397): its one step loops,
+"""A long run that polls, for tests/outdated.sh and tests/concurrency.sh
+(#397): its one step loops,
 a unit of work every 0.2 s, and appends to OUTDATED_OUT each time what
 `morca.outdated()` says changes, with `code_version()`,
 `desired_code_version()` and `outdated_why()`.
@@ -66,10 +67,15 @@ def follow(mut ctx: Ctx, m: Month) raises -> Int:
 
 
 comptime Follow = Step["follow", Month, Int, follow, Mapped]
-comptime LongPoll = Pipeline[
-    "longpoll", Follow, partitions=Monthly["2024-01"], max_runs=4
-]
+
+
+def run[name: StaticString]() raises:
+    """The pipeline as `name`: longpoll, and longpoll2 beside it for
+    tests/concurrency.sh's key shared by two pipelines (#397)."""
+    morca_main[
+        Pipeline[name, Follow, partitions=Monthly["2024-01"], max_runs=4]
+    ]()
 
 
 def main() raises:
-    morca_main[LongPoll]()
+    run["longpoll"]()

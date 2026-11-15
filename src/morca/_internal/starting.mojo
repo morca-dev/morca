@@ -28,6 +28,8 @@ from morca._internal.system import system_now
 from morca._internal.db.batches import mark_batch
 import morca._internal.db.starting as starting_db
 from morca._internal.db.live import hold_behind
+from morca._internal.db.concurrency import FILLS, OTHERS
+from morca._internal.key_wait import key_room, started
 from morca._internal.kube import (
     RunSpec,
     cpu_millis,
@@ -198,6 +200,28 @@ def _start(
         )
         free = 0 if settling or hold else status.value().slots
         end_finished(tx, status.value().request)
+    # Its concurrency key (#397), across pipelines and schedulers: no more
+    # starts than its limit leaves, and with none left its queued runs say
+    # which run they wait on (a run of an older version, at most the wait
+    # limit). Before the locks across pipelines below, as a claim takes it.
+    if p.concurrency_key and not p.paused and not hold:
+        var k = key_room(
+            tx,
+            p.name,
+            p.concurrency_key,
+            p.concurrency_limit,
+            self.stale,
+            dead,
+            FILLS if fill else OTHERS,
+            True,
+        )
+        for t in k.timed_out:
+            print(String("run ", t, " of ", p.name, " failed: ", k.error))
+        if k.room == 0:
+            free = 0
+            hold = k.hold
+        else:
+            free = min(free, k.room)
     var need = 0
     if control:
         need = 0  # no instance: nothing of the budget
@@ -360,6 +384,7 @@ def _start(
                     sized.runs,
                 )
             )
+            started(tx, id, p.concurrency_key)
     tx.commit()
     for l in lost:
         print(

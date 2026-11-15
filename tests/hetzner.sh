@@ -474,10 +474,35 @@ has "  morca-stack: overlay/morca.overlay.toml: removed"
 has "  morca-stack: settings.env: removed MORCA_CONFIG_OVERLAY"
 [ ! -f "$MORCA_CONF/overlay/morca.overlay.toml" ] || fail "the overlay is still on the server"
 grep -q "run -d --name scheduler .*/etc/orca/overlay" "$FAKE/docker.log" && fail "the scheduler still has the overlay"
-grep -q 'config-check' "$FAKE/docker.log" && fail "checked an overlay there is none of"
+grep -q 'config-check.*/etc/orca/overlay' "$FAKE/docker.log" && fail "checked an overlay there is none of"
 deploy eee5555 console=hhh8888 || fail "a deploy with no overlay"
 has "nothing to replace: not backing up"
 echo "ok   a stack's overlay is sent, checked in the image, mounted in the scheduler and removed"
+
+# An image whose morca.toml declares a concurrency key (#397) needs
+# HANDOVER_WAIT_SECONDS: the plan stops, before anything is paused or
+# started, naming it. Set, the scheduler gets it; deploy.sh refuses one that
+# isn't a whole number above 0; taken out, it's removed.
+touch "$FAKE/concurrency-keys"
+: > "$FAKE/docker.log"
+deploy eee5555 console=hhh8888 && fail "deployed a concurrency key without HANDOVER_WAIT_SECONDS"
+has "declares concurrency keys (/opt/morca/morca.toml:3: \[pipelines.toy\]), and HANDOVER_WAIT_SECONDS isn't set"
+grep -q 'morca pause\|run -d' "$FAKE/docker.log" && fail "a refused deploy paused or started something"
+for bad in 0 -5 1h; do
+    { cat "$FAKE/hetzner.env"; echo "HANDOVER_WAIT_SECONDS=$bad"; } > "$FAKE/handover.env"
+    (HETZNER_ENV="$FAKE/handover.env" deploy eee5555 console=hhh8888) && fail "deployed HANDOVER_WAIT_SECONDS=$bad"
+    has "HANDOVER_WAIT_SECONDS=$bad isn't a whole number of seconds above 0"
+done
+echo HANDOVER_WAIT_SECONDS=3600 >> "$FAKE/hetzner.env"
+deploy eee5555 console=hhh8888 || fail "a deploy with a concurrency key and HANDOVER_WAIT_SECONDS"
+has "morca-stack: HANDOVER_WAIT_SECONDS (unset) -> 3600"
+grep -qx 'MORCA_HANDOVER_WAIT_SECONDS=3600' "$MORCA_CONF/morca.env" || fail "no MORCA_HANDOVER_WAIT_SECONDS in morca.env"
+rm "$FAKE/concurrency-keys"
+sed -i.bak '/^HANDOVER_WAIT_SECONDS=/d' "$FAKE/hetzner.env"
+deploy eee5555 console=hhh8888 || fail "a deploy that takes HANDOVER_WAIT_SECONDS out"
+has "morca-stack: HANDOVER_WAIT_SECONDS 3600 -> (unset)"
+grep -q 'MORCA_HANDOVER_WAIT_SECONDS' "$MORCA_CONF/morca.env" && fail "MORCA_HANDOVER_WAIT_SECONDS left in morca.env"
+echo "ok   a concurrency key needs HANDOVER_WAIT_SECONDS before anything changes; set, the scheduler gets it"
 # A dry run shows the sync and the keys, and writes nothing.
 sed -i.bak '/^POSTHOG_KEY=/d' "$FAKE/hetzner.env"
 printf 'POSTHOG_KEY=\nFIXED_COST=8/month\nBACKUP_KEEP=7\nS3_REGION=nbg1\n' >> "$FAKE/hetzner.env"
@@ -487,7 +512,7 @@ before=$(cat "$MORCA_CONF/settings.env" "$MORCA_CONF/s3.env" "$MORCA_CONF/stack.
 sh deploy/hetzner/deploy.sh --dry-run eee5555 > "$FAKE/out" 2>&1 || fail "a dry run with settings changed"
 has "+ ssh root@<server-ip> morca-stack sync --keys settings.env < "
 has "+ ssh root@<server-ip> morca-stack sync s3.env < $FAKE/s3.env"
-has "+ ssh root@<server-ip> morca-stack configure MORCA_IMAGE=img .*BACKUP_KEEP=7 GHCR_USER= OVERLAP=1 DRAIN_SECONDS=86400$"
+has "+ ssh root@<server-ip> morca-stack configure MORCA_IMAGE=img .*BACKUP_KEEP=7 GHCR_USER= OVERLAP=1 DRAIN_SECONDS=86400 HANDOVER_WAIT_SECONDS=$"
 has "# settings.env from $FAKE/hetzner.env: AWS_REGION .*MORCA_FIXED_COST"
 grep -q 'MORCA_POSTHOG_KEY\|notasecret99\|nbg1 ' "$FAKE/out" && fail "the dry run: $(grep 'POSTHOG\|notasecret99' "$FAKE/out")"
 [ "$(cat "$MORCA_CONF/settings.env" "$MORCA_CONF/s3.env" "$MORCA_CONF/stack.conf" | cksum)" = "$before" ] \

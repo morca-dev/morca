@@ -168,6 +168,9 @@ struct RunRow(Copyable, Movable):
     var outdated: String
     """While it runs on outdated code (`morca._internal.handover`), why: "newer
     version X is leading"; else empty."""
+    var waits_on: Int
+    """While it's queued, the run holding the concurrency key it waits on
+    (#397); else 0."""
 
 
 @fieldwise_init
@@ -237,6 +240,7 @@ def _run_row(r: RunRecord) -> RunRow:
         String(),
         String(),
         String(),
+        r.waits_on if r.status == "queued" else 0,
     )
 
 

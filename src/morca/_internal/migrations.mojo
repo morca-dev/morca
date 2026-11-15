@@ -898,6 +898,18 @@ def _migrations() -> List[List[String]]:
                 " WHERE fill_request IS NOT NULL"
             ),
         ],
+        # Concurrency keys (#397, `morca._internal.concurrency`): a
+        # pipeline's key and limit from morca.toml, the key a run holds
+        # once started, and the run a queued one waits on, since when if
+        # that run is of an older version. Additive: nullable columns an
+        # older binary neither reads nor writes.
+        [
+            "ALTER TABLE orca.pipelines ADD COLUMN concurrency_key text",
+            "ALTER TABLE orca.pipelines ADD COLUMN concurrency_limit integer",
+            "ALTER TABLE orca.runs ADD COLUMN concurrency_key text",
+            "ALTER TABLE orca.runs ADD COLUMN waits_on bigint",
+            "ALTER TABLE orca.runs ADD COLUMN key_wait_since timestamptz",
+        ],
     ]
 
 
@@ -945,6 +957,10 @@ def _floor_raisers() -> List[Int]:
     table and a nullable column the binaries before it neither read nor
     write. A request's queued fill runs wait under one of them while fills
     are off, as a fill's did, until a newer one leads again.
+    63 (concurrency keys, #397) is additive: nullable columns the binaries
+    before it neither read nor write. While one overlaps a newer one it
+    starts nothing (only the leader starts runs, and the newer one leads);
+    a run it started records no key and holds its pipeline's.
     """
     return [1, 24]
 

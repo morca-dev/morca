@@ -9,6 +9,7 @@ from json import (
     loads,
 )
 import morca._internal.db.config_show as config_db
+from morca._internal.concurrency import concurrency_toml
 from morca._internal.db.config_show import Settings
 from morca._internal.fill import fill_max_runs_text
 from morca._internal.fill import SINCE_REGISTRATION
@@ -476,6 +477,15 @@ def shown(mut db: State, only: String = "") raises -> List[Shown]:
         else:
             var w = _source(sources, "priority")
             s.add("priority", String(r.priority), w[0], w[1])
+        # A concurrency key across pipelines (#397), only when it has one.
+        if r.concurrency_key:
+            var w = _source(sources, "concurrency")
+            s.add(
+                "concurrency",
+                concurrency_toml(r.concurrency_key, Int(r.concurrency_limit)),
+                w[0],
+                w[1],
+            )
         # A request (morca.resources), only when it has one.
         for key in ["cpus", "memory_gb"]:
             if r.cpus if key == "cpus" else r.memory_gb:
@@ -649,6 +659,12 @@ def export_toml(mut db: State) raises -> String:
             out.write("keys_per_run = ", r.keys_per_run.value(), "\n")
         if r.priority != 0:
             out.write("priority = ", r.priority, "\n")
+        if r.concurrency_key:
+            out.write(
+                "concurrency = ",
+                concurrency_toml(r.concurrency_key, Int(r.concurrency_limit)),
+                "\n",
+            )
         for key in ["cpus", "memory_gb"]:
             if r.cpus if key == "cpus" else r.memory_gb:
                 out.write(

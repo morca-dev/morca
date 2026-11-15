@@ -424,6 +424,7 @@ check_args() {
 # decrypt failure stops before anything is changed on the server.
 need_settings() {
     need_drain_limit
+    need_handover_wait
     case $OVERLAP in 0 | 1) ;; *) die "OVERLAP is 1 (overlapping schedulers, the default) or 0, not '$OVERLAP' ($HETZNER_ENV); nothing was changed on the server" ;; esac
     need BUCKET S3_ENDPOINT S3_REGION
     [ -z "${EXTRA_ENV_FILE:-}" ] || need_file EXTRA_ENV_FILE
@@ -464,6 +465,19 @@ need_drain_limit() {
         *[!0-9]*) die "DRAIN_SECONDS=$DRAIN_SECONDS isn't a whole number of seconds above 0: $d_how" ;;
     esac
     [ "$DRAIN_SECONDS" -gt 0 ] || die "DRAIN_SECONDS=$DRAIN_SECONDS isn't a whole number of seconds above 0: $d_how"
+}
+
+# need_handover_wait: HANDOVER_WAIT_SECONDS, when set, is a whole number of
+# seconds above 0: how long a run waiting on a concurrency key may wait for
+# a run of an older version to end (#397). It's required only of an image
+# whose morca.toml declares a key, which the server's apply checks
+# (need_handover_wait in morca-stack); docs/hetzner.md#the-handover-wait-limit.
+need_handover_wait() {
+    case ${HANDOVER_WAIT_SECONDS:-} in
+        "") return 0 ;;
+        *[!0-9]*) die "HANDOVER_WAIT_SECONDS=$HANDOVER_WAIT_SECONDS isn't a whole number of seconds above 0 ($HETZNER_ENV); nothing was changed on the server" ;;
+    esac
+    [ "$HANDOVER_WAIT_SECONDS" -gt 0 ] || die "HANDOVER_WAIT_SECONDS=$HANDOVER_WAIT_SECONDS isn't a whole number of seconds above 0 ($HETZNER_ENV); nothing was changed on the server"
 }
 
 # --- SECRETS_FILE: every secret in one SOPS file, one `sops -d` ----------------
@@ -692,7 +706,8 @@ sync_settings_() {
     # GHCR_USER= (none in hetzner.env) removes it from stack.conf.
     remote morca-stack configure MORCA_IMAGE="$MORCA_IMAGE" CLOUDFLARED_IMAGE="$CLOUDFLARED_IMAGE" \
         BUCKET="$BUCKET" BACKUP_KEEP="$BACKUP_KEEP" GHCR_USER="${GHCR_USER:-}" \
-        OVERLAP="$OVERLAP" DRAIN_SECONDS="$DRAIN_SECONDS" || return 1
+        OVERLAP="$OVERLAP" DRAIN_SECONDS="$DRAIN_SECONDS" \
+        HANDOVER_WAIT_SECONDS="${HANDOVER_WAIT_SECONDS:-}" || return 1
     # APPS=console names an app; console:8080 also gives its port, for an
     # app whose morca.toml has no [apps.console] port.
     for app in $APPS; do

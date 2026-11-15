@@ -12,6 +12,7 @@ runs (#145), read by `morca register` and `morca aws register`.
     max_runs = 2                 # over the code's Pipeline max_runs
     keys_per_run = 30            # over the code's: keys a run takes (#240)
     priority = 10                # higher starts first when room is short (#421)
+    concurrency = { key = "lake", limit = 1 }   # across pipelines (#397)
     cpus = "1..16"               # a request: MIN..MAX (morca.resources)
     memory_gb = "2..24"          # or "auto", "auto..24" (morca.recommend)
     learn = false                # don't: "auto" is then no request
@@ -61,6 +62,10 @@ from std.os.path import exists
 
 from objectstore.crypto import sha256_hex
 
+from morca._internal.concurrency import (
+    concurrency_text,
+    parse_concurrency,
+)
 from morca._internal.control import parse_placement
 from morca._internal.fill import (
     lag_text,
@@ -831,6 +836,11 @@ struct ProjectConfig(Movable):
             if key == "enabled":
                 if v.kind != BOOLEAN:
                     self._fail(p, table, "enabled is true or false")
+            elif key == "concurrency":
+                try:
+                    _ = self.concurrency(p)
+                except e:
+                    self._fail(p, table, String("concurrency ", e))
             elif is_scalar_key(key):
                 if v.kind == TABLE:
                     self._fail(p, table, String(key, " is a table"))
@@ -856,7 +866,7 @@ struct ProjectConfig(Movable):
                 var known = String()
                 for k in materialize[SCALAR_KEYS]():
                     known.write(k, ", ")
-                known.write("enabled, secrets and env")
+                known.write("concurrency, enabled, secrets and env")
                 self._fail(
                     p,
                     table,
@@ -864,6 +874,33 @@ struct ProjectConfig(Movable):
                         "has no key ", toml_key(key), " (it has ", known, ")"
                     ),
                 )
+
+    def concurrency(self, path: List[String]) raises -> String:
+        """The `concurrency = { key = "...", limit = N }` at `path`, checked,
+        as `concurrency_text` (#397)."""
+        var v = self.doc.get(path).value().copy()
+        if v.kind != TABLE:
+            raise Error('is a table, { key = "...", limit = N }, not ', v.kind)
+        var key = String()
+        var limit = String()
+        for k in self.doc.keys(path):
+            var q = path.copy()
+            q.append(k)
+            var item = self.doc.get(q).value().copy()
+            if k == "key":
+                if item.kind != STRING:
+                    raise Error("key is a string, not ", item.kind)
+                key = item.text
+            elif k == "limit":
+                if item.kind != INTEGER:
+                    raise Error("limit is a count, not ", item.kind)
+                limit = item.text
+            else:
+                raise Error("has key and limit, not ", toml_key(k))
+        if not key or not limit:
+            raise Error('needs both key and limit: { key = "...", limit = N }')
+        var c = parse_concurrency(String(key, ":", limit))
+        return concurrency_text(c[0], c[1])
 
     def _item_problem(
         self, key: String, name: String, item: TomlValue
@@ -1076,6 +1113,12 @@ def resolve(
                     r.values[String(key)] = file.setting(
                         _canonical_toml(String(key), v.value()), p, labels[t]
                     )
+            var cp = tables[t].copy()
+            cp.append("concurrency")
+            if file.doc.get(cp):
+                r.values["concurrency"] = file.setting(
+                    file.concurrency(cp), cp, labels[t]
+                )
             for m in ["secrets", "env"]:
                 for kv in file._map(tables[t], m):
                     var p = tables[t].copy()

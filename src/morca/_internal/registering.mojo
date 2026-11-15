@@ -3,7 +3,9 @@
 """
 
 from std.os.path import exists
+import morca._internal.db.concurrency as concurrency_db
 import morca._internal.db.pipelines as pipelines_db
+from morca._internal.concurrency import parse_concurrency, wait_limit
 import morca._internal.db.registering as registering_db
 from morca._internal.config import (
     ProjectConfig,
@@ -112,6 +114,20 @@ def register_pipeline(
     var priority = 0
     if r.text("priority"):
         priority = parse_priority(r.text("priority"))
+    # A concurrency key (#397) needs the wait limit, as the scheduler
+    # does: refused before anything is registered.
+    var ckey = String()
+    var climit = 0
+    if r.text("concurrency"):
+        var c = parse_concurrency(r.text("concurrency"))
+        ckey = c[0]
+        climit = c[1]
+        try:
+            _ = wait_limit()
+        except e:
+            raise Error(
+                String(e), " (", r.name, " declares concurrency key ", ckey, ")"
+            )
     var fill_budget = -1.0
     if r.text("fill_budget_per_day"):
         fill_budget = parse_fill_budget(r.text("fill_budget_per_day"))
@@ -168,6 +184,8 @@ def register_pipeline(
         ),
     )
     var name = res[0]
+    if r.in_file:
+        concurrency_db.set_key(self.db.conn, name, ckey, climit)
     var version = self.db.version(name, res[1], got[1], res[2])
     # The data version before and after (#297), for the notice below:
     # a first registration has no before.

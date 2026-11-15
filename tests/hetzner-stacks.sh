@@ -62,7 +62,7 @@ has "+ ssh root@<server-ip> morca-stack sync --keys settings.env < "
 has "+ ssh root@<server-ip> morca-stack sync tunnel.env < $FAKE/tunnel.env"
 # The stack's overlay, named relative to its settings file (#332).
 has "+ ssh root@<server-ip> morca-stack sync overlay/morca.overlay.toml < $FAKE/dev.overlay.toml"
-has "+ ssh root@<server-ip> morca-stack configure MORCA_IMAGE=ghcr.io/morca-dev/census .*BUCKET=morca-dev-bkt BACKUP_KEEP=14 GHCR_USER= OVERLAP=1 DRAIN_SECONDS=86400$"
+has "+ ssh root@<server-ip> morca-stack configure MORCA_IMAGE=ghcr.io/morca-dev/census .*BUCKET=morca-dev-bkt BACKUP_KEEP=14 GHCR_USER= OVERLAP=1 DRAIN_SECONDS=86400 HANDOVER_WAIT_SECONDS=$"
 has "+ ssh root@<server-ip> morca-stack configure --keep-existing MORCA_TAG=latest"
 has "# settings.env from $FAKE/dev.env: AWS_REGION .* MORCA_CONFIG_OVERLAY MORCA_CONFIG "
 # down.sh --all: the same.

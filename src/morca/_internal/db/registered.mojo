@@ -62,6 +62,9 @@ struct Registration(Copyable, Movable):
     var learned_capped: String
     var max_runs_auto: Bool
     var priority: Int
+    var concurrency_key: String
+    """Its concurrency key (#397), or empty."""
+    var concurrency_limit: Int
 
 
 def registrations(
@@ -118,7 +121,9 @@ def registrations(
             " coalesce((learned->>'memory_mb')::bigint, 0) AS"
             " learned_memory_mb, coalesce((learned->>'cpus')::bigint, 0) AS"
             " learned_cpus, coalesce(learned->>'capped', '') AS"
-            " learned_capped, priority FROM orca.pipelines WHERE binary_path IS"
+            " learned_capped, priority, coalesce(concurrency_key, '') AS"
+            " concurrency_key, coalesce(concurrency_limit, 0)::bigint AS"
+            " concurrency_limit FROM orca.pipelines WHERE binary_path IS"
             " NOT NULL AND retired IS NULL AND ($1 = '' OR name = $1) ORDER BY"
             " priority DESC, name"
         ),
@@ -175,6 +180,8 @@ def registrations(
                 r.text("learned_capped"),
                 r.bool("max_runs_auto"),
                 Int(r.int64("priority")),
+                r.text("concurrency_key"),
+                Int(r.int64("concurrency_limit")),
             )
         )
     return out^

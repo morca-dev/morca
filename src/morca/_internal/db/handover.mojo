@@ -43,17 +43,32 @@ def differs_sql(a: String, b: String) -> String:
     )
 
 
+def draining_sql(s: String, r: String) -> String:
+    """SQL true when the run `r` (a row of `orca.runs`) is held by the
+    scheduler instance `s` (its `orca.schedulers` row, null for none) and
+    that instance drains: a newer one leads, or it was asked to."""
+    return String(
+        "coalesce((",
+        s,
+        ".draining_since IS NOT NULL OR ",
+        s,
+        ".drain_asked IS NOT NULL) AND ",
+        s,
+        ".ended IS NULL AND ",
+        r,
+        ".id::text = ANY(string_to_array(",
+        s,
+        ".running, ',')), false)",
+    )
+
+
 def outdated_sql() -> String:
     """One run's outdatedness, for the run `$1` (module doc): `outdated`,
     `mine` and `desired` (labels), `differs` (other code is registered),
     `newer` (registered after the run's), `draining` (its instance drains)
     and `leader` (the newest instance that doesn't drain, which leads or
     is about to, or 0)."""
-    var draining = String(
-        "coalesce((s.draining_since IS NOT NULL OR s.drain_asked IS NOT NULL)",
-        " AND s.ended IS NULL AND r.id::text = ANY(string_to_array(s.running,",
-        " ',')), false)",
-    )
+    var draining = draining_sql("s", "r")
     return String(
         "SELECT r.status = 'running' AND (",
         differs_sql("rv", "pv"),
