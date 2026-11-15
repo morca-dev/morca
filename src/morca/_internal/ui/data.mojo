@@ -256,6 +256,25 @@ def data_csv(
             String(r.error, "\n"),
             "text/plain; charset=utf-8",
         )
+    # The download couldn't be written (a full disk, #483): a 503 saying so.
+    var wrote = String()
+    try:
+        var e = loads(r.json).try_at("/csv/error")
+        if e and e.value().is_string():
+            wrote = e.value().string_value()
+    except:
+        pass
+    if wrote:
+        try:
+            remove(path)
+        except:
+            pass
+        return Page(
+            503,
+            String('{"error": ', quote(wrote), "}"),
+            String(wrote, "\n"),
+            "text/plain; charset=utf-8",
+        )
     var text: String
     with open(path, "r") as f:
         text = f.read()

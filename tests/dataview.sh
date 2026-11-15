@@ -24,6 +24,8 @@
 #   free space to keep (MORCA_DATA_CACHE_MIN_FREE_MB) nothing is kept;
 # - a pipeline's Data tab: the first rows of each dataset it writes, through
 #   the same reader, linked to the dataset's Data tab;
+# - a download that can't be written (no directory; a full disk, as
+#   /dev/full is on Linux) is an error, not a crash;
 # - [datasets."lake.obs"] public = false hides the data from visitors not
 #   logged in once login is on (401), not from those logged in, and not the
 #   dataset's overview; config check accepts the table and refuses a bad one.
@@ -218,6 +220,18 @@ start_ui MORCA_DATA_SECONDS=0.000001
 case "$(json "" | jq -r .rows.stopped)" in "the scan stopped at its time limit"*) ;; *) fail "the time limit: $(json "" | jq -c .rows)" ;; esac
 stop_ui
 echo "ok   bad filters are 400; the memory and time limits stop a read, saying why"
+
+# A download that can't be written (#483): an error the UI answers 503
+# with, not a crash. Every write to /dev/full fails with ENOSPC, as on a
+# full disk.
+for to in build/dataview/no-such-dir/obs.csv /dev/full; do
+    [ "$to" != /dev/full ] || [ -w /dev/full ] || { echo "skip: no /dev/full here"; continue; }
+    ./build/morca_maintain data lake.obs --csv "$to" --max-rows 10 > build/dataview/full.json \
+        || fail "morca_maintain data --csv $to exited $?"
+    jq -r .csv.error build/dataview/full.json | grep -qF "can't write the download to $to" \
+        || fail "a download to $to: $(cat build/dataview/full.json)"
+done
+echo "ok   a download that can't be written, or to a full disk, is an error, not a crash"
 
 # Many commits: pages by count, the cache, the loading mark.
 ./build/dv-many run --partitions 2024-01-01..2024-02-29 >> "$log" 2>&1 || fail "many"
