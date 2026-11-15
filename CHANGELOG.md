@@ -2,19 +2,12 @@
 
 ## 0.33.0 - 2026-11-15
 
-- **Docs:** the snapshot summary keys are `orca.*`, the table of public helpers lists `strings_of`, `ints_of`, `column_of`, `concat_batches` and `Name.text`, and `Pipeline[workers=]` says where it applies. (#473)
-
-- **The Hetzner tools have their own version:** `morca-hetzner-<version>.tar.gz` is now versioned by `deploy/hetzner/VERSION` (from 0.33.0), which moves only when the tools change, and `deploy.sh`, `promote.sh` and `up.sh` stop before touching the server when the image's `dev.morca.hetzner-min` label asks for newer tools. (#489)
-
-- **Faster pool and Hetzner tests:** test-pool and test-hetzner wait for what they check instead of fixed grace periods and retry pauses. (#491)
-
-- **Release tagging:** the runtime image is tagged even when it's a Docker manifest list (0.32.0's tag step failed). (#493)
-
-- **The Data tab puts the table first:** a bar at the top picks the commit (newest first, searchable, with arrows, in the URL) and shows its row count, then Data and Schema tabs, with each column's type under its header. (#501)
-
-- **Concurrency keys:** `concurrency = { key = "...", limit = N }` in morca.toml limits how many runs of every pipeline declaring the key run at once, across schedulers and workers; a run waiting on an older version's run fails after `MORCA_HANDOVER_WAIT_SECONDS` (`HANDOVER_WAIT_SECONDS` in hetzner.env), required once a pipeline declares a key. (#503)
-
-- **morca ships prebuilt**: the package has `morca` and `morca_maintain` in its `bin/`, so a project can drop its `bin/scheduler.mojo` and `bin/morca_maintain.mojo`, and `morca register` refuses pipelines built from another morca-mojo (`MORCA_MIXED_VERSIONS=1` warns instead). (#504)
+- **Data tab layout:** the table first, a commit picker at the top (searchable, in the URL), and Data/Schema tabs with column types under the headers. (#501)
+- **morca ships prebuilt:** the package has `morca` and `morca_maintain` in `bin/`; `morca register` refuses pipelines built from another morca-mojo (`MORCA_MIXED_VERSIONS=1` warns). (#504)
+- **Concurrency keys:** `concurrency = { key, limit }` in morca.toml caps runs across pipelines, schedulers and workers; a run waiting on an older version's run fails after `MORCA_HANDOVER_WAIT_SECONDS`, required once a key is declared. (#503)
+- **Hetzner tools versioned on their own** (`deploy/hetzner/VERSION`, now 0.34.0), and deploys stop when the image needs newer tools; 0.33.0 images need 0.34.0. (#489, #494, #503)
+- Docs: summary keys are `orca.*`, more public helpers listed, `workers=` explained. (#473)
+- Faster pool and Hetzner tests; the runtime image is tagged on manifest lists too. (#491, #493)
 
 ## 0.32.0 - 2026-11-15
 

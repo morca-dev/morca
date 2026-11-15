@@ -12,7 +12,7 @@ pipeline built from another one (`mismatch`), unless
 
 from std.os import getenv
 
-comptime MORCA_VERSION = "0.32.0"
+comptime MORCA_VERSION = "0.33.0"
 """morca-mojo's version: pixi.toml's `[package] version`."""
 
 
