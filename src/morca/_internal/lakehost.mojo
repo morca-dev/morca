@@ -2,6 +2,15 @@
 inside a call (`morca._lake.abi` lays the block out, and the library's
 `morca._lake.host.Host` calls it). It lives on the program's side, above
 `morca._lake`, which knows no `Ctx`.
+
+A `HostBlock` borrows the `Ctx` it's made over, as a reference does: the
+compiler keeps the `Ctx` alive while the block is, and the block is
+`writable` only over a `mut` borrow. Pass the block itself to the call
+(`morca._lake.calls`), not its address, and the borrow covers the call.
+The callbacks reach the `Ctx` through its address, which the compiler can't
+follow; those that change it (`pin`, `fence`, `committed`) refuse when the
+block isn't writable, should the library ask for one through a call that
+doesn't take a writable host.
 """
 
 from std.memory.alloc import unsafe_alloc
@@ -37,15 +46,18 @@ from morca._lake.abi import (
     put_int,
     text_of,
 )
+from morca._lake.calls import Hosting
 
 
 struct _HostState(Movable):
     var ctx: Int
+    var writable: Bool
     var scratch: List[UInt8]
     var err: String
 
-    def __init__(out self, ctx: Int):
+    def __init__(out self, ctx: Int, writable: Bool):
         self.ctx = ctx
+        self.writable = writable
         self.scratch = List[UInt8]()
         self.err = String()
 
@@ -56,6 +68,15 @@ def _st(state: Int) -> Pointer[_HostState, MutAnyOrigin]:
 
 def _ctx(state: Int) -> Pointer[Ctx, MutAnyOrigin]:
     return Pointer[Ctx, MutAnyOrigin](unsafe_from_address=_st(state)[].ctx)
+
+
+def _writable(state: Int, what: String) raises:
+    if not _st(state)[].writable:
+        raise Error(
+            "lake: the library asked to ",
+            what,
+            " through a host over a read-only Ctx",
+        )
 
 
 def _hand(state: Int, var b: List[UInt8], out_n: Int) -> Int:
@@ -81,6 +102,7 @@ def _on_pin(
     state: Int, loc: Int, n: Int, current: Int64, ds: Int, dn: Int, out_id: Int
 ) abi("C") -> Int32:
     try:
+        _writable(state, "pin a table")
         var id = _ctx(state)[].pin(text_of(loc, n), current, text_of(ds, dn))
         put_int(out_id, 0, Int(id))
         return 0
@@ -91,6 +113,7 @@ def _on_pin(
 
 def _on_fence(state: Int) abi("C") -> Int32:
     try:
+        _writable(state, "fence the run")
         _ctx(state)[].fence()
         return 0
     except e:
@@ -102,6 +125,7 @@ def _on_committed(
     state: Int, loc: Int, n: Int, id: Int64, ds: Int, dn: Int
 ) abi("C") -> Int32:
     try:
+        _writable(state, "record a commit")
         _ctx(state)[].committed(text_of(loc, n), id, text_of(ds, dn))
         return 0
     except e:
@@ -155,21 +179,24 @@ def _put_fn[FT: TrivialRegisterPassable](block: Int, at: Int, f: FT):
     Pointer[FT, MutUntrackedOrigin](unsafe_from_address=block + at)[] = f
 
 
-struct HostBlock(Movable):
-    """The host block for one call into the library, over `ctx`, whose
-    address it keeps: the `Ctx` must outlive it, which a block made and
-    dropped around one call does."""
+struct HostBlock[mut: Bool, //, origin: Origin[mut=mut]](Hosting, Movable):
+    """The host block over a borrow of `ctx`, for the calls into the library
+    made while it lives (see the module doc)."""
 
-    var addr: Int
-    var state: Int
+    comptime writable = Self.mut
 
-    def __init__(out self, ctx: Ctx):
+    var _ctx: Pointer[Ctx, Self.origin]
+    var _addr: Int
+    var _state: Int
+
+    def __init__(out self, ref[Self.origin] ctx: Ctx):
+        self._ctx = Pointer(to=ctx)
         var st = unsafe_alloc[_HostState](1)
-        st.unsafe_write(_HostState(Int(Pointer(to=ctx))))
-        self.state = Int(st)
-        self.addr = Int(unsafe_alloc[Int](HOST_SIZE // 8))
-        var h = self.addr
-        put_int(h, H_STATE, self.state)
+        st.unsafe_write(_HostState(Int(self._ctx), Self.mut))
+        self._state = Int(st)
+        self._addr = Int(unsafe_alloc[Int](HOST_SIZE // 8))
+        var h = self._addr
+        put_int(h, H_STATE, self._state)
         _put_fn[CheckDeclaredFn](h, H_CHECK_DECLARED, _on_check_declared)
         _put_fn[PinFn](h, H_PIN, _on_pin)
         _put_fn[FenceFn](h, H_FENCE, _on_fence)
@@ -183,12 +210,21 @@ struct HostBlock(Movable):
         _put_fn[TextFn](h, H_COMMITS, _on_commits)
         _put_fn[TextFn](h, H_ERROR, _on_error)
 
+    def host_addr(self) -> Int:
+        return self._addr
+
+    def ctx(self) -> ref[Self.origin] Ctx:
+        """The `Ctx` the block borrows: code that holds the block reaches the
+        step through it, rather than through a second borrow the compiler
+        would see alias this one."""
+        return self._ctx[]
+
     def __deinit__(deinit self):
         var st = Pointer[_HostState, MutUntrackedOrigin](
-            unsafe_from_address=self.state
+            unsafe_from_address=self._state
         )
         st.unsafe_deinit_pointee()
         st.unsafe_free()
         Pointer[Int, MutUntrackedOrigin](
-            unsafe_from_address=self.addr
+            unsafe_from_address=self._addr
         ).unsafe_free()

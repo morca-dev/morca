@@ -38,8 +38,9 @@ Both commands run inside liblake (`lake_expire`, `lake_data`, #471), as
 
 from std.sys import argv
 
-from morca._lake.abi import Enc, Slots
-from morca._lake.client import api, take_bytes, take_error
+from morca._lake.abi import Enc
+from morca._lake.client import api
+import morca._lake.calls as lake
 from morca._lake.expire import ExpireAsk, Expiry
 
 
@@ -84,33 +85,16 @@ def expire_dataset(ask: ExpireAsk) raises -> Expiry:
     the table's properties when that is -1), keeping at least `ask.keep`
     (or the table's `history.expire.min-snapshots-to-keep`) and every
     snapshot in `ask.retain`."""
-    var a = api()
-    var e = ask.encode()
-    var got = Slots()
-    var err = Slots()
-    var rc = a.expire(e.addr(), len(e), got.addr, err.addr)
-    _ = e^
-    if rc != 0:
-        raise take_error(a, err)
-    var b = take_bytes(a, got)
-    var expiry = Expiry.decode(Int(b.unsafe_ptr()), len(b))
-    _ = b^  # read through its address above
-    return expiry^
+    var b = lake.expire(api(), ask.encode())
+    return Expiry.decode(b)
 
 
 def data_text(args: List[String]) raises -> String:
     """What `morca_maintain data` prints for `args` (those after `data`),
     read inside liblake (`morca._lake.dataread`)."""
-    var a = api()
     var e = Enc()
     e.strs(args)
-    var got = Slots()
-    var err = Slots()
-    var rc = a.data(e.addr(), len(e), got.addr, err.addr)
-    _ = e^
-    if rc != 0:
-        raise take_error(a, err)
-    var b = take_bytes(a, got)
+    var b = lake.data(api(), e)
     return String(unsafe_from_utf8=Span(b))
 
 

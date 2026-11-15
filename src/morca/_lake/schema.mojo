@@ -2,8 +2,9 @@
 liblake: their JSON, which the library parses. A schema's fields are the
 library's reading of it (`Schema.fields`)."""
 
-from morca._lake.abi import Dec, Slots
-from morca._lake.client import api, take_bytes, take_error
+from morca._lake.abi import Dec
+from morca._lake.client import api
+import morca._lake.calls as lake
 
 
 # ── schemas and specs ───────────────────────────────────────────────────────
@@ -47,19 +48,8 @@ struct Schema(Copyable, Movable, Writable):
     def fields(self) raises -> List[SchemaField]:
         """Every field, nested ones after the field they're in; raises if the
         schema doesn't parse."""
-        var a = api()
-        var got = Slots()
-        var err = Slots()
-        var rc = a.schema_fields(
-            Int(self.json.unsafe_ptr()),
-            self.json.byte_length(),
-            got.addr,
-            err.addr,
-        )
-        if rc != 0:
-            raise take_error(a, err)
-        var b = take_bytes(a, got)
-        var d = Dec(Int(b.unsafe_ptr()), len(b))
+        var b = lake.schema_fields(api(), self.json)
+        var d = Dec(b)
         var out = List[SchemaField]()
         for _ in range(Int(d.int())):
             var id = Int(d.int())
@@ -67,7 +57,6 @@ struct Schema(Copyable, Movable, Writable):
             var type = d.str()
             var required = d.bool()
             out.append(SchemaField(id, name^, type^, required, Int(d.int())))
-        _ = b^
         return out^
 
     def columns(self) raises -> List[SchemaField]:

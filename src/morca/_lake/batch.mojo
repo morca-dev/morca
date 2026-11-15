@@ -30,11 +30,10 @@ from arrow_mlake import (
     bit_get,
     bit_set,
 )
-from arrow_mlake.carrow_import import ImportedArray
 from parquet import RecordBatch
 
-from morca._lake.abi import Slots
-from morca._lake.client import Exported, api, take_error
+from morca._lake.client import Exported, api
+import morca._lake.calls as lake
 from morca._lake.schema import Schema
 
 
@@ -85,22 +84,7 @@ struct BatchBuilder(Movable):
     var names: Dict[String, Int]
 
     def __init__(out self, schema: Schema) raises:
-        var a = api()
-        var json = schema.to_json()
-        var arr = Slots(1)
-        var sch = Slots(1)
-        var err = Slots()
-        var rc = a.empty_batch(
-            Int(json.unsafe_ptr()),
-            json.byte_length(),
-            arr.addr,
-            sch.addr,
-            err.addr,
-        )
-        _ = json^
-        if rc != 0:
-            raise take_error(a, err)
-        var b = ImportedArray(arr[0], sch[0]).into_batch()
+        var b = lake.empty_batch(api(), schema.to_json())
         self.arena = b.arena.copy()  # its own memory: it grows
         self.roots = b.roots.copy()
         self.names = Dict[String, Int]()
@@ -277,23 +261,7 @@ def concat_batches(batches: List[RecordBatch]) raises -> RecordBatch:
         return RecordBatch()
     if len(batches) == 1:
         return batches[0].copy()
-    var a = api()
-    var ex = Exported(batches)
-    var arr = Slots(1)
-    var sch = Slots(1)
-    var err = Slots()
-    var rc = a.concat(
-        ex.n(),
-        ex.arrays_addr(),
-        ex.schemas_addr(),
-        arr.addr,
-        sch.addr,
-        err.addr,
-    )
-    _ = ex^
-    if rc != 0:
-        raise take_error(a, err)
-    return ImportedArray(arr[0], sch[0]).into_batch()
+    return lake.concat(api(), Exported(batches))
 
 
 def _check_rows(b: RecordBatch) raises:

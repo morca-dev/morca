@@ -1,7 +1,7 @@
 """The program's side of liblake: finding and loading the library, and
-batches crossing as Arrow C Data. No iceberg here, and no `Ctx`: the host
-block over a step's `Ctx` is the program's (`morca._internal.lakehost`).
-`morca.tables` is built on this.
+batches crossing as Arrow C Data. No iceberg here, and no `Ctx`:
+`morca._lake.calls` calls the library through this, and the host block over
+a step's `Ctx` is the program's (`morca._internal.lakehost`).
 
 **Loading.** The library is opened the first time a table is used, in the
 step or the dista task that uses it, never at program start (dista forks
@@ -28,7 +28,7 @@ from arrow_mlake.carrow import ExportedArray, export_c
 from parquet import RecordBatch
 
 from morca._common.dlopen import open_library
-from morca._lake.abi import ABI_VERSION, Slots, bytes_of, text_of
+from morca._lake.abi import ABI_VERSION
 
 comptime SOURCE = is_defined["MORCA_LAKE_SOURCE"]()
 """Whether this build compiles the library's code in (see the module doc)."""
@@ -410,20 +410,6 @@ def api() raises -> Api:
         return l.api.value().copy()
 
 
-def take_error(a: Api, err: Slots) -> Error:
-    """The error the library wrote to `err`, freed."""
-    var msg = text_of(err[0], err[1])
-    a.free_text(err[0])
-    return Error(msg^)
-
-
-def take_bytes(a: Api, got: Slots) -> List[UInt8]:
-    """The buffer the library wrote to `got`, copied and freed."""
-    var b = bytes_of(got[0], got[1])
-    a.free_text(got[0])
-    return b^
-
-
 # ── batches as C structs ────────────────────────────────────────────────────
 
 
@@ -441,8 +427,9 @@ def export_batch(b: RecordBatch) raises -> ExportedArray:
 struct Exported(Movable):
     """Batches exported for one call, as two C arrays of the arrays' and the
     schemas' addresses. The call moves them to the library, which releases
-    them (ABI 2): nothing here does, and the two lists stay alive across the
-    call (LIB-TINS.md §5, item 4)."""
+    them (ABI 2): nothing here does. Pass it to the call
+    (`morca._lake.calls`) as an argument, which keeps the two lists alive
+    across the call (LIB-TINS.md §5, item 4)."""
 
     var arrays: List[Int]
     var schemas: List[Int]
