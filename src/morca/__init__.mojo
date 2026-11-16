@@ -37,9 +37,9 @@ comes with a minor-version note in the changelog (changes/README.md).
 | `morca.step` | `Step`, `Mapped`, `Gather`, `NoStep`, `StepKind`, `StepLike`, `defer` |
 | `morca.pipeline` | `Pipeline`, and what a run returns: `RunResult`, `StepRun`, `SUCCEEDED`, `FAILED`, `SKIPPED` |
 | `morca.ctx` | `Ctx`, what a step is given: its run, partition, attempt, logs and dista runtime |
-| `morca.partitions` | `Monthly`, `Daily`, `Hourly`, `Partitions`, `parse_partitions` |
+| `morca.partitions` | `Monthly`, `Weekly`, `Daily`, `Hourly`, `Partitions`, `parse_partitions` |
 | `morca.keyed` | `Keyed`: partitions named by a dataset's column, not dates |
-| `morca.month`, `morca.day`, `morca.hour`, `morca.key`, `morca.name` | the partition keys: `Month`, `Day`, `Hour`, `Name` (`Name.text` is the name as a `String`), `Key`, `TimeKey`, and their parsers |
+| `morca.month`, `morca.week`, `morca.day`, `morca.hour`, `morca.key`, `morca.name` | the partition keys: `Month`, `Week`, `Day`, `Hour`, `Name` (`Name.text` is the name as a `String`), `Key`, `TimeKey`, and their parsers |
 | `morca.schedule`, `morca.cron`, `morca.tz` | `Cron`, `Current`, `Previous`, `Fill`, `NoSchedule`, `Schedule`, `ScheduleLike`; `CronExpr`; `Zone`, `PosixTZ` |
 | `morca.civil` | `Civil`, `now`, `parse_time`, `utc` |
 | `morca.tasks` | `Tasks`, `TaskSet`, `NoTasks`, `workers`: a step's dista tasks |
@@ -81,6 +81,7 @@ from morca.day import Day
 from morca.hour import Hour
 from morca.key import Key, TimeKey, parse_keys
 from morca.month import Month, days_in, parse_months
+from morca.week import Week, weeks_in
 from morca._internal.handover import (
     code_version,
     desired_code_version,
@@ -93,6 +94,7 @@ from morca.partitions import (
     Hourly,
     Monthly,
     Partitions,
+    Weekly,
     parse_partitions,
 )
 from morca.pipeline import Pipeline

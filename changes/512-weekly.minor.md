@@ -1,0 +1,1 @@
+- **Weekly partitions**: `Weekly[start]` partitions a pipeline by ISO week, keys `YYYY-Www` such as `2026-W46` (#512).

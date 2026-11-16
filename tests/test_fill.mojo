@@ -112,6 +112,35 @@ def test_range_hourly() raises:
     assert_equal(fill_refusal("hourly", "2024-01-01T00", False, "p"), "")
 
 
+def test_range_weekly() raises:
+    # Wednesday 2026-11-18 is in 2026-W47: W46 is the last that ended.
+    var t = parse_time("2026-11-18T10:00Z")
+    assert_equal(last_ended("weekly", "UTC", t), "2026-W46")
+    var weeks = range_keys("weekly", "2026-W44", "UTC", t)
+    assert_equal(len(weeks), 3)
+    assert_equal(weeks[0], "2026-W44")
+    assert_equal(weeks[2], "2026-W46")
+    # Across New Year, through a 53-week year.
+    var ny = range_keys(
+        "weekly", "2026-W52", "UTC", parse_time("2027-01-12T00:00Z")
+    )
+    assert_equal(len(ny), 3)
+    assert_equal(ny[1], "2026-W53")
+    assert_equal(ny[2], "2027-W01")
+    # A week ends at Monday 00:00 on the schedule's clock: 03:00 UTC is
+    # still Sunday in New York.
+    var mon = parse_time("2026-11-16T03:00Z")
+    assert_equal(last_ended("weekly", "UTC", mon), "2026-W46")
+    assert_equal(last_ended("weekly", "America/New_York", mon), "2026-W45")
+    # A lag of 2 hours: W46 ended an hour ago and waits until 02:00.
+    var early = parse_time("2026-11-16T01:00Z")
+    assert_equal(last_ended("weekly", "UTC", early, 7200), "2026-W45")
+    var w = lag_wait("weekly", "UTC", early, 7200)
+    assert_equal(w[0], "2026-W46")
+    assert_equal(w[1], parse_time("2026-11-16T02:00Z"))
+    assert_equal(fill_refusal("weekly", "2026-W01", False, "p"), "")
+
+
 def test_lag_values() raises:
     assert_equal(parse_fill_lag("0"), 0)
     assert_equal(parse_fill_lag("2h"), 7200)

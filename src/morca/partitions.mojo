@@ -5,12 +5,13 @@ comptime Taxi = Pipeline[
     "taxi", Download, Load, Compact, partitions=Monthly["2011-01"]
 ]
 comptime Weather = Pipeline["weather", Fetch, partitions=Daily["2020-01-01"]]
+comptime Stats = Pipeline["stats", Count, partitions=Weekly["2026-W40"]]
 comptime Poll = Pipeline["poll", Poll, partitions=Hourly["2026-11-11T00"]]
 comptime Labels = Pipeline["labels", Label, partitions=Keyed["av2.logs", "log_id"]]
 ```
 
-A pipeline's first step takes its key (`Month` for `Monthly`, `Day` for
-`Daily`, `Hour` for `Hourly`, `Name` for `morca.keyed.Keyed`), or a `Seq` of them for a first
+A pipeline's first step takes its key (`Month` for `Monthly`, `Week` for
+`Weekly` (ISO weeks, `2026-W46`), `Day` for `Daily`, `Hour` for `Hourly`, `Name` for `morca.keyed.Keyed`), or a `Seq` of them for a first
 gather step. `start` is the first partition: keys before it are refused,
 and phase 2's scheduler and backfills count from it. A pipeline without
 `partitions=` is `Monthly[]`, with no start.
@@ -25,6 +26,7 @@ from morca.day import Day
 from morca.hour import Hour
 from morca.key import Key, TimeKey, parse_keys
 from morca.month import Month
+from morca.week import Week
 
 
 trait Partitions:
@@ -33,7 +35,8 @@ trait Partitions:
 
     @staticmethod
     def kind() -> StaticString:
-        """`monthly`, `daily`, `hourly` or `keyed`, as `describe` writes it."""
+        """`monthly`, `weekly`, `daily`, `hourly` or `keyed`, as `describe` writes it.
+        """
         ...
 
     @staticmethod
@@ -114,6 +117,43 @@ struct Monthly[first: StaticString = ""](Partitions):
     @staticmethod
     def keys() raises -> Tuple[Int64, List[String]]:
         raise Error("morca: monthly partitions have no keys dataset")
+
+
+struct Weekly[first: StaticString = ""](Partitions):
+    """A partition per ISO week, Monday to Sunday, from `first` (`YYYY-Www`)
+    if given."""
+
+    comptime K = Week
+
+    @staticmethod
+    def kind() -> StaticString:
+        return "weekly"
+
+    @staticmethod
+    def start() -> StaticString:
+        return Self.first
+
+    @staticmethod
+    def dataset() -> StaticString:
+        return ""
+
+    @staticmethod
+    def column() -> StaticString:
+        return ""
+
+    @staticmethod
+    def parse(s: StringSlice, check: Bool) raises -> List[Week]:
+        return parse_keys[Week](s, Self.first)
+
+    @staticmethod
+    def fill(
+        year: Int, month: Int, day: Int, hour: Int, previous: Bool
+    ) raises -> Week:
+        return _fill[Week](year, month, day, hour, previous)
+
+    @staticmethod
+    def keys() raises -> Tuple[Int64, List[String]]:
+        raise Error("morca: weekly partitions have no keys dataset")
 
 
 struct Daily[first: StaticString = ""](Partitions):

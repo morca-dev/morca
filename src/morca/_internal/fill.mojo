@@ -19,7 +19,8 @@ from its first partition through the last one that has ended at least
 partition's data some time after it ends: GH Archive puts each hour's file
 up minutes after the hour, so at 00:00 UTC the day that just ended isn't
 all there yet. A Daily day D fills from D+1 00:00 plus the lag (on the
-schedule's clock), a Monthly month from the 1st of the next plus the lag.
+schedule's clock), a Weekly week from the next Monday 00:00 plus the lag, a
+Monthly month from the 1st of the next plus the lag.
 Until then the partition is outside the range, for the fill and for the
 coverage alike (`range_keys`), so it isn't counted as missing; the
 pipeline page's Fill line says when it fills (`FillStatus.lag_key`). The default,
@@ -319,7 +320,10 @@ def fill_refusal(
             " is keyed: its keys come from its keys dataset, which its",
             " sensor or `morca backfill ",
             pipeline,
-            " @all` runs; fills are for Hourly, Daily and Monthly partitions",
+            (
+                " @all` runs; fills are for Hourly, Daily, Weekly and Monthly"
+                " partitions"
+            ),
         )
     if sensor:
         return String(
@@ -329,7 +333,9 @@ def fill_refusal(
             " may not be there; backfill it by hand",
         )
     if not is_time_kind(kind):
-        return String(pipeline, " has no Hourly, Daily or Monthly partitions")
+        return String(
+            pipeline, " has no Hourly, Daily, Weekly or Monthly partitions"
+        )
     if not start:
         return String(pipeline, " has no first partition to fill from")
     return ""

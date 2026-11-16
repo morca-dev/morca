@@ -20,6 +20,7 @@ from morca._internal.fill import (
 from morca.cron import CronExpr
 from morca.day import Day
 from morca.hour import Hour
+from morca.week import Week
 from morca._internal.ec2 import Ec2Spec
 from morca.month import Month
 from morca.schedule import Schedule
@@ -217,6 +218,9 @@ def fill_key(kind: String, fills: String, local: Civil) raises -> String:
     if kind == "daily":
         var d = Day.containing(local.year, local.month, local.day, 0)
         return String(d.prev() if fills == "previous" else d^)
+    if kind == "weekly":
+        var w = Week.containing(local.year, local.month, local.day, 0)
+        return String(w.prev() if fills == "previous" else w^)
     if kind == "monthly":
         var m = Month.containing(local.year, local.month, local.day, 0)
         return String(m.prev() if fills == "previous" else m^)

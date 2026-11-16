@@ -142,6 +142,35 @@ def test_parse_sense() raises:
         _ = parse_sense("a.b twelve other -\n")
 
 
+def test_map_weekly_keys() raises:
+    assert_equal(key_kind("2026-W46"), "weekly")
+    assert_equal(key_kind("2026-X46"), "")
+    assert_equal(join_keys(map_keys(["2024-12-31"], "weekly")), "2025-W01")
+    assert_equal(join_keys(map_keys(["2026-11-15T23"], "weekly")), "2026-W46")
+    assert_equal(
+        join_keys(map_keys(["2026-11-09", "2026-11-15"], "weekly")),
+        "2026-W46",
+    )
+    # A month is the weeks with a day in it, a week the months it spans.
+    assert_equal(
+        join_keys(map_keys(["2026-02"], "weekly")),
+        "2026-W05,2026-W06,2026-W07,2026-W08,2026-W09",
+    )
+    assert_equal(
+        join_keys(map_keys(["2026-02"], "weekly", "2026-W07")),
+        "2026-W07,2026-W08,2026-W09",
+    )
+    assert_equal(
+        join_keys(map_keys(["2026-W53"], "monthly")), "2026-12,2027-01"
+    )
+    var days = map_keys(["2026-W46"], "daily")
+    assert_equal(len(days), 7)
+    assert_equal(days[0], "2026-11-09")
+    assert_equal(days[6], "2026-11-15")
+    assert_equal(len(map_keys(["2026-W46"], "hourly")), 7 * 24)
+    assert_equal(join_keys(map_keys(["2026-W46"], "weekly")), "2026-W46")
+
+
 def test_map_hourly_keys() raises:
     assert_equal(key_kind("2024-02-29T07"), "hourly")
     assert_equal(key_kind("2024-02-29 07"), "")

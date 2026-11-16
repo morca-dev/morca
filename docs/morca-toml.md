@@ -816,7 +816,7 @@ The default, `fills = "since_registration"`, is what morca did before. A schedul
 
 On every tick, after the other runs of every pipeline of its [priority](#priority) have started, the scheduler queues and starts fill runs for it:
 
-- **The range** is the pipeline's first partition through the last one that has ended on its schedule's wall clock (UTC without a schedule), at least `fill_lag` ago: yesterday for a daily pipeline, last month for a monthly one. The partition still going is the schedule's. See [The lag](#the-lag).
+- **The range** is the pipeline's first partition through the last one that has ended on its schedule's wall clock (UTC without a schedule), at least `fill_lag` ago: yesterday for a daily pipeline, last week for a weekly one, last month for a monthly one. The partition still going is the schedule's. See [The lag](#the-lag).
 - **`keys_per_run` partitions per fill run** (one by default), in `fill_order`; a run's own partitions are in ascending order. The run's trigger is `fill` (`orca.runs.trigger`), so the runs page can filter for them.
 - **A partition is taken** when it's done in a run of any of the pipeline's code, when a live run has it, or when a fill run of it was ever queued. A fill never runs a partition twice. A fill run that fails is retried like a scheduled run, up to `run_retries`. A partition whose fill run failed past its retries, or was cancelled, is left to a person: `morca backfill`, or resume in the UI. Running done partitions again stays `morca backfill --rerun`, or [as a fill](#a-backfill-as-a-fill) with `--as-fill`.
 - **Fill runs don't count against `max_runs`.** At most `fill_max_runs` fill runs are going, beside up to `max_runs` other runs.
@@ -825,7 +825,7 @@ On every tick, after the other runs of every pipeline of its [priority](#priorit
 
 ### The lag
 
-`fill_lag` (default `0`) holds a partition back for a while after it ends, for a source that publishes its data late. A partition is filled once its end is at least `fill_lag` in the past: a daily day D from D+1 00:00 plus the lag, a monthly month from the 1st of the next month plus the lag, both on the schedule's wall clock (UTC without a schedule).
+`fill_lag` (default `0`) holds a partition back for a while after it ends, for a source that publishes its data late. A partition is filled once its end is at least `fill_lag` in the past: a daily day D from D+1 00:00 plus the lag, a weekly (ISO) week from the next Monday 00:00 plus the lag, a monthly month from the 1st of the next month plus the lag, both on the schedule's wall clock (UTC without a schedule).
 
 GH Archive puts each hour's file up some minutes after the hour. With no lag, the fill starts the day that just ended at 00:00 UTC, before its last hour is there. Its attempts fail until the file appears, and enough failures in an hour trip the [watchdog](watchdog.md), which pauses the pipeline. With `fill_lag = "2h"` the day is filled from 02:00 UTC.
 

@@ -7,8 +7,9 @@ a strip of every month of its range linking to their years). Both are in
 the page; the links work without scripts (`?cov=month|year`, with `?cal=`
 the month or year), and with them the tabs switch in place and the choice
 is kept in `localStorage`, as the Steps tabs are. Year is the default. A
-monthly pipeline's card is its year of months, as before, and an hourly
-one's a day of hours (`?cal=YYYY-MM-DD`). For a sensor,
+monthly pipeline's card is its year of months, as before, a weekly one's
+an ISO year of weeks (`?cal=YYYY`), and an hourly one's a day of hours
+(`?cal=YYYY-MM-DD`). For a sensor,
 the days what it follows has but it hasn't done, failed or started are
 `behind` (`morca._internal.follow`), and `follow_html` is its Progress card's
 Following line.
@@ -33,6 +34,7 @@ from morca._internal.ui.layout import act_button
 from morca.day import Day
 from morca.hour import Hour
 from morca.month import Month, days_in
+from morca.week import Week
 from morca._internal.views.commands import shell_quote
 from morca._internal.state import State
 
@@ -73,7 +75,7 @@ def state_words(state: String) -> String:
 
 
 def _cal_title(c: Calendar) raises -> String:
-    if c.kind == "monthly" or c.kind == "hourly":
+    if c.kind == "monthly" or c.kind == "hourly" or c.kind == "weekly":
         return c.period
     var y = c.period[byte=:4]
     var m = Int(c.period[byte=5:7])
@@ -170,13 +172,17 @@ def _month_html(
     view: String,
     follows: List[String],
 ):
-    """A month of days (a year of months for a monthly pipeline, a day of
-    hours for an hourly one), as the card has always drawn it."""
+    """A month of days (a year of months for a monthly pipeline, of weeks
+    for a weekly one, a day of hours for an hourly one), as the card has
+    always drawn it."""
     var daily = c.kind == "daily"
     var hourly = c.kind == "hourly"
+    var weekly = c.kind == "weekly"
     h.raw('<div class="cal cal--static" role="group" aria-label="')
     h.text(
-        "Days" if daily else ("Hours" if hourly else "Months"),
+        "Days" if daily else (
+            "Hours" if hourly else ("Weeks" if weekly else "Months")
+        ),
         " of ",
         c.pipeline,
     )
@@ -207,8 +213,10 @@ def _month_html(
             cell.key,
             cell.state,
             String(i + 1) if daily else (
-                String(cell.key[byte=11:]) if hourly else String(
-                    month_name(i + 1)[byte=:3]
+                String(cell.key[byte=11:]) if hourly else (
+                    String(cell.key[byte=5:]) if weekly else String(
+                        month_name(i + 1)[byte=:3]
+                    )
                 )
             ),
         )
@@ -433,6 +441,8 @@ def key_ranges(keys: List[String], unit: String) raises -> String:
                 nxt = String(Day.parse(keys[j]).next())
             elif unit == "hour":
                 nxt = String(Hour.parse(keys[j]).next())
+            elif unit == "week":
+                nxt = String(Week.parse(keys[j]).next())
             else:
                 nxt = String(Month.parse(keys[j]).next())
             if nxt != keys[j + 1]:
