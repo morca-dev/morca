@@ -2,7 +2,7 @@
 # A sensor whose datasets hold something it can't run doesn't stop
 # (tests/fake_sensor stands in for its binary, so no warehouse is needed):
 #
-# - a snapshot whose morca.partitions isn't a partition key (a week) is
+# - a snapshot whose morca.partitions isn't a partition key (a quarter) is
 #   recorded as seen with no run and why, and a snapshot of another dataset
 #   seen in the same tick still starts its run;
 # - the next ticks start nothing more, and say nothing more of it;
@@ -35,16 +35,16 @@ tick() { ./build/morca tick >> "$log" 2>&1 || fail "a tick failed"; }
 printf 'raw.a 1 other 2024-01\nraw.b -1 other -\n' > "$FAKE_SENSE"
 ./build/morca register ./tests/fake_sensor >> "$log" 2>&1 || fail "register"
 
-# raw.a gets a snapshot another writer says holds a week, raw.b a month.
-printf 'raw.a 2 other 2024-W12\nraw.b 3 other 2024-03\n' > "$FAKE_SENSE"
+# raw.a gets a snapshot another writer says holds a quarter (no partition key), raw.b a month.
+printf 'raw.a 2 other 2024-Q01\nraw.b 3 other 2024-03\n' > "$FAKE_SENSE"
 tick
 [ "$(q "SELECT partitions FROM orca.runs WHERE pipeline = 'fake_sensor'")" = 2024-03 ] \
     || fail "raw.b@3 started no run for 2024-03: $(q "SELECT id, partitions FROM orca.runs")"
-[ "$(q "SELECT run IS NULL AND error LIKE '%not a partition key: ''2024-W12''%' FROM orca.sensed WHERE dataset = 'raw.a' AND snapshot_id = 2")" = t ] \
+[ "$(q "SELECT run IS NULL AND error LIKE '%not a partition key: ''2024-Q01''%' FROM orca.sensed WHERE dataset = 'raw.a' AND snapshot_id = 2")" = t ] \
     || fail "raw.a@2 isn't seen with why: $(q "SELECT * FROM orca.sensed")"
 [ "$(q "SELECT run IS NOT NULL AND error IS NULL FROM orca.sensed WHERE dataset = 'raw.b' AND snapshot_id = 3")" = t ] \
     || fail "raw.b@3 isn't seen with its run"
-grep -q "sensed raw.a@2 for fake_sensor and ran nothing: morca: not a partition key: '2024-W12'" "$log" \
+grep -q "sensed raw.a@2 for fake_sensor and ran nothing: morca: not a partition key: '2024-Q01'" "$log" \
     || fail "the unusable snapshot isn't said"
 tick
 tick
