@@ -83,7 +83,7 @@ def _backoff(attempt: Int):
     half. Two writers that both wrote the same metadata version both back
     out (iceberg's filesystem catalog deletes both files), so retrying at
     once can clash again and again; the random wait lets one get ahead.
-    Each process seeds `std.random` itself (`morca._internal.cli.seed_random`).
+    Each process seeds `std.random` itself (`morca._cli.seed_random`).
     """
     var base = 0.01 * Float64(1 << min(attempt - 1, 6))
     sleep(base * random_float64(0.5, 1.5))

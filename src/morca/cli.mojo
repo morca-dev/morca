@@ -7,7 +7,7 @@ def main() raises:
 
 `morca_main` and `report` are public (they're exported from `morca` too).
 The command line itself, its subcommands and stores, is internal:
-`morca._internal.cli`.
+`morca._cli`.
 """
 
-from morca._internal.cli import morca_main, report
+from morca._cli import morca_main, report
