@@ -900,7 +900,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: magmalake/customs@v0.2.1
+      - uses: magmalake/customs@v0.3.0
       # And the packages as layers: `_internal` imports no public module
       # that imports `_internal` back (AGENTS.md).
       - run: python3 scripts/check_layers.py
