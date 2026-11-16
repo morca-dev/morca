@@ -20,7 +20,7 @@ the repository's root.
 """
 
 from std.os import getenv, setenv
-from std.testing import assert_equal
+from std.testing import TestSuite, assert_equal
 
 from postgres import Connection, Params
 
@@ -128,5 +128,4 @@ def test_fencing_agrees_with_the_model() raises:
 
 
 def main() raises:
-    test_fencing_agrees_with_the_model()
-    print("PASS test_fencing_agrees_with_the_model")
+    TestSuite.discover_tests[__functions_in_module()]().run()

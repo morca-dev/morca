@@ -16,7 +16,7 @@ environment, from the repository's root.
 """
 
 from std.os import getenv, setenv
-from std.testing import assert_equal
+from std.testing import TestSuite, assert_equal
 
 from iceberg.catalog.filesystem import FilesystemCatalog
 from iceberg.schema import Schema as IcebergSchema
@@ -131,7 +131,26 @@ def test_append_agrees_with_the_model() raises:
     assert_equal(cases, 363)
 
 
-def main() raises:
+def before_tests() raises:
+    """A warehouse of its own for the run, before any test."""
     _ = setenv("MORCA_WAREHOUSE", String("build/wh-formal-retry-", now_ms()))
-    test_append_agrees_with_the_model()
-    print("PASS test_append_agrees_with_the_model")
+
+
+def after_tests() raises:
+    """Nothing to undo: the process ends after the tests."""
+    pass
+
+
+def main() raises:
+    # scripts/unit-tests.sh, which runs the tests from one binary, calls
+    # before_tests and after_tests as this does.
+    before_tests()
+    var failed = False
+    try:
+        TestSuite.discover_tests[__functions_in_module()]().run()
+    except e:
+        failed = True
+        print(e)
+    after_tests()
+    if failed:
+        raise Error("test_formal_retry failed")

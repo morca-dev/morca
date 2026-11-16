@@ -10,7 +10,7 @@ ids say which run each row came from.
 
 from std.os import getenv, setenv
 from std.os.path import exists
-from std.testing import assert_equal, assert_true
+from std.testing import TestSuite, assert_equal, assert_true
 
 from iceberg.catalog.filesystem import FilesystemCatalog
 from iceberg.schema import Schema as IcebergSchema
@@ -380,20 +380,27 @@ def test_append_to_a_replaced_dataset_replaces() raises:
     assert_equal(_ids(_table("d")), _expected_n(2000, ROWS))
 
 
-def main() raises:
+def before_tests() raises:
+    """A warehouse of its own for the run, before any test."""
     var root = String("build/wh-replace-", now_ms())
     _ = setenv("MORCA_WAREHOUSE", root)
-    test_a_rerun_replaces_its_partition()
-    print("PASS test_a_rerun_replaces_its_partition")
-    test_append_mode_still_appends()
-    print("PASS test_append_mode_still_appends")
-    test_a_retry_within_a_run_is_the_uninterrupted_result()
-    print("PASS test_a_retry_within_a_run_is_the_uninterrupted_result")
-    test_two_runs_replacing_one_partition_keep_one_runs_rows()
-    print("PASS test_two_runs_replacing_one_partition_keep_one_runs_rows")
-    test_a_commit_refuses_a_stale_removal()
-    print("PASS test_a_commit_refuses_a_stale_removal")
-    test_an_unpartitioned_table_is_replaced_whole()
-    print("PASS test_an_unpartitioned_table_is_replaced_whole")
-    test_append_to_a_replaced_dataset_replaces()
-    print("PASS test_append_to_a_replaced_dataset_replaces")
+
+
+def after_tests() raises:
+    """Nothing to undo: the process ends after the tests."""
+    pass
+
+
+def main() raises:
+    # scripts/unit-tests.sh, which runs the tests from one binary, calls
+    # before_tests and after_tests as this does.
+    before_tests()
+    var failed = False
+    try:
+        TestSuite.discover_tests[__functions_in_module()]().run()
+    except e:
+        failed = True
+        print(e)
+    after_tests()
+    if failed:
+        raise Error("test_replace failed")

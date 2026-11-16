@@ -18,7 +18,7 @@ Run from the repository's root.
 
 from std.os import remove
 from std.os.path import exists
-from std.testing import assert_equal
+from std.testing import TestSuite, assert_equal
 
 from morca import Ctx, MemoryStore, RunStore, SqliteStore
 
@@ -123,7 +123,4 @@ def test_sqlite_pins_agree_with_the_model() raises:
 
 
 def main() raises:
-    test_memory_pins_agree_with_the_model()
-    print("PASS test_memory_pins_agree_with_the_model")
-    test_sqlite_pins_agree_with_the_model()
-    print("PASS test_sqlite_pins_agree_with_the_model")
+    TestSuite.discover_tests[__functions_in_module()]().run()
