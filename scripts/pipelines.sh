@@ -41,6 +41,7 @@ chaos_pipeline:tests/chaos_pipeline.mojo
 defer:tests/defer_pipeline.mojo
 hourly:tests/hourly.mojo
 six-hourly:tests/six_hourly.mojo
+weekly:tests/weekly.mojo
 stop:tests/stop_pipeline.mojo
 longpoll:tests/outdated_pipeline.mojo
 longpoll2:tests/outdated_pipeline.mojo:run["longpoll2"]

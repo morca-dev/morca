@@ -49,16 +49,19 @@ from morca._internal.lineage import flows
 from morca._internal.db.live import live_runs
 from morca.month import Month, days_in
 from morca.name import sort_texts
+from morca.week import Week
 from morca._internal.state import State
 from morca._internal.timekeys import parse_time_keys
 from morca._internal.warehouse import Sensed
 
 
 def key_kind(key: StringSlice) -> String:
-    """`monthly` for a `YYYY-MM` key, `daily` for `YYYY-MM-DD`, `hourly`
-    for `YYYY-MM-DDTHH`, or empty."""
+    """`monthly` for a `YYYY-MM` key, `weekly` for `YYYY-Www`, `daily` for
+    `YYYY-MM-DD`, `hourly` for `YYYY-MM-DDTHH`, or empty."""
     if key.byte_length() == 7:
         return "monthly"
+    if key.byte_length() == 8 and key[byte=5] == "W":
+        return "weekly"
     if key.byte_length() == 10:
         return "daily"
     if key.byte_length() == 13 and key[byte=10] == "T":
@@ -82,7 +85,8 @@ def map_keys(
     """`keys`, of any time kind, as keys of `kind`: a key as the longer one
     it falls in (an hour as its day or month, a day as its month), or as
     each shorter one it has (a month as its days or hours, a day as its
-    hours). Those before `start` are dropped, and the rest are sorted, once
+    hours). Weeks and months overlap: a week is the months its days fall
+    in, a month the weeks with a day in it. Those before `start` are dropped, and the rest are sorted, once
     each."""
     var out = List[String]()
     for k in keys:
@@ -94,6 +98,8 @@ def map_keys(
             mapped.append(String(Day.parse(k)))
         elif have == kind and have == "hourly":
             mapped.append(String(Hour.parse(k)))
+        elif have == "weekly" or kind == "weekly":
+            mapped = _map_weekly(k, have, kind)
         elif have == "daily" and kind == "monthly":
             mapped.append(String(Day.parse(k).month_of()))
         elif have == "hourly" and kind == "monthly":
@@ -124,6 +130,42 @@ def map_keys(
         while j > 0 and out[j] < out[j - 1]:
             out.swap_elements(j, j - 1)
             j -= 1
+    return out^
+
+
+def _map_weekly(k: String, have: String, kind: String) raises -> List[String]:
+    """`map_keys` of one key when it or `kind` is weekly."""
+    var out = List[String]()
+    if have == "weekly":
+        var w = Week.parse(k)
+        if kind == "weekly":
+            out.append(String(w))
+        elif kind == "monthly":
+            for m in w.months():
+                out.append(String(m))
+        elif kind == "daily":
+            for d in w.days():
+                out.append(String(d))
+        elif kind == "hourly":
+            for d in w.days():
+                for h in range(24):
+                    out.append(String(Hour(d.year, d.month, d.day, h)))
+        else:
+            raise Error("morca: not a partition key: '", k, "'")
+    elif have == "daily":
+        var d = Day.parse(k)
+        out.append(String(Week.containing(d.year, d.month, d.day, 0)))
+    elif have == "hourly":
+        var h = Hour.parse(k)
+        out.append(String(Week.containing(h.year, h.month, h.day, h.hour)))
+    elif have == "monthly":
+        var m = Month.parse(k)
+        for d in range(1, days_in(m.year, m.month) + 1):
+            var w = String(Week.containing(m.year, m.month, d, 0))
+            if w not in out:
+                out.append(w^)
+    else:
+        raise Error("morca: not a partition key: '", k, "'")
     return out^
 
 

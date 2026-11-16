@@ -203,6 +203,8 @@ test-concurrency = { cmd = "scripts/with-postgres.sh tests/concurrency.sh" }
 test-one-run-per-key = { cmd = "scripts/with-postgres.sh tests/one_run_per_key.sh" }
 # Hourly partitions: */5 fires, hour backfills, the day-of-hours calendar.
 test-hourly = { cmd = "scripts/with-postgres.sh tests/hourly.sh" }
+# Weekly (ISO week) partitions: Monday fires, week backfills, the year of weeks.
+test-weekly = { cmd = "scripts/with-postgres.sh tests/weekly.sh" }
 # morca.toml (morca.toml, morca.config): the parser, what register reads from
 # the file and records, config show and export, and the env on each runner.
 test-toml = { cmd = "scripts/mojo-build.sh -I src $DEP_INC tests/test_toml.mojo -o build/test-toml && ./build/test-toml" }
@@ -286,7 +288,7 @@ test-executor-core = { depends-on = ["build-shared", "test-sample", "test-steps"
 test-executor-workers = { depends-on = ["build-shared", "test-ec2", "test-autoscale", "test-no-workers", "test-pool", "test-hcloud", "test-pool-scale", "test-pool-scale-ec2", "test-pool-image", "test-run-cluster", "test-secrets", "test-placement", "test-grants", "test-pressure", "test-lost-workers"] }
 test-executor = { depends-on = ["test-executor-core", "test-executor-workers"] }
 # The scheduler, the UI, and what a registration and its code control:
-test-scheduler-ui = { depends-on = ["build-shared", "test-toml", "test-upgrade", "test-config", "test-fill", "test-fill-version", "test-fill-requests", "test-priority", "test-pool-fills", "test-run-locks", "test-metrics", "test-scheduler", "test-ui", "test-fleet", "test-system", "test-actions", "test-calendar", "test-ui-login", "test-ui-drain", "test-remote", "test-worker-api", "test-pause", "test-older-binary", "test-watchdog", "test-notify", "test-versions", "test-manual-run", "test-new-code", "test-defer", "test-dead-runs", "test-adopt", "test-overlap", "test-outdated", "test-concurrency", "test-one-run-per-key", "test-hourly", "test-sense-errors", "test-stop", "test-binary-timeouts"] }
+test-scheduler-ui = { depends-on = ["build-shared", "test-toml", "test-upgrade", "test-config", "test-fill", "test-fill-version", "test-fill-requests", "test-priority", "test-pool-fills", "test-run-locks", "test-metrics", "test-scheduler", "test-ui", "test-fleet", "test-system", "test-actions", "test-calendar", "test-ui-login", "test-ui-drain", "test-remote", "test-worker-api", "test-pause", "test-older-binary", "test-watchdog", "test-notify", "test-versions", "test-manual-run", "test-new-code", "test-defer", "test-dead-runs", "test-adopt", "test-overlap", "test-outdated", "test-concurrency", "test-one-run-per-key", "test-hourly", "test-weekly", "test-sense-errors", "test-stop", "test-binary-timeouts"] }
 test = { depends-on = ["test-executor", "test-scheduler-ui"] }
 toy = { cmd = "scripts/mojo-build.sh -I src $DEP_INC examples/toy.mojo -o build/toy" }
 fanout = { cmd = "scripts/mojo-build.sh -I src $DEP_INC examples/fanout.mojo -o build/fanout" }

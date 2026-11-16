@@ -4,7 +4,8 @@ a monthly pipeline, month) is in, read from the database alone.
 `morca ui` draws it twice, as the picker on the Start runs form and as the
 read-only coverage on a pipeline's page, and serves it as JSON at
 `/pipelines/<name>/calendar?month=2023-01`. Daily pipelines have a month of
-days at a time; monthly ones a year of months; hourly ones a day of hours
+days at a time; monthly ones a year of months; weekly ones an ISO year of
+its 52 or 53 weeks (`?month=2026`); hourly ones a day of hours
 (`?month=2023-01-31`). The states, in the order
 they win:
 
@@ -19,7 +20,8 @@ they win:
 - `open`: none of the above, so a backfill would queue it; shown as "not
   done", since it may have been done under an older data version.
 
-Hourly, daily and monthly keys are zero-padded, so they compare as text.
+Hourly, daily, weekly and monthly keys are zero-padded, so they compare as
+text.
 """
 
 from std.collections import Dict
@@ -32,6 +34,7 @@ from morca.day import Day
 from morca.hour import Hour
 from morca._internal.json import quote
 from morca.month import Month, days_in
+from morca.week import Week, weeks_in
 from morca._internal.queueing import done_keys
 from morca._internal.state import State
 from morca._internal.timekeys import unit_of
@@ -47,17 +50,19 @@ struct Calendar(Movable):
     var pipeline: String
     var kind: String
     """`daily` (cells are days of one month), `monthly` (months of one
-    year) or `hourly` (hours of one day)."""
+    year), `weekly` (the weeks of one ISO year) or `hourly` (hours of one
+    day)."""
     var period: String
-    """`YYYY-MM` for days, `YYYY` for months, `YYYY-MM-DD` for hours."""
+    """`YYYY-MM` for days, `YYYY` for months and weeks, `YYYY-MM-DD` for
+    hours."""
     var prev: String
     """The period before, empty if it ends before the pipeline starts."""
     var next: String
     """The period after, empty if it starts after today."""
     var start: String
     var today: String
-    """Today's key: `YYYY-MM-DD`, `YYYY-MM` or, for hours, this hour's
-    `YYYY-MM-DDTHH`."""
+    """Today's key: `YYYY-MM-DD`, `YYYY-MM`, this week's `YYYY-Www` or, for
+    hours, this hour's `YYYY-MM-DDTHH`."""
     var weekday: Int
     """Of a month's first day, with Monday as 0."""
     var cells: List[Cell]
@@ -117,6 +122,8 @@ def calendar(
     that are only open are `behind`."""
     if kind == "hourly":
         return _hours(db, pipeline, start, period, upstream)
+    if kind == "weekly":
+        return _weeks(db, pipeline, start, period, upstream)
     if kind != "daily" and kind != "monthly":
         raise Error(pipeline, " has ", kind, " partitions, not dated ones")
     var t = Civil.of(now())
@@ -183,6 +190,58 @@ def _hours(
     cal.next = (
         String(after) if String(Hour(after.year, after.month, after.day, 0))
         <= cal.today else String()
+    )
+    cal.cells = _cells(
+        db,
+        pipeline,
+        start,
+        cal.today,
+        keys,
+        done_keys(db, pipeline, keys),
+        upstream,
+    )
+    return cal^
+
+
+def _weeks(
+    mut db: State,
+    pipeline: String,
+    start: String,
+    period: String,
+    upstream: Dict[String, Bool],
+) raises -> Calendar:
+    """A weekly pipeline's calendar: the weeks of the ISO year `period`
+    (`YYYY`, or the ISO year of a `YYYY-MM` month's first day or a
+    `YYYY-Www` week; this week's if empty)."""
+    var t = Civil.of(now())
+    var cal = Calendar(pipeline, "weekly")
+    cal.start = start
+    var today = Week.containing(t.year, t.month, t.day, t.hour)
+    cal.today = String(today)
+    var y: Int
+    if not period:
+        y = today.year
+    elif period.byte_length() == 4:
+        try:
+            y = Int(period)
+        except:
+            raise Error("not a year (YYYY): '", period, "'")
+        if y < 0:
+            raise Error("not a year (YYYY): '", period, "'")
+    elif period.byte_length() == 8:
+        y = Week.parse(period).year
+    else:
+        var m = Month.parse(period)
+        y = Week.containing(m.year, m.month, 1, 0).year
+    cal.period = _pad(y, 4)
+    var keys = List[String]()
+    for w in range(1, weeks_in(y) + 1):
+        keys.append(String(Week(y, w)))
+    cal.prev = _pad(y - 1, 4) if (
+        y > 0 and (not start or String(Week(y - 1, weeks_in(y - 1))) >= start)
+    ) else String()
+    cal.next = (
+        _pad(y + 1, 4) if String(Week(y + 1, 1)) <= cal.today else String()
     )
     cal.cells = _cells(
         db,

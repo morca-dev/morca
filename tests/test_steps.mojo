@@ -1,4 +1,4 @@
-"""Months, days, pipelines, describe and the in-memory executor."""
+"""Months, weeks, days, pipelines, describe and the in-memory executor."""
 
 from std.testing import (
     TestSuite,
@@ -25,11 +25,14 @@ from morca import (
     Name,
     Pipeline,
     Step,
+    Week,
+    Weekly,
     parse_months,
     parse_names,
     parse_partitions,
 )
 from morca.name import path_segment
+from morca.week import weeks_in
 
 
 # --- names ---
@@ -209,6 +212,103 @@ def test_hour_ranges_and_fills() raises:
     )
 
 
+# --- weeks ---
+
+
+def test_week_parse_and_write() raises:
+    var w = Week.parse("2026-W46")
+    assert_equal(w.year, 2026)
+    assert_equal(w.week, 46)
+    assert_equal(String(w), "2026-W46")
+    assert_equal(String(w.monday()), "2026-11-09")
+    assert_equal(String(w.next()), "2026-W47")
+    assert_equal(String(w.prev()), "2026-W45")
+    assert_true(Week.parse("2026-W09") < Week.parse("2026-W10"))
+    assert_true(Week.parse("2025-W52") < Week.parse("2026-W01"))
+    for bad in [
+        "2026-W00",
+        "2026-W54",
+        "2024-W53",  # 2024 has 52 weeks
+        "2026-W1",
+        "2026W46",
+        "2026-46",
+        "2026-11",
+        "26-W46",
+        "2026-Wxx",
+    ]:
+        with assert_raises(contains="not a week"):
+            _ = Week.parse(bad)
+
+
+def test_iso_week_year_boundaries() raises:
+    # 53 weeks in a year that starts on a Thursday (2015, 2026), or a leap
+    # year that starts on a Wednesday (2020); 52 otherwise.
+    assert_equal(weeks_in(2015), 53)
+    assert_equal(weeks_in(2020), 53)
+    assert_equal(weeks_in(2026), 53)
+    assert_equal(weeks_in(2024), 52)
+    assert_equal(weeks_in(2025), 52)
+    assert_equal(weeks_in(2027), 52)
+    # Days near New Year in the other ISO year's weeks.
+    assert_equal(String(Week.containing(2024, 12, 30, 0)), "2025-W01")
+    assert_equal(String(Week.containing(2024, 12, 29, 23)), "2024-W52")
+    assert_equal(String(Week.containing(2021, 1, 3, 0)), "2020-W53")
+    assert_equal(String(Week.containing(2021, 1, 4, 0)), "2021-W01")
+    assert_equal(String(Week.containing(2026, 1, 1, 0)), "2026-W01")
+    assert_equal(String(Week.containing(2027, 1, 1, 0)), "2026-W53")
+    assert_equal(String(Week.containing(2027, 1, 3, 0)), "2026-W53")
+    assert_equal(String(Week.containing(2027, 1, 4, 0)), "2027-W01")
+    assert_equal(String(Week.containing(2010, 1, 3, 0)), "2009-W53")
+    assert_equal(String(Week.containing(2008, 12, 29, 0)), "2009-W01")
+    assert_equal(String(Week.containing(1970, 1, 1, 0)), "1970-W01")
+    assert_equal(String(Week.parse("2026-W01").monday()), "2025-12-29")
+    assert_equal(String(Week.parse("2026-W53").monday()), "2026-12-28")
+    assert_equal(String(Week.parse("2020-W53").next()), "2021-W01")
+    assert_equal(String(Week.parse("2024-W52").next()), "2025-W01")
+    assert_equal(String(Week.parse("2021-W01").prev()), "2020-W53")
+    assert_equal(String(Week.parse("2025-W01").prev()), "2024-W52")
+    # Every day of 2000-2040 is in the week its Monday is, and consecutive
+    # weeks' Mondays are seven days apart.
+    var d = Day(2000, 1, 1)
+    var last = Week.containing(2000, 1, 1, 0)
+    while d.year < 2041:
+        var wk = Week.containing(d.year, d.month, d.day, 0)
+        if not (wk == last):
+            assert_equal(String(last.next()), String(wk))
+            assert_equal(String(wk.monday()), String(d))
+            last = wk.copy()
+        d = d.next()
+    var ms = Week.parse("2026-W53").months()
+    assert_equal(len(ms), 2)
+    assert_equal(String(ms[0]), "2026-12")
+    assert_equal(String(ms[1]), "2027-01")
+
+
+def test_week_ranges_and_fills() raises:
+    var ws = parse_partitions[Weekly[]]("2020-W52..2021-W02")
+    assert_equal(len(ws), 4)
+    assert_equal(String(ws[1]), "2020-W53")
+    assert_equal(String(ws[2]), "2021-W01")
+    assert_equal(len(parse_partitions[Weekly[]]("2024-W01..2024-W52")), 52)
+    assert_equal(len(parse_partitions[Weekly[]]("2015-W01..2015-W53")), 53)
+    with assert_raises(contains="before the pipeline's first partition"):
+        _ = parse_partitions[Weekly["2026-W40"]]("2026-W39..2026-W41")
+    # A fire on Monday 2026-11-16 06:00 fills the week that just ended
+    # with fills=Previous, the one it falls in with Current.
+    assert_equal(
+        String(Weekly[].fill(2026, 11, 16, 6, previous=True)), "2026-W46"
+    )
+    assert_equal(
+        String(Weekly[].fill(2026, 11, 16, 6, previous=False)), "2026-W47"
+    )
+    assert_equal(
+        String(Weekly[].fill(2026, 11, 15, 23, previous=False)), "2026-W46"
+    )
+    assert_equal(
+        String(Weekly[].fill(2027, 1, 4, 0, previous=True)), "2026-W53"
+    )
+
+
 def test_keys_before_the_start_are_refused() raises:
     assert_equal(
         len(parse_partitions[Monthly["2011-01"]]("2011-01..2011-03")), 3
@@ -316,6 +416,27 @@ def test_an_hourly_pipeline() raises:
         '"partitions": {"kind": "hourly", "start": "2024-01-01T00"}' in d, d
     )
     assert_true('"input": "morca.hour.Hour"' in d, d)
+
+
+def week_of(mut ctx: Ctx, w: Week) raises -> Int:
+    return w.week
+
+
+comptime WeekOf = Step["week", Week, Int, week_of, Mapped]
+comptime Weeks = Pipeline["weeks", WeekOf, partitions=Weekly["2024-W01"]]
+
+
+def test_a_weekly_pipeline() raises:
+    var res = Weeks.run(
+        parse_partitions[Weeks.partitions]("2024-W51..2025-W02")
+    )
+    assert_true(res.succeeded())
+    assert_equal(len(res.steps), 4)
+    assert_equal(res.output[Int]("week", "2024-W52"), 52)
+    assert_equal(res.output[Int]("week", "2025-W01"), 1)
+    var d = Weeks.describe()
+    assert_true('"partitions": {"kind": "weekly", "start": "2024-W01"}' in d, d)
+    assert_true('"input": "morca.week.Week"' in d, d)
 
 
 def test_a_daily_pipeline() raises:
