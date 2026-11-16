@@ -13,12 +13,15 @@ the home page's table, its page's Progress card and in their JSON.
   binary).
 
 **Done** is what the calendar and a backfill count as done
-(`morca._internal.scheduler.DONE_SQL`): every mapped step of the pipeline succeeded
-for the key in a run of its current code; with no mapped step, a run of
-its current code over the key succeeded. A step `skipped` because one
-before it failed isn't done, nor is a key done only by older code (the
-Fill line, which counts any code's, can be higher). Running, queued,
-failed and never-run keys are all not done.
+(`morca._internal.db.queueing.DONE_SQL`), and what the Fill line counts:
+every mapped step of the pipeline succeeded for the key in a run of any of
+its code with its current data version (the same steps' `version=`); with
+no mapped step, such a run over the key succeeded. New code that keeps
+every `version=` leaves keys done; a raised `version=`, or a new mapped
+step, leaves them not done until they run again. A step `skipped` because
+one before it failed isn't done, nor is a key done only under an older
+data version. Running, queued, failed and never-run keys are all not
+done.
 
 A pipeline with nothing to count has no coverage (None, shown as "—"):
 a dated one with no first partition, or whose first hasn't ended yet, and

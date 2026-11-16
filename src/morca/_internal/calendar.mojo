@@ -10,11 +10,14 @@ they win:
 
 - `outside`: before the pipeline's first partition, or after today.
 - `live`: in a queued, deferred or running run (`live_sql`).
-- `done`: what a backfill counts as done (`DONE_SQL`).
+- `done`: what a backfill counts as done (`DONE_SQL`): every mapped step
+  succeeded in a run of any code with the current data version (the same
+  steps' `version=`), so new code that keeps them leaves days done.
 - `failed`: not done, and the last run over it failed.
 - `behind`: none of these, but a dataset the sensor pipeline follows has
   it (`morca._internal.follow`); only on the page's coverage.
-- `open`: none of the above, so a backfill would queue it.
+- `open`: none of the above, so a backfill would queue it; shown as "not
+  done", since it may have been done under an older data version.
 
 Hourly, daily and monthly keys are zero-padded, so they compare as text.
 """

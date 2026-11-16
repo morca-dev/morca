@@ -22,7 +22,7 @@ comptime _CAL_SCRIPT = """
   const f = document.getElementById("start");
   if (!root || !f) return;
   const field = f.elements.partitions;
-  const words = { done: "done", failed: "failed", live: "running or queued", open: "not run", outside: "outside the pipeline's range" };
+  const words = { done: "done", failed: "failed", live: "running or queued", open: "not done", outside: "outside the pipeline's range" };
   const names = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
   const two = (n) => String(n).padStart(2, "0");
   const cache = {};

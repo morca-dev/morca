@@ -64,7 +64,7 @@ def state_words(state: String) -> String:
     if state == "live":
         return "running or queued"
     if state == "open":
-        return "not run"
+        return "not done"
     if state == "behind":
         return "behind what it follows"
     if state == "outside":

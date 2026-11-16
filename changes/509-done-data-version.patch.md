@@ -1,0 +1,1 @@
+- **Done follows the data version everywhere**: coverage, the calendar, keyed sensors and backfills count a key done under any code with the same steps' `version=`, as the fill does, so a rename that changes the registry hash no longer undoes them (#509).

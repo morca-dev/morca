@@ -144,28 +144,41 @@ def kept_keys(
 
 comptime DONE_SQL = (
     "WITH k AS (SELECT DISTINCT unnest(string_to_array($2, ',')) AS key), p"
-    " AS (SELECT registry_hash, describe FROM orca.pipelines WHERE name ="
-    " $1), m AS (SELECT x->>'name' AS step FROM p,"
-    " jsonb_array_elements(p.describe->'steps') AS x WHERE x->>'kind' ="
-    " 'mapped') SELECT k.key FROM k WHERE CASE WHEN EXISTS (SELECT 1 FROM m)"
+    " AS (SELECT pp.describe, coalesce((SELECT v.data_version FROM"
+    " orca.pipeline_versions v WHERE v.id = pp.version), '') AS dv FROM"
+    " orca.pipelines pp WHERE pp.name = $1), h AS (SELECT registry_hash,"
+    " coalesce(max(data_version), '') AS dv FROM orca.pipeline_versions WHERE"
+    " pipeline = $1 GROUP BY registry_hash), m AS (SELECT x->>'name' AS step"
+    " FROM p, jsonb_array_elements(p.describe->'steps') AS x WHERE x->>'kind'"
+    " = 'mapped') SELECT k.key FROM k WHERE CASE WHEN EXISTS (SELECT 1 FROM m)"
     " THEN NOT EXISTS (SELECT 1 FROM m WHERE NOT EXISTS (SELECT 1 FROM"
-    " orca.steps st JOIN orca.runs r ON r.id = st.run JOIN p ON"
-    " r.registry_hash = p.registry_hash WHERE r.pipeline = $1 AND st.step ="
-    " m.step AND st.partition = k.key AND st.status = 'succeeded')) ELSE"
-    " false END UNION ALL SELECT k.key FROM k WHERE k.key IN (SELECT"
-    " unnest(string_to_array(r.partitions, ',')) FROM orca.runs r JOIN p ON"
-    " r.registry_hash = p.registry_hash WHERE NOT EXISTS (SELECT 1 FROM m)"
-    " AND r.pipeline = $1 AND r.status = 'succeeded')"
+    " orca.steps st JOIN orca.runs r ON r.id = st.run LEFT JOIN h ON"
+    " h.registry_hash = r.registry_hash WHERE r.pipeline = $1 AND st.step ="
+    " m.step AND st.partition = k.key AND st.status = 'succeeded' AND"
+    " coalesce(h.dv, '') = (SELECT dv FROM p))) ELSE false END UNION ALL"
+    " SELECT k.key FROM k WHERE k.key IN (SELECT"
+    " unnest(string_to_array(r.partitions, ',')) FROM orca.runs r LEFT JOIN h"
+    " ON h.registry_hash = r.registry_hash WHERE NOT EXISTS (SELECT 1 FROM m)"
+    " AND r.pipeline = $1 AND r.status = 'succeeded' AND coalesce(h.dv, '') ="
+    " (SELECT dv FROM p))"
 )
 """Of the comma-separated keys `$2`, those done for pipeline `$1`: every
-mapped step has succeeded for the key in a run of the pipeline's current
-code. A pipeline with no mapped step has a key done when a run of its
-current code over it succeeded. The two are separate halves, each empty
-when the other applies. The first looks each key's steps up by index (the
-`CASE` keeps Postgres from hashing every step of every pipeline instead);
-the second joins the keys to its runs' keys, read once, rather than
-scanning the runs again for each key (1.2 s for 1,500 keys over 30,000
-runs when it was a `CASE` branch too, 10 ms now)."""
+mapped step of its current `describe` has succeeded for the key in a run of
+any of its code with its current data version (the same steps' `version=`,
+as `morca._internal.db.fill._SAME_DATA` has it, #508). A run's data version
+is its registry hash's in `orca.pipeline_versions`; a hash recorded before
+data versions (null), or not at all, has none. So new code that keeps every
+`version=` (a renamed type in a step's signature, a read added) leaves keys
+done, a raised `version=` leaves them not done, and a new mapped step leaves
+them not done until it has run. A pipeline with no mapped step has a key
+done when a run over it of its current data version succeeded. The two are
+separate halves, each empty when the other applies. The first looks each
+key's steps up by index (the `CASE` keeps Postgres from hashing every step
+of every pipeline instead), with the pipeline's few hashes' data versions
+read once (`h`, by `pipeline_versions`'s unique index); the second joins the
+keys to its runs' keys, read once, rather than scanning the runs again for
+each key (1.2 s for 1,500 keys over 30,000 runs when it was a `CASE` branch
+too, 10 ms now)."""
 
 
 def done_keys(
