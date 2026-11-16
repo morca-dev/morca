@@ -8,6 +8,6 @@
 
 Nothing here imports `morca._internal` or knows a `Ctx`: `morca._internal`
 (and `morca.tables`) import this package, never the other way round, and
-the host block over a step's `Ctx` is `morca._internal.lakehost`'s. What the
+the host block over a step's `Ctx` is `morca._lakehost`'s. What the
 two share lives in `morca._common`.
 """

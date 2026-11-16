@@ -85,7 +85,7 @@ from arrow_mlake.carrow_import import ImportedStream, release_c_array
 
 from morca.ctx import Ctx
 from morca._internal.handover import outdated
-from morca._internal.rust_ffi import StopFn, WorkerCall, WorkerLib
+from morca._rust_ffi import StopFn, WorkerCall, WorkerLib
 from morca._lake.abi import Dec, Slots
 from morca._lake import calls
 from morca._lake.client import Api

@@ -73,7 +73,7 @@ stores and their SQL, the runners, the UI and its API, the command line's
 subcommands. They change without notice; a pipeline shouldn't import them.
 """
 
-from morca._internal.cli import morca_main, report
+from morca._cli import morca_main, report
 from morca.ctx import Ctx
 from morca.civil import Civil, now, parse_time, utc
 from morca.cron import CronExpr

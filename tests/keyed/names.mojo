@@ -17,7 +17,7 @@ from iceberg.transforms import PartitionSpec
 from iceberg.values import Datum
 from iceberg.write import WriteOptions, write_data_files
 
-from morca._internal.cli import seed_random
+from morca._cli import seed_random
 
 comptime SCHEMA = (
     '{"schema-id":0,"type":"struct","fields":['

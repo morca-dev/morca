@@ -16,7 +16,7 @@ The table, reader and writer handles stay integers: each is owned by a
 value of the caller's (`morca.tables.Table`, `BatchReader`, `FileWriter`),
 held as a field or an argument across the call.
 
-**The host** is anything `Hosting`: `morca._internal.lakehost.HostBlock`
+**The host** is anything `Hosting`: `morca._lakehost.HostBlock`
 over the step's `Ctx`, or `NoHost` outside any step. A call whose callbacks
 change the `Ctx` (a pin, a fence, a commit) takes only a `writable` host,
 one over a `mut` borrow of it, and says so at compile time.

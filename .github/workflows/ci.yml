@@ -901,6 +901,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: magmalake/customs@v0.2.1
+      # And the packages as layers: `_internal` imports no public module
+      # that imports `_internal` back (AGENTS.md).
+      - run: python3 scripts/check_layers.py
 
   # The one check to require: every Linux job above passed, or, for a
   # prose-only PR, was skipped. (macOS runs only on the nightly, which this
