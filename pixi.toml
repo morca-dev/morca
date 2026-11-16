@@ -143,30 +143,30 @@ sqlite-mojo = { git = "https://github.com/magmalake/sqlite.mojo", rev = "0d76aa7
 
 
 [tasks]
-test-steps = { cmd = "scripts/mojo-build.sh -I src $DEP_INC tests/test_steps.mojo -o build/test-steps && ./build/test-steps" }
-test-cron = { cmd = "scripts/mojo-build.sh -I src $DEP_INC tests/test_cron.mojo -o build/test-cron && ./build/test-cron" }
-test-warehouse = { cmd = "scripts/mojo-build.sh -I src $DEP_INC tests/test_warehouse.mojo -o build/test-warehouse && ./build/test-warehouse" }
+test-steps = { cmd = "scripts/unit-tests.sh build executor-core && scripts/unit-tests.sh run test-steps" }
+test-cron = { cmd = "scripts/unit-tests.sh build executor-core && scripts/unit-tests.sh run test-cron" }
+test-warehouse = { cmd = "scripts/unit-tests.sh build executor-core && scripts/unit-tests.sh run test-warehouse" }
 test-cli = { cmd = "tests/cli.sh" }
 test-hetzner = { cmd = "tests/hetzner.sh && tests/hetzner-stacks.sh && tests/hetzner-tools.sh && tests/hetzner-version.sh" }
 test-compile-fail = { cmd = "tests/compile_fail.sh" }
 # The executor over every store that needs no server (tests/store_suite.mojo),
 # then over Postgres, with what only Postgres has.
-test-store = { cmd = "scripts/mojo-build.sh -I src -I tests $DEP_INC tests/test_store.mojo -o build/test-store && ./build/test-store" }
+test-store = { cmd = "scripts/unit-tests.sh build executor-core && scripts/unit-tests.sh run test-store" }
 # The Lean model of pinned reads (formal/Morca/Pins) against Ctx.pin over the
 # memory and SQLite stores, on the event sequences in formal/difftest/pins.cases.
-test-formal-pins = { cmd = "scripts/mojo-build.sh -I src $DEP_INC tests/test_formal_pins.mojo -o build/test-formal-pins && ./build/test-formal-pins" }
-test-state = { cmd = "scripts/mojo-build.sh -I src -I tests $DEP_INC tests/test_state.mojo -o build/test-state && scripts/with-postgres.sh ./build/test-state" }
+test-formal-pins = { cmd = "scripts/unit-tests.sh build executor-core && scripts/unit-tests.sh run test-formal-pins" }
+test-state = { cmd = "scripts/unit-tests.sh build executor-core && scripts/with-postgres.sh scripts/unit-tests.sh run test-state" }
 # The Lean model of the schema floor (formal/Morca/Migrate) against
 # migration_floor, schema_ahead and State.migrate, on formal/difftest/migrate.cases.
-test-formal-migrate = { cmd = "scripts/mojo-build.sh -I src $DEP_INC tests/test_formal_migrate.mojo -o build/test-formal-migrate && scripts/with-postgres.sh ./build/test-formal-migrate" }
+test-formal-migrate = { cmd = "scripts/unit-tests.sh build executor-core && scripts/with-postgres.sh scripts/unit-tests.sh run test-formal-migrate" }
 # The Lean model of fencing (formal/Morca/Fence) against PgStore's claim, fence
 # and beat_run, on the event sequences in formal/difftest/fence.cases.
-test-formal-fence = { cmd = "scripts/mojo-build.sh -I src $DEP_INC tests/test_formal_fence.mojo -o build/test-formal-fence && scripts/with-postgres.sh ./build/test-formal-fence" }
+test-formal-fence = { cmd = "scripts/unit-tests.sh build executor-core && scripts/with-postgres.sh scripts/unit-tests.sh run test-formal-fence" }
 # A crash's stack dump: morca.crash's summary of one, then a run whose
 # process aborts mid-step under the scheduler.
-test-crash = { cmd = "scripts/mojo-build.sh -I src $DEP_INC tests/test_crash.mojo -o build/test-crash && ./build/test-crash && scripts/with-postgres.sh tests/crash.sh" }
-test-tasks = { cmd = "scripts/mojo-build.sh -I src $DEP_INC tests/test_tasks.mojo -o build/test-tasks && ./build/test-tasks" }
-test-logs = { cmd = "scripts/mojo-build.sh -I src $DEP_INC tests/test_logs.mojo -o build/test-logs && ./build/test-logs && rm -f build/logs.db build/logs.db-wal build/logs.db-shm && MORCA_DATABASE_URL=sqlite:build/logs.db tests/logs.sh" }
+test-crash = { cmd = "scripts/unit-tests.sh build executor-core && scripts/unit-tests.sh run test-crash && scripts/with-postgres.sh tests/crash.sh" }
+test-tasks = { cmd = "scripts/unit-tests.sh build executor-core && scripts/unit-tests.sh run test-tasks" }
+test-logs = { cmd = "scripts/unit-tests.sh build executor-core && scripts/unit-tests.sh run test-logs && rm -f build/logs.db build/logs.db-wal build/logs.db-shm && MORCA_DATABASE_URL=sqlite:build/logs.db tests/logs.sh" }
 test-scheduler = { cmd = "scripts/with-postgres.sh tests/scheduler.sh" }
 test-chaos = { cmd = "scripts/with-postgres.sh tests/chaos.sh" }
 # The same over a SQLite file (morca.sqlite_store), with no server.
@@ -181,11 +181,11 @@ test-ui-login = { cmd = "scripts/with-postgres.sh tests/ui_login.sh" }
 test-ui-drain = { cmd = "scripts/with-postgres.sh tests/ui_drain.sh" }
 # `morca login` and `--remote` (morca.remote, morca.tokens): tokens, URLs and
 # the credentials file, then the command against morca ui over HTTP.
-test-remote = { cmd = "scripts/mojo-build.sh -I src $DEP_INC tests/test_remote.mojo -o build/test-remote && ./build/test-remote && scripts/with-postgres.sh tests/remote.sh" }
+test-remote = { cmd = "scripts/unit-tests.sh build scheduler-ui && scripts/unit-tests.sh run test-remote && scripts/with-postgres.sh tests/remote.sh" }
 # The watchdog (morca.watchdog): each rule over made-up rows, then the scheduler
 # pausing pipelines, against the stand-in EC2 for the launches.
 test-notify = { cmd = "scripts/with-postgres.sh tests/notify.sh" }
-test-watchdog = { cmd = "scripts/mojo-build.sh -I src $DEP_INC tests/test_watchdog.mojo -o build/test-watchdog && ./build/test-watchdog && scripts/with-postgres.sh tests/watchdog.sh" }
+test-watchdog = { cmd = "scripts/unit-tests.sh build scheduler-ui && scripts/unit-tests.sh run test-watchdog && scripts/with-postgres.sh tests/watchdog.sh" }
 test-pause = { cmd = "scripts/with-postgres.sh tests/pause.sh" }
 test-older-binary = { cmd = "scripts/with-postgres.sh tests/older_binary.sh" }
 # The ec2 runner against a stand-in EC2 API; needs python3.
@@ -207,11 +207,11 @@ test-hourly = { cmd = "scripts/with-postgres.sh tests/hourly.sh" }
 test-weekly = { cmd = "scripts/with-postgres.sh tests/weekly.sh" }
 # morca.toml (morca.toml, morca.config): the parser, what register reads from
 # the file and records, config show and export, and the env on each runner.
-test-toml = { cmd = "scripts/mojo-build.sh -I src $DEP_INC tests/test_toml.mojo -o build/test-toml && ./build/test-toml" }
-test-upgrade = { cmd = "scripts/mojo-build.sh -I src $DEP_INC tests/test_upgrade.mojo -o build/test-upgrade && ./build/test-upgrade" }
-test-config = { cmd = "scripts/mojo-build.sh -I src $DEP_INC tests/test_config.mojo -o build/test-config && ./build/test-config && scripts/with-postgres.sh tests/config.sh" }
+test-toml = { cmd = "scripts/unit-tests.sh build scheduler-ui && scripts/unit-tests.sh run test-toml" }
+test-upgrade = { cmd = "scripts/unit-tests.sh build scheduler-ui && scripts/unit-tests.sh run test-upgrade" }
+test-config = { cmd = "scripts/unit-tests.sh build scheduler-ui && scripts/unit-tests.sh run test-config && scripts/with-postgres.sh tests/config.sh" }
 # Fills (morca.fill): a pipeline filling its range by itself, within limits.
-test-fill = { cmd = "scripts/mojo-build.sh -I src $DEP_INC tests/test_fill.mojo -o build/test-fill && ./build/test-fill && scripts/with-postgres.sh tests/fill.sh" }
+test-fill = { cmd = "scripts/unit-tests.sh build scheduler-ui && scripts/unit-tests.sh run test-fill && scripts/with-postgres.sh tests/fill.sh" }
 test-fill-version = { cmd = "scripts/with-postgres.sh tests/fill_version.sh" }
 test-fill-requests = { cmd = "scripts/with-postgres.sh tests/fill_requests.sh" }
 # Fills on a worker pool (#177): two `morca worker`s fill a range within
@@ -220,13 +220,13 @@ test-pool-fills = { cmd = "scripts/with-postgres.sh tests/pool_fills.sh" }
 # No Postgres deadlock on orca.runs between ticks and bulk updates (#440).
 test-run-locks = { cmd = "scripts/with-postgres.sh tests/run_locks.sh" }
 test-source = { cmd = "scripts/mojo-build.sh -I src $DEP_INC -D MORCA_SOURCE=https://example.com/lake.git -D MORCA_COMMIT=1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a tests/test_source.mojo -o build/test-source && ./build/test-source" }
-test-highlight = { cmd = "scripts/mojo-build.sh -I src $DEP_INC tests/test_highlight.mojo -o build/test-highlight && ./build/test-highlight" }
+test-highlight = { cmd = "scripts/unit-tests.sh build executor-core && scripts/unit-tests.sh run test-highlight" }
 # The step cards' data (morca.step_cards): signatures, docstrings, the JSON.
-test-step-cards = { cmd = "scripts/mojo-build.sh -I src $DEP_INC tests/test_step_cards.mojo -o build/test-step-cards && ./build/test-step-cards" }
-test-graph = { cmd = "scripts/mojo-build.sh -I src $DEP_INC tests/test_graph.mojo -o build/test-graph && ./build/test-graph" }
+test-step-cards = { cmd = "scripts/unit-tests.sh build executor-core && scripts/unit-tests.sh run test-step-cards" }
+test-graph = { cmd = "scripts/unit-tests.sh build executor-core && scripts/unit-tests.sh run test-graph" }
 playground = { cmd = "scripts/playground.sh" }
-test-locate = { cmd = "scripts/mojo-build.sh -I src $DEP_INC tests/test_locate.mojo -o build/test-locate && ./build/test-locate" }
-test-timeline = { cmd = "scripts/mojo-build.sh -I src $DEP_INC tests/test_timeline.mojo -o build/test-timeline && ./build/test-timeline" }
+test-locate = { cmd = "scripts/unit-tests.sh build executor-core && scripts/unit-tests.sh run test-locate" }
+test-timeline = { cmd = "scripts/unit-tests.sh build executor-core && scripts/unit-tests.sh run test-timeline" }
 test-ec2 = { cmd = "scripts/with-postgres.sh tests/ec2.sh" }
 test-autoscale = { cmd = "scripts/with-postgres.sh tests/autoscale.sh" }
 test-no-workers = { cmd = "scripts/with-postgres.sh tests/no_workers.sh" }
@@ -247,23 +247,23 @@ test-secrets = { cmd = "scripts/with-postgres.sh tests/secrets.sh" }
 # limits, beside runs on the stand-in EC2.
 # A worker's run's state over morca ui's API: its encoding (morca.http_store,
 # orca.workers); tests/worker.sh (the data environment) runs the rest.
-test-worker-api = { cmd = "scripts/mojo-build.sh -I src $DEP_INC tests/test_worker.mojo -o build/test-worker-api && ./build/test-worker-api" }
-test-placement = { cmd = "scripts/mojo-build.sh -I src $DEP_INC tests/test_control.mojo -o build/test-control && ./build/test-control && scripts/with-postgres.sh tests/placement.sh" }
+test-worker-api = { cmd = "scripts/unit-tests.sh build scheduler-ui && scripts/unit-tests.sh run test-worker-api" }
+test-placement = { cmd = "scripts/unit-tests.sh build executor-workers && scripts/unit-tests.sh run test-control && scripts/with-postgres.sh tests/placement.sh" }
 # What runs use (morca.usage): the meter's sharing out, then a step holding a
 # known amount on the local runner, the control host and a remote worker.
-test-resources = { cmd = "scripts/mojo-build.sh -I src $DEP_INC tests/test_resources.mojo -o build/test-resources && ./build/test-resources" }
+test-resources = { cmd = "scripts/unit-tests.sh build executor-core && scripts/unit-tests.sh run test-resources" }
 # Requests learned from the measured peaks (morca.recommend), shown only.
-test-recommend = { cmd = "scripts/mojo-build.sh -I src $DEP_INC tests/test_recommend.mojo -o build/test-recommend && ./build/test-recommend" }
+test-recommend = { cmd = "scripts/unit-tests.sh build executor-core && scripts/unit-tests.sh run test-recommend" }
 test-grants = { cmd = "scripts/with-postgres.sh tests/grants.sh" }
 test-priority = { cmd = "scripts/with-postgres.sh tests/priority.sh" }
 # Admission by memory pressure (orca.pressure, morca.admission): PSI parsing
 # and the hold's hysteresis, then runs waiting on a fixture PSI file.
-test-pressure = { cmd = "scripts/mojo-build.sh -I src $DEP_INC tests/test_pressure.mojo -o build/test-pressure && ./build/test-pressure && scripts/with-postgres.sh tests/pressure.sh" }
-test-usage = { cmd = "scripts/mojo-build.sh -I src $DEP_INC tests/test_usage.mojo -o build/test-usage && ./build/test-usage && scripts/with-postgres.sh tests/usage.sh" }
+test-pressure = { cmd = "scripts/unit-tests.sh build executor-workers && scripts/unit-tests.sh run test-pressure && scripts/with-postgres.sh tests/pressure.sh" }
+test-usage = { cmd = "scripts/unit-tests.sh build executor-core && scripts/unit-tests.sh run test-usage && scripts/with-postgres.sh tests/usage.sh" }
 # Containment (morca.cgroup): the arithmetic, then on Linux a run killed for
 # its memory and retried bigger (skipped, saying why, without cgroups); then a
 # run at a lower nice with MORCA_CGROUPS=0 (tests/run_nice.sh, #229).
-test-cgroups = { cmd = "scripts/mojo-build.sh -I src $DEP_INC tests/test_cgroup.mojo -o build/test-cgroup && ./build/test-cgroup && scripts/with-postgres.sh tests/cgroups.sh && scripts/with-postgres.sh tests/run_nice.sh" }
+test-cgroups = { cmd = "scripts/unit-tests.sh build executor-core && scripts/unit-tests.sh run test-cgroup && scripts/with-postgres.sh tests/cgroups.sh && scripts/with-postgres.sh tests/run_nice.sh" }
 test-aws = { cmd = "tests/aws.sh && tests/replace_control.sh" }
 test-lost-workers = { cmd = "scripts/with-postgres.sh tests/lost_workers.sh" }
 test-datasets = { cmd = "scripts/with-postgres.sh tests/datasets.sh" }
@@ -273,9 +273,9 @@ test-db-blip = { cmd = "scripts/with-postgres.sh tests/db_blip.sh" }
 test-sense-errors = { cmd = "scripts/with-postgres.sh tests/sense_errors.sh" }
 test-defer = { cmd = "scripts/with-postgres.sh tests/defer.sh" }
 # The sampler (morca.sample): its parsing, then the binary on this machine.
-test-sample = { cmd = "scripts/mojo-build.sh -I src $DEP_INC tests/test_sample.mojo -o build/test-sample && ./build/test-sample && tests/sample.sh" }
+test-sample = { cmd = "scripts/unit-tests.sh build executor-core && scripts/unit-tests.sh run test-sample && tests/sample.sh" }
 # A run's machines on its page (morca.metrics): peaks, warnings and charts.
-test-metrics = { cmd = "scripts/mojo-build.sh -I src $DEP_INC tests/test_metrics.mojo -o build/test-metrics && ./build/test-metrics" }
+test-metrics = { cmd = "scripts/unit-tests.sh build scheduler-ui && scripts/unit-tests.sh run test-metrics" }
 # Needs docker, kind and kubectl; builds the image of deploy/Dockerfile.
 test-kind = { cmd = "tests/kind.sh" }
 # The binaries most tests share, built at once before the tests that copy
@@ -405,29 +405,29 @@ LAKE_LIB = "$PIXI_PROJECT_ROOT/build/liblake.so"
 build-shared = { cmd = "scripts/build-shared.sh morca", depends-on = ["build-liblake"] }
 # liblake, which morca.tables loads (#454); every test below needs it.
 build-liblake = { cmd = "scripts/build-liblake.sh" }
-test-tables = { cmd = "scripts/mojo-build.sh -I src $DEP_INC tests/test_tables.mojo -o build/test-tables && scripts/with-postgres.sh ./build/test-tables", depends-on = ["build-liblake"] }
+test-tables = { cmd = "scripts/unit-tests.sh build data-tables && scripts/with-postgres.sh scripts/unit-tests.sh run test-tables", depends-on = ["build-liblake"] }
 # Data files written in dista tasks, committed once by the step (append_files).
 test-append-files = { cmd = "scripts/mojo-build.sh -I src $DEP_INC tests/test_append_files.mojo -o build/test-append-files && scripts/with-postgres.sh ./build/test-append-files", depends-on = ["build-liblake"] }
 # Steps that replace their partitions (replaces=, replace_partitions): reruns,
 # retries, runs racing over one partition, and stale removals.
-test-replace = { cmd = "scripts/mojo-build.sh -I src $DEP_INC tests/test_replace.mojo -o build/test-replace && scripts/with-postgres.sh ./build/test-replace", depends-on = ["build-liblake"] }
+test-replace = { cmd = "scripts/unit-tests.sh build data-tables && scripts/with-postgres.sh scripts/unit-tests.sh run test-replace", depends-on = ["build-liblake"] }
 test-replace-concurrent = { cmd = "tests/replace_concurrent.sh", depends-on = ["build-liblake"] }
 # The Lean model of a retried step (formal/) against morca.tables.append, on
 # the event sequences in formal/difftest/retry.cases.
-test-formal-retry = { cmd = "scripts/mojo-build.sh -I src $DEP_INC tests/test_formal_retry.mojo -o build/test-formal-retry && ./build/test-formal-retry", depends-on = ["build-liblake"] }
+test-formal-retry = { cmd = "scripts/unit-tests.sh build data-tables && scripts/unit-tests.sh run test-formal-retry", depends-on = ["build-liblake"] }
 # A run's commits told from those of another run with its number, by the
 # run's token (#292).
-test-run-token = { cmd = "scripts/mojo-build.sh -I src $DEP_INC tests/test_run_token.mojo -o build/test-run-token && ./build/test-run-token", depends-on = ["build-liblake"] }
+test-run-token = { cmd = "scripts/unit-tests.sh build data-tables && scripts/unit-tests.sh run test-run-token", depends-on = ["build-liblake"] }
 # liblake itself (#454): ABI and missing-library refusals, an iceberg error
 # crossing to the step's log as it would compiled in, and its line tables.
 test-lake = { cmd = "tests/lake.sh", depends-on = ["build-liblake"] }
 # test-tables with liblake's code compiled in (-D MORCA_LAKE_SOURCE=1), the
 # fallback: both builds must pass.
-test-tables-source = { cmd = "scripts/mojo-build.sh -D MORCA_LAKE_SOURCE=1 -I src $DEP_INC tests/test_tables.mojo -o build/test-tables-source && scripts/with-postgres.sh ./build/test-tables-source" }
+test-tables-source = { cmd = "scripts/unit-tests.sh build data-tables-source && scripts/with-postgres.sh scripts/unit-tests.sh run test-tables-source" }
 # morca.tables' BatchBuilder and column accessors, and a table outside any step.
-test-lake-batch = { cmd = "scripts/mojo-build.sh -I src $DEP_INC tests/test_lake_batch.mojo -o build/test-lake-batch && ./build/test-lake-batch", depends-on = ["build-liblake"] }
+test-lake-batch = { cmd = "scripts/unit-tests.sh build data-tables && scripts/unit-tests.sh run test-lake-batch", depends-on = ["build-liblake"] }
 # The same with liblake's code compiled in, as test-tables-source.
-test-lake-batch-source = { cmd = "scripts/mojo-build.sh -D MORCA_LAKE_SOURCE=1 -I src $DEP_INC tests/test_lake_batch.mojo -o build/test-lake-batch-source && ./build/test-lake-batch-source" }
+test-lake-batch-source = { cmd = "scripts/unit-tests.sh build data-tables-source && scripts/unit-tests.sh run test-lake-batch-source" }
 test-chaos-tables = { cmd = "CHAOS_SRC=tests/chaos_tables.mojo CHAOS_CHECK=1 scripts/with-postgres.sh tests/chaos.sh", depends-on = ["build-liblake"] }
 test-taxi = { cmd = "scripts/with-postgres.sh tests/taxi.sh", depends-on = ["build-liblake"] }
 test-lineage = { cmd = "scripts/with-postgres.sh tests/lineage.sh", depends-on = ["build-liblake"] }

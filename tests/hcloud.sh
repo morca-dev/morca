@@ -22,7 +22,7 @@ until curl -s -o /dev/null "$MORCA_HCLOUD_ENDPOINT/server_types"; do
     i=$((i + 1)); [ "$i" -lt 100 ] || { echo "FAIL: the fake didn't start"; exit 1; }
     sleep 0.1
 done
-# shellcheck disable=SC2086
-scripts/mojo-build.sh -I src $DEP_INC tests/test_hcloud.mojo -o build/test-hcloud
-./build/test-hcloud
+# tests/test_hcloud.mojo, from the executor-workers shard's binary.
+scripts/unit-tests.sh build executor-workers
+scripts/unit-tests.sh run test-hcloud
 echo "hcloud: ok"
