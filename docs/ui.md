@@ -229,12 +229,14 @@ percent, so 100% means all of them). `src/morca/_internal/coverage.mojo` defines
 - **Keyed**: keys done of the keys morca knows, those `<binary> keys` last
   printed (`orca.keys`, which the sensor and the pipeline's page keep
   fresh; the home page never runs the binary).
-- **Done** is what the calendar and a backfill count as done: every
-  mapped step succeeded for the key in a run of the pipeline's current
-  code (with no mapped step, a run of it over the key succeeded). A step
-  skipped because one before it failed isn't done, and neither are
-  failed, queued, running or never-run keys, nor a key only older code
-  did; the Fill line counts any code's, so it can be higher.
+- **Done** is what the calendar, a backfill and the Fill line count as
+  done: every mapped step succeeded for the key in a run of any of the
+  pipeline's code with its current data version, the same steps'
+  `version=` (with no mapped step, such a run over the key succeeded).
+  New code that keeps every `version=` leaves keys done. A step skipped
+  because one before it failed isn't done, and neither are failed,
+  queued, running or never-run keys, nor a key done only before a
+  `version=` was raised.
 - **None** (`null`, "—"): a pipeline without a first partition, one whose
   first hasn't ended yet, and a keyed one whose keys haven't been read.
 

@@ -34,8 +34,8 @@ comptime _DONE_ANY_CODE = (
 )
 """The keys done for pipeline `$1` in a run of any of its code with its
 current data version: every mapped step succeeded for the key; with no
-mapped step, a run over it succeeded. (`morca._internal.scheduler.DONE_SQL` asks the
-same of the current code.) A raised `version=` is a new data version, so
+mapped step, a run over it succeeded. (`morca._internal.db.queueing.DONE_SQL`
+asks the same of given keys, for coverage, the calendar and backfills.) A raised `version=` is a new data version, so
 the fill runs the partitions again (#297)."""
 
 

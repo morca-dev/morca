@@ -1,7 +1,7 @@
 #!/bin/sh
 # `<binary> run` against a pipeline `morca register` gave a binary: it never
-# changes the registration, which is what the scheduler queues and counts
-# as done, and a binary with other code is refused unless --allow-new-code.
+# changes the registration, which is what the scheduler queues, and a
+# binary with other code is refused unless --allow-new-code.
 # Needs MORCA_DATABASE_URL (pixi run test-manual-run starts a throwaway
 # server).
 set -eu
@@ -56,9 +56,10 @@ run=$(q "SELECT max(id) FROM orca.runs")
     || fail "the run: $(q "SELECT status, registry_hash, trigger FROM orca.runs WHERE id = $run")"
 [ "$(q "SELECT v.registry_hash FROM orca.runs r JOIN orca.pipeline_versions v ON v.id = r.version WHERE r.id = $run")" = "$hash" ] \
     || fail "the run's version isn't its own code"
-# And it doesn't make 2024-02 done for the registered code.
+# Its code has the registered code's data version (no step sets version=),
+# so it makes 2024-02 done, as the fill counts it (#508).
 out=$(MORCA_NOW=2024-03-01T00:00Z ./build/morca backfill toy 2024-02) || fail "backfill exited $?"
-[ "$out" = "queued 1 runs" ] || fail "the manual run counted as the registered code's: $out"
+[ "$out" = "queued 0 runs" ] || fail "the manual run of the same data version didn't count: $out"
 
 # The registered code itself runs by hand as before, still without
 # re-registering.

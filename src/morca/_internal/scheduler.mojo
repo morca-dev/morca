@@ -52,8 +52,8 @@ Postgres, so it can be stopped and restarted, or run twice, at any time:
   `held` saying so; then the grants of a pipeline with a request
   (`morca._internal.resources`).
 - **Backfills queue what isn't done.** A key is done when every mapped
-  step has succeeded for it in a run of the pipeline's current code
-  (`DONE_SQL`). A backfill drops the keys that are done or in a live run
+  step has succeeded for it in a run of any of the pipeline's code with
+  its current data version, the same steps' `version=` (`DONE_SQL`). A backfill drops the keys that are done or in a live run
   (queued, or running with its process alive: `live_sql`), sorts the rest
   and queues a run per `keys_per_run` of them; `morca backfill` says on
   stderr which keys it dropped and why.

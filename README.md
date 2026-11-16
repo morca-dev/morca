@@ -290,14 +290,17 @@ integer; none is 0):
 comptime Refresh = Step["refresh", Day, Int64, refresh, Mapped, replaces=["mojo.repo_stats"], version=2]
 ```
 
-The new version is a new hash. Once it's registered, the keys done under
-the old one are no longer done: coverage counts again from zero, a keyed
-sensor queues every key at its next snapshot, and `morca backfill <pipeline>
-@all` queues them all. A time-partitioned pipeline with `fills = "all"`
-fills its partitions again, within its fill limits (`fill_max_runs`,
-`fill_window`, `fill_budget_per_day`), since its fill counts a partition
-done only under code with the same steps' versions; any other change of
-code fills nothing again. With `since_registration`, regenerate its history
+The new version is a new data version (the steps' `version=`s), and a new
+hash. Once it's registered, the keys done under the old one are no longer
+done: coverage counts again from zero, the calendar shows them not done, a
+keyed sensor queues every key at its next snapshot, and `morca backfill
+<pipeline> @all` queues them all. A time-partitioned pipeline with `fills =
+"all"` fills its partitions again, within its fill limits (`fill_max_runs`,
+`fill_window`, `fill_budget_per_day`). Everything that counts a key done
+counts it under code with the same steps' versions, so any other change of
+code (a new hash with the same versions, such as a type in a step's
+signature moving to another module) makes nothing not done and fills
+nothing again; only a new mapped step leaves keys not done until it runs. With `since_registration`, regenerate its history
 with `morca backfill <pipeline> <range>` or `morca rebuild <dataset> <range>`
 (which also reruns what reads it). `morca register` says which applies.
 

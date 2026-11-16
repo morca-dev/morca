@@ -22,8 +22,9 @@ comptime COVERAGE_HELP = (
     "How much of the pipeline is done: its days or months done of those in "
     "its range so far (its first partition through the last that has "
     "ended), or a keyed pipeline's keys done of the keys its dataset has. "
-    "Done means every step succeeded in a run of its current code, as on "
-    "the calendar; failed, skipped, queued and running ones aren't. A dash "
+    "Done means every step succeeded in a run of code with the same steps' "
+    "version=, as on the calendar; failed, skipped, queued and running "
+    "ones aren't, nor ones done before a version= was raised. A dash "
     "means it has none to count yet."
 )
 """The help of a pipeline's Coverage, in the home page's table and on its
