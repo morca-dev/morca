@@ -27,8 +27,22 @@
 # temporary file and renamed, so builds running at once never see half of
 # one, and a hit removed under a build (by another's pruning) is built again.
 #
+# In the `ouromo` environment (`pixi run -e ouromo ...`) the compiler is
+# `ouromo`, an experimental build of the same compiler that keeps each
+# function's object code under build/.split-cache (MOJO_SPLIT_CACHE_DIR
+# moves it) and compiles only the functions an edit changed: a rebuild of
+# build/morca takes about half the time. Its binaries run a few percent
+# slower and are larger, so it is for development only: CI, the images and
+# the releases build in the other environments, with `mojo`.
+#
 # Usage: scripts/mojo-build.sh <mojo build arguments...> -o <out>
 set -eu
+
+if command -v ouromo > /dev/null 2>&1; then
+    compile() { ouromo build --split-cache-dir "${MOJO_SPLIT_CACHE_DIR:-build/.split-cache}" "$@"; }
+else
+    compile() { mojo build "$@"; }
+fi
 
 out=
 prev=
@@ -48,7 +62,8 @@ if [ -n "${MOJO_TARGET_CPU:-}" ]; then
 fi
 if [ -z "$out" ] || [ "${MOJO_BUILD_CACHE:-1}" = 0 ]; then
     [ -z "$out" ] || [ ! -L "$out" ] || rm -f "$out"
-    exec mojo build "$@"
+    compile "$@"
+    exit
 fi
 
 if command -v sha256sum > /dev/null 2>&1; then
@@ -106,7 +121,7 @@ rm -f "$out.tmp.$$"
 start=$(date +%s)
 # A link at -o (scripts/pipelines.sh's) is replaced, not written through.
 [ -L "$out" ] && rm -f "$out"
-mojo build "$@"
+compile "$@"
 cp "$out" "$hit.tmp.$$"
 mv -f "$hit.tmp.$$" "$hit"
 echo "mojo-build: $out built in $(($(date +%s) - start))s" >&2

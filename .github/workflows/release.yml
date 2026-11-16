@@ -1,13 +1,16 @@
 # A GitHub release for each morca version, with the Hetzner deploy tooling
 # (deploy/hetzner/package.sh, under the tools' own version) as its assets, so deploying needs no checkout
 # of morca (#247), and its runtime image, morca-runtime:<version>: the
-# image CI on main built, tested and pushed for the released commit
-# (morca-runtime:<sha>, runtime-image.yml), tagged again, not rebuilt.
+# image CI built, tested and pushed from the released commit's sources
+# (the release PR's morca-runtime:inputs-<key>, else main's
+# morca-runtime:<sha>; runtime-image.yml), tagged again, not rebuilt.
 # `shelf release` merges a PR from
 # release/morca-mojo-<version>: its merge commit is tagged v<version> and
 # released. By hand (Actions > release > Run workflow, or `gh workflow run
 # release.yml -f version=0.18.0 -f ref=<sha>`) for a version released
-# before this workflow, at the commit given.
+# before this workflow, at the commit given. With `-f dry-run=true` it
+# changes nothing: it checks the version, packages the tools and finds the
+# image to tag, and says what it would release and tag.
 name: release
 
 on:
@@ -21,6 +24,10 @@ on:
       ref:
         description: "The commit to tag v<version> and package"
         required: true
+      dry-run:
+        description: "Release and tag nothing: only say what would be"
+        type: boolean
+        default: false
 
 # One release of a version at a time.
 concurrency:
@@ -39,6 +46,7 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
       sha: ${{ steps.version.outputs.sha }}
+      key: ${{ steps.version.outputs.key }}
       runtime: ${{ steps.version.outputs.runtime }}
     env:
       GH_TOKEN: ${{ github.token }}
@@ -72,6 +80,12 @@ jobs:
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
           # A version from before the runtime image has none to tag.
           echo "runtime=$([ -f deploy/runtime.Dockerfile ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          # The key of what its runtime image is built from (#353): the
+          # release PR's image has it. None at a commit from before the key.
+          key=
+          [ ! -f deploy/runtime/inputs.sh ] || key=$(sh deploy/runtime/inputs.sh)
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+          echo "v$version is $sha, its runtime image's key ${key:-(none)}"
 
       # Under the tools' own version (#461), deploy/hetzner/VERSION, which
       # moves only when deploy/hetzner changes: a release that changes
@@ -92,6 +106,8 @@ jobs:
       # The notes: the version's section of CHANGELOG.md, and how to get the
       # scripts.
       - name: The release
+        env:
+          DRY_RUN: ${{ inputs.dry-run && 'true' || 'false' }}
         run: |
           notes=$RUNNER_TEMP/notes.md
           awk -v head="## $VERSION " 'index($0, head) == 1 { on = 1; next } on && /^## / { exit } on' CHANGELOG.md > "$notes"
@@ -105,6 +121,11 @@ jobs:
           \`\`\`
           EOF
           set -- "$RUNNER_TEMP/assets/morca-hetzner-$TOOLS.tar.gz" "$RUNNER_TEMP/assets/morca-hetzner.tar.gz"
+          if [ "$DRY_RUN" = true ]; then
+            echo "dry run: would release v$VERSION at $SHA with $*, and these notes:"
+            cat "$notes"
+            exit 0
+          fi
           # Run again (an upload that failed), the release gets the assets anew.
           # Otherwise gh makes the tag v<version> at the commit, and the release.
           if gh release view "v$VERSION" > /dev/null 2>&1; then
@@ -114,16 +135,26 @@ jobs:
           fi
 
   # The version's runtime image, ghcr.io/morca-dev/morca-runtime:<version>,
-  # which project images build FROM: the released commit's image from CI on
-  # main, morca-runtime:<sha>, tagged <version>. Nothing is built here, and a
-  # commit with no image fails the job rather than getting one built.
+  # which project images build FROM: an image CI built and tested from the
+  # released commit's sources, tagged <version>. Nothing is built here, and
+  # a commit with no image fails the job rather than getting one built.
   #
-  # The released commit is the release PR's merge commit, so its CI on main
-  # starts with this workflow and pushes the image some minutes later: the
-  # job waits for the image while that run is going, and fails once the run
-  # has finished without it (its runtime image job failed: re-run it, then
-  # this job), or when there's no such run (a commit CI on main never
-  # pushed an image for, such as one from before it did).
+  # Which image (#353): the version is compiled into the image (`morca
+  # version`, which `morca register` and a project's image build check), so
+  # the image of the commit before the version bump won't do; the released
+  # commit's own sources must be built. They are, before the release: the
+  # release PR's CI pushes its image as morca-runtime:inputs-<key>, the key
+  # of what the image is built from (deploy/runtime/inputs.sh), and the
+  # merge commit has the same key, so this tags that image in seconds.
+  #
+  # Without it (the release PR's image job failed or was skipped, or main
+  # moved under the PR in a way that changed the inputs) it falls back to
+  # main's image of the merge commit, morca-runtime:<sha> (or its key),
+  # which main's CI starts building with this workflow: the job waits for
+  # it while that run is going, and fails once the run has finished without
+  # it (its runtime image job failed: re-run it, then this job), or when
+  # there's no such run (a commit CI on main never pushed an image for, such
+  # as one from before it did).
   # Its own job, after the release: Re-run failed jobs runs only this.
   runtime-image:
     needs: release
@@ -138,7 +169,9 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       GHCR_IMAGE: ghcr.io/morca-dev/morca-runtime
       SHA: ${{ needs.release.outputs.sha }}
+      KEY: ${{ needs.release.outputs.key }}
       VERSION: ${{ needs.release.outputs.version }}
+      DRY_RUN: ${{ inputs.dry-run && 'true' || 'false' }}
     steps:
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
@@ -146,9 +179,20 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Wait for morca-runtime:<sha>
+      - name: Find, or wait for, the image of ${{ env.KEY || env.SHA }}
         run: |
-          have() { docker buildx imagetools inspect "$GHCR_IMAGE:$SHA" > /dev/null 2>&1; }
+          # The release PR's image (inputs-<key>), else main's (<sha>).
+          have() {
+            for t in $KEY $SHA; do
+              if docker buildx imagetools inspect "$GHCR_IMAGE:$t" > /dev/null 2>&1; then
+                echo "FROM=$GHCR_IMAGE:$t" >> "$GITHUB_ENV"
+                echo "found $GHCR_IMAGE:$t"
+                return 0
+              fi
+            done
+            return 1
+          }
+          if have; then exit 0; fi
           # The CI run on main for the commit, once GitHub has started it.
           for _ in $(seq 1 10); do
             run=$(gh run list -R "$GITHUB_REPOSITORY" --workflow ci.yml --event push --commit "$SHA" \
@@ -157,7 +201,7 @@ jobs:
             sleep 30
           done
           if [ -z "$run" ] && ! have; then
-            echo "::error::no CI run on main for $SHA, and no $GHCR_IMAGE:$SHA: is it a commit on main?"
+            echo "::error::no CI run on main for $SHA, and no $GHCR_IMAGE:${KEY:-$SHA}: is it a commit on main?"
             exit 1
           fi
           until have; do
@@ -172,12 +216,20 @@ jobs:
           done
       - name: Tag it ${{ env.VERSION }}
         run: |
-          # The version as an annotation on the index, which only an OCI
-          # index takes: a Docker manifest list (what `docker push` makes
-          # with the classic image store) is tagged without it.
-          docker buildx imagetools create \
+          # The version and the released commit as annotations on the
+          # index, which only an OCI index takes: a Docker manifest list
+          # (what `docker push` makes with the classic image store) is
+          # tagged without them. A dry run prints the index it would push.
+          dry=
+          [ "$DRY_RUN" != true ] || dry=--dry-run
+          docker buildx imagetools create $dry \
             --annotation "index:org.opencontainers.image.version=$VERSION" \
-            -t "$GHCR_IMAGE:$VERSION" "$GHCR_IMAGE:$SHA" \
-            || docker buildx imagetools create -t "$GHCR_IMAGE:$VERSION" "$GHCR_IMAGE:$SHA"
+            --annotation "index:org.opencontainers.image.revision=$SHA" \
+            -t "$GHCR_IMAGE:$VERSION" "$FROM" \
+            || docker buildx imagetools create $dry -t "$GHCR_IMAGE:$VERSION" "$FROM"
+          if [ -n "$dry" ]; then
+            echo "dry run: would tag $FROM as $GHCR_IMAGE:$VERSION"
+            exit 0
+          fi
           docker buildx imagetools inspect "$GHCR_IMAGE:$VERSION"
           docker buildx imagetools inspect "$GHCR_IMAGE:$VERSION" | grep -E 'Platform: +linux/(arm64|amd64)'

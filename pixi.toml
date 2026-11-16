@@ -499,8 +499,21 @@ fuzz-names = { cmd = "scripts/mojo-build.sh -D ASSERT=all -I src -I fuzz $DEP_IN
 fuzz-toml = { cmd = "scripts/mojo-build.sh -D ASSERT=all -I src -I fuzz $DEP_INC fuzz/fuzz_toml.mojo -o build/fuzz-toml && ./build/fuzz-toml" }
 fuzz = { depends-on = ["fuzz-months", "fuzz-days", "fuzz-cron", "fuzz-tz", "fuzz-inputs", "fuzz-json", "fuzz-summary", "fuzz-metadata", "fuzz-names", "fuzz-toml"] }
 
+# Development only: `ouromo`, an experimental build of the 1.2.0 compiler
+# with a per-function object cache, which scripts/mojo-build.sh uses when it
+# is on the PATH. Rebuilds take about half the time; the binaries are a few
+# percent slower and larger, so nothing that ships is built here. No
+# linux-aarch64 package exists.
+[feature.ouromo]
+channels = ["https://prefix.dev/winding-lines/ouromo"]
+platforms = ["osx-arm64", "linux-64"]
+
+[feature.ouromo.dependencies]
+ouromo = "==1.2.0.1"
+
 [environments]
 default = ["stable"]
+ouromo = ["stable", "ouromo"]
 nightly = ["nightly"]
 fuzz = ["stable", "fuzz"]
 fmt = { features = ["fmt"], no-default-feature = true }

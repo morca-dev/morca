@@ -14,7 +14,7 @@ from iceberg.schema import Schema
 from iceberg.transforms import PartitionSpec
 from iceberg.write import WriteOptions, write_data_files
 
-from morca._internal.cli import seed_random
+from morca._cli import seed_random
 from rows import SCHEMA, rows
 
 

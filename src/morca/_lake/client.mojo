@@ -1,7 +1,7 @@
 """The program's side of liblake: finding and loading the library, and
 batches crossing as Arrow C Data. No iceberg here, and no `Ctx`:
 `morca._lake.calls` calls the library through this, and the host block over
-a step's `Ctx` is the program's (`morca._internal.lakehost`).
+a step's `Ctx` is the program's (`morca._lakehost`).
 
 **Loading.** The library is opened the first time a table is used, in the
 step or the dista task that uses it, never at program start (dista forks

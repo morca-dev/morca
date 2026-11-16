@@ -1,25 +1,34 @@
 # The runtime image, ghcr.io/morca-dev/morca-runtime (deploy/runtime.Dockerfile),
 # which project images build FROM (deploy/project.Dockerfile). Called by CI:
-# on pull requests to build and test it, and on main to build, test and push
-# it as morca-runtime:<sha>. A release builds nothing: it tags the image of
-# the commit it releases <version> (release.yml).
+# on pull requests to build and test it, on main to build, test and push it
+# as morca-runtime:<sha>, and on a release PR to build, test and push it
+# under its inputs' key, morca-runtime:inputs-<key>. A release builds
+# nothing: it tags the image of its commit's key <version> (release.yml).
 #
 # One image per architecture, each on its own runner (no emulation), built
 # for a baseline CPU (the morca-mojo package's binaries, pixi.toml; a
 # project's image on it takes MOJO_TARGET_CPU) from deploy/runtime/pixi.lock and
 # tested with tests/runtime-image.sh, which on the architectures in
 # `project` also builds a scratch project's image on it. A push sends each
-# as <sha>-<arch>, and `manifest` joins them under <sha>.
+# as <tag>-<arch>, and `manifest` joins them under <tag>.
+#
+# The key (deploy/runtime/inputs.sh) names what the image is built from:
+# the Dockerfile and what it copies, the version among them. Main's
+# image is also tagged inputs-<key>, unless an image already has that key
+# (the release PR's, for the release's merge commit), and a release PR's
+# is pushed under its key only, since its commit (the PR's merge with main)
+# never lands on main. An inputs-<key> tag, once there, is never moved: the
+# image a release tags is the one CI tested first with those inputs (#353).
 #
 # The jobs ask for no permissions of their own: they get the caller's, so
-# only CI's main job, which pushes, has packages: write.
+# only CI's jobs that push have packages: write.
 name: runtime image
 
 on:
   workflow_call:
     inputs:
       push:
-        description: "Push the image as morca-runtime:<sha> (main only)"
+        description: "Push the image: as morca-runtime:<sha> on main, as inputs-<key> on a release PR"
         type: boolean
         default: false
       project:
@@ -42,11 +51,26 @@ jobs:
             cpu: x86-64-v3
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
+    outputs:
+      key: ${{ steps.key.outputs.key }}
+      tag: ${{ steps.key.outputs.tag }}
     env:
       GHCR_IMAGE: ghcr.io/morca-dev/morca-runtime
       SHA: ${{ github.sha }}
+      EVENT: ${{ github.event_name }}
     steps:
       - uses: actions/checkout@v4
+      # What a push tags: main's commit, or a release PR's key alone.
+      - name: The image's key
+        id: key
+        run: |
+          key=$(sh deploy/runtime/inputs.sh)
+          tag=$SHA
+          [ "$EVENT" = push ] || tag=$key
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "TAG=$tag" >> "$GITHUB_ENV"
+          echo "key $key; a push tags $tag"
       # pixi, for the scratch project's lock (tests/runtime-image.sh).
       - run: git config --global maintenance.auto false && git config --global gc.auto 0
       - uses: prefix-dev/setup-pixi@v0.10.2
@@ -76,14 +100,20 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Push <sha>-${{ matrix.arch }}
+      # A key already pushed stays as it is: CI tested that image first.
+      - name: Push <tag>-${{ matrix.arch }}
         if: inputs.push
         run: |
-          docker tag morca-runtime:ci "$GHCR_IMAGE:$SHA-${{ matrix.arch }}"
-          docker push "$GHCR_IMAGE:$SHA-${{ matrix.arch }}"
+          if [ "$TAG" != "$SHA" ] && docker buildx imagetools inspect "$GHCR_IMAGE:$TAG" > /dev/null 2>&1; then
+            echo "$GHCR_IMAGE:$TAG is there already: not pushed again"
+            exit 0
+          fi
+          docker tag morca-runtime:ci "$GHCR_IMAGE:$TAG-${{ matrix.arch }}"
+          docker push "$GHCR_IMAGE:$TAG-${{ matrix.arch }}"
 
   # The commit's image as one for both architectures, so each host pulls its
-  # own. Only after both pushed: a <sha> tag is an image tested on both.
+  # own. Only after both pushed: a <sha> or inputs-<key> tag is an image
+  # tested on both.
   manifest:
     needs: image
     if: inputs.push
@@ -91,6 +121,8 @@ jobs:
     env:
       GHCR_IMAGE: ghcr.io/morca-dev/morca-runtime
       SHA: ${{ github.sha }}
+      KEY: ${{ needs.image.outputs.key }}
+      TAG: ${{ needs.image.outputs.tag }}
     steps:
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
@@ -100,5 +132,21 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Join the architectures
         run: |
-          docker buildx imagetools create -t "$GHCR_IMAGE:$SHA" "$GHCR_IMAGE:$SHA-arm64" "$GHCR_IMAGE:$SHA-amd64"
-          docker buildx imagetools inspect "$GHCR_IMAGE:$SHA" | grep -E 'Platform: +linux/(arm64|amd64)'
+          have() { docker buildx imagetools inspect "$GHCR_IMAGE:$1" > /dev/null 2>&1; }
+          [ -n "$KEY" ] && [ -n "$TAG" ] || { echo "::error::no key from the image jobs"; exit 1; }
+          if [ "$TAG" = "$KEY" ] && have "$KEY"; then
+            echo "$GHCR_IMAGE:$KEY is there already: left as it is"
+          else
+            docker buildx imagetools create -t "$GHCR_IMAGE:$TAG" "$GHCR_IMAGE:$TAG-arm64" "$GHCR_IMAGE:$TAG-amd64"
+          fi
+          docker buildx imagetools inspect "$GHCR_IMAGE:$TAG" | grep -E 'Platform: +linux/(arm64|amd64)'
+      # Main's image under its key too, unless an image has it already (the
+      # release PR's): the same index, one more tag.
+      - name: Tag it ${{ needs.image.outputs.key }}
+        if: github.event_name == 'push'
+        run: |
+          if docker buildx imagetools inspect "$GHCR_IMAGE:$KEY" > /dev/null 2>&1; then
+            echo "$GHCR_IMAGE:$KEY is there already: left as it is"
+          else
+            docker buildx imagetools create -t "$GHCR_IMAGE:$KEY" "$GHCR_IMAGE:$SHA"
+          fi

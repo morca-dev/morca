@@ -1,0 +1,1 @@
+- **A release's runtime image in seconds**: the release PR's CI pushes its tested runtime image, and the release tags it `morca-runtime:<version>` instead of waiting for main to rebuild the merge commit; old per-commit images are pruned weekly (#353).

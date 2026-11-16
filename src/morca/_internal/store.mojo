@@ -7,7 +7,7 @@ process, for a run that lives as long as it does; `morca._internal.state.PgStore
 writes them to Postgres, so a run can be resumed by another process.
 
 `RunStore` is a `Store` that also keeps runs: the rest of what a pipeline
-binary (`morca._internal.cli`) asks of persistence, from registering the pipeline to
+binary (`morca._cli`) asks of persistence, from registering the pipeline to
 ending its run, so the binary depends on this trait and nothing else.
 Both backends' SQL is in `morca._internal.db` (`morca._internal.db.runs`, `morca._internal.db.steps`,
 `morca._internal.db.sqlite_runs`), as is the scheduler's and the UI's.

@@ -25,7 +25,12 @@ go in the PR.
   and the plumbing that calls it) imports only `morca._common`, and
   `morca._internal` and the public modules may import both. `_lake` never
   imports `_internal`, `morca.ctx` or another public module, even for one
-  helper: what both need goes in `_common`.
+  helper: what both need goes in `_common`. Public modules may import
+  `_internal`, but `_internal` imports only the public modules that don't
+  (`morca.civil`, `morca.day`, ...), never `morca.ctx`, `morca.pipeline` or
+  `morca`: code over `Ctx` or `Pipeline` lives beside them (`morca._cli`,
+  `morca._lakehost`, `morca._rust_ffi`). `scripts/check_layers.py` checks
+  the layers in CI.
 - **Import from the defining module.** `from m import x` names the module
   that defines `x`, not one that imports it and passes it on; only a
   package's `__init__.mojo` may re-export. That's why `morca.tables`,
