@@ -350,7 +350,7 @@ def _keep(p: Optional[_Ptr]):
 def api() raises -> Api:
     """liblake's functions: loaded on first use (see the module doc)."""
     comptime if SOURCE:
-        from morca._lake import lib
+        from morca._lake import lib, rust_sink
 
         return Api(
             free_text=lib.lake_free_text,
@@ -391,12 +391,12 @@ def api() raises -> Api:
             writer_close=lib.lake_writer_close,
             expire=lib.lake_expire,
             data=lib.lake_data,
-            sink_new=lib.lake_sink_new,
-            sink_schema=lib.lake_sink_schema,
-            sink_put=lib.lake_sink_put,
-            sink_take=lib.lake_sink_take,
-            sink_finish=lib.lake_sink_finish,
-            sink_free=lib.lake_sink_free,
+            sink_new=rust_sink.lake_sink_new,
+            sink_schema=rust_sink.lake_sink_schema,
+            sink_put=rust_sink.lake_sink_put,
+            sink_take=rust_sink.lake_sink_take,
+            sink_finish=rust_sink.lake_sink_finish,
+            sink_free=rust_sink.lake_sink_free,
         )
     else:
         var p = _get_global["MORCA_LAKE_LIB", _init, _keep]()

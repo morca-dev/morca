@@ -8,9 +8,8 @@ internal, with no stability promise.
 from morca._internal.store import (
     MemoryStore,
     Recorder,
-    RunInfo,
     RunStore,
-    StepInfo,
     Store,
     TableSnapshot,
 )
+from morca._internal.db.run_rows import RunInfo, StepInfo

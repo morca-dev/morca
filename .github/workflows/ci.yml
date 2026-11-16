@@ -872,12 +872,20 @@ jobs:
             esac
           done < caches
 
+  # Imports: no cycles between modules, and each name imported from the
+  # module that defines it (github.com/magmalake/customs).
+  customs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: magmalake/customs@v0.2.1
+
   # The one check to require: every Linux job above passed, or, for a
   # prose-only PR, was skipped. (macOS runs only on the nightly, which this
   # gate doesn't cover.)
   ci:
     if: ${{ always() && github.event_name != 'schedule' }}
-    needs: [release, release-check, changes, version, test, kind, runtime-image, runtime-image-main, runtime-lock, project-image, project-test, project-release, fuzz, format, formal, data, rust-worker]
+    needs: [release, release-check, changes, version, test, kind, runtime-image, runtime-image-main, runtime-lock, project-image, project-test, project-release, fuzz, format, formal, data, rust-worker, customs]
     runs-on: ubuntu-latest
     steps:
       - env:

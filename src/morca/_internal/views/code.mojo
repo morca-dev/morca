@@ -9,7 +9,8 @@ import morca._internal.db.code_view as code_db
 from morca._internal.locate import function_key
 from morca._internal.source import is_hex, web_url
 from morca._internal.state import State
-from morca._internal.views.runs import RunRow, VersionRow, version_rows
+from morca._internal.views.runs import RunRow, version_rows
+from morca._internal.db.run_view import VersionRow
 
 
 def _code_url(v: VersionRow, location: String) -> String:

@@ -30,14 +30,8 @@ from morca._internal.http_store import (
     steps_json,
     steps_of,
 )
-from morca._internal.store import (
-    RunInfo,
-    RunResult,
-    StepInfo,
-    StepRun,
-    SUCCEEDED,
-    Usage,
-)
+from morca._internal.store import RunResult, StepRun, SUCCEEDED
+from morca._internal.db.run_rows import RunInfo, StepInfo, Usage
 from morca._internal.sample import machine_name
 from morca._internal.workers import (
     WorkerRun,

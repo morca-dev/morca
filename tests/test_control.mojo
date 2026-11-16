@@ -22,7 +22,8 @@ from morca._internal.control import (
     run_env,
     slots_reason,
 )
-from morca._internal.system import Container, Now
+from morca._internal.system import Now
+from morca._internal.db.system import Container
 
 
 def _now(age: Float64, mem: Float64, disk: Float64) -> Now:

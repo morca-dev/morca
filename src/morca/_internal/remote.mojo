@@ -49,7 +49,7 @@ from objectstore.http import Header, HttpClient, Response
 from morca.civil import now, parse_time
 from morca._internal.html import url_encode
 from morca._internal.json import quote
-from morca._internal.lineage import SnapshotRef
+from morca._internal.db.lineage import SnapshotRef
 from morca._internal.pressure import pct_text
 from morca._internal.run_cpu import status_text
 from morca._internal.queueing import file_names

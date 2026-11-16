@@ -49,15 +49,13 @@ from morca._internal.store import (
     SKIPPED,
     SUCCEEDED,
     Backoff,
-    RunInfo,
     RunResult,
     RunStore,
     status_list,
-    StepInfo,
     StepRun,
     TableSnapshot,
-    Usage,
 )
+from morca._internal.db.run_rows import RunInfo, StepInfo, Usage
 
 comptime _BUSY_MS = 1000
 """How long a write waits for another writer's lock before it fails (and,

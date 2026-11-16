@@ -95,14 +95,7 @@ from morca.partitions import (
     Partitions,
     parse_partitions,
 )
-from morca.pipeline import (
-    FAILED,
-    SKIPPED,
-    SUCCEEDED,
-    Pipeline,
-    RunResult,
-    StepRun,
-)
+from morca.pipeline import Pipeline
 from morca._internal.resources import Grant, auto_count
 from morca.schedule import (
     Cron,
@@ -130,11 +123,15 @@ from morca._internal.pressure import Psi, Stall, memory_pressure
 from morca._internal.sqlite_store import SqliteStore, sqlite_path
 from morca._internal.state import PgStore, State
 from morca._internal.store import (
+    FAILED,
     MemoryStore,
     Recorder,
-    RunInfo,
+    RunResult,
     RunStore,
-    StepInfo,
+    SKIPPED,
+    SUCCEEDED,
+    StepRun,
     Store,
     TableSnapshot,
 )
+from morca._internal.db.run_rows import RunInfo, StepInfo

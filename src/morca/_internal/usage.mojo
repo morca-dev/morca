@@ -43,7 +43,7 @@ from morca._internal.db.usage import AttemptSpan
 
 from morca._internal.sample import fixed1
 from morca._internal.state import State
-from morca._internal.store import Usage
+from morca._internal.db.run_rows import Usage
 
 comptime MAX_MARKS = 1024
 """The most samples a meter keeps; past it, neighbours are merged."""

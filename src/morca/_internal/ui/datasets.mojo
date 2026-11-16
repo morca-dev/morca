@@ -12,10 +12,6 @@ from morca._internal.graph import Edge, Node, graph_svg
 from morca._internal.html import Html, query_param, url_encode
 from morca._internal.json import quote
 from morca._internal.lineage import (
-    Commit,
-    Made,
-    SnapshotCursor,
-    SnapshotRef,
     back,
     commits,
     datasets as dataset_rows,
@@ -23,7 +19,9 @@ from morca._internal.lineage import (
     forward,
     latest as latest_snapshot,
 )
-from morca._internal.sensors import Link, Rebuild, downstream, rebuilds
+from morca._internal.db.lineage import Commit, Made, SnapshotCursor, SnapshotRef
+from morca._internal.sensors import Link, downstream, rebuilds
+from morca._internal.db.rebuilds import Rebuild
 from morca._internal.state import State
 from morca._internal.ui.layout import (
     HERE_SLOT,

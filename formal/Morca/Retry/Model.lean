@@ -9,7 +9,7 @@ earlier attempt of the same step in the same run) already made, commits if
 there is none, and records the snapshot in Postgres. Other writers commit to
 the table in between, and the worker can crash between any two of these.
 
-Mirrors src/morca/tables.mojo#find_commit+_found+_commit_append and
+Mirrors src/morca/tables/__init__.mojo#find_commit+_found+_commit_append and
 src/morca/ctx.mojo#Ctx.made+Ctx.summary+Ctx.committed+Ctx.commits_to.
 -/
 namespace Morca

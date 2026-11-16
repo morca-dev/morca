@@ -32,11 +32,8 @@ from morca._internal.ui.parts import data_line, pause_button
 from morca._internal.ui.recent import recent_list
 from morca._internal.ui.viz import gantt_panel, gantt_tabs
 from morca._internal.views.code import pipeline_srcs
-from morca._internal.views.pipelines import (
-    PipelineRow,
-    pipeline_coverage,
-    pipeline_rows,
-)
+from morca._internal.views.pipelines import pipeline_coverage, pipeline_rows
+from morca._internal.db.pipelines_view import PipelineRow
 from morca._internal.views.recent import json_recent, recent_rows
 from morca._internal.views.runs import HOME_RUNS, RunsQuery, run_rows
 from morca._internal.watchdog import active_trips, banner_html, trips_json

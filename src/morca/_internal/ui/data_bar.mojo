@@ -12,7 +12,7 @@ JavaScript the list is there to scroll, and the links work the same.
 from json import Value
 
 from morca._internal.html import Html
-from morca._internal.lineage import SnapshotRef
+from morca._internal.db.lineage import SnapshotRef
 from morca._internal.ui.datasets import dataset_href, snapshot_href
 from morca._internal.ui.runs import grouped
 from morca._internal.views.data import DataQuery

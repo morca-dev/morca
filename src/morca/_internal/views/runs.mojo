@@ -14,6 +14,7 @@ import morca._internal.db.runs_view as runs_db
 from morca._internal.db.run_view import (
     AttemptRecord,
     AuditRow,
+    ClusterRow,
     InstanceRow,
     StepRecord,
     Touch,
@@ -21,7 +22,7 @@ from morca._internal.db.run_view import (
 )
 from morca._internal.db.runs_view import RunRecord, RunsFilter, utc_sql
 
-from morca._internal.views.cluster import ClusterRow, cluster_rows
+from morca._internal.views.cluster import cluster_rows
 from morca._internal.handover import run_outdated
 from morca._internal.html import (
     query_param,
@@ -30,12 +31,12 @@ from morca._internal.html import (
     url_encode,
 )
 from morca._internal.json import quote
-from morca._internal.lineage import SnapshotRef
+from morca._internal.db.lineage import SnapshotRef
 from morca._internal.logs import location_exists, run_dir
 from morca._internal.metrics import InstanceMetrics, StepSpan, read_metrics
 from morca._internal.resources import Grant
 from morca._internal.state import State
-from morca._internal.store import Usage
+from morca._internal.db.run_rows import Usage
 from morca.civil import Civil
 
 

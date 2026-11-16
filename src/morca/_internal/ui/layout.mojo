@@ -12,7 +12,7 @@ from morca._internal.json import quote
 from morca._internal.ui.loading import LOADING_JS
 from morca._internal.ui.step_cards import LEAD_JS, STEP_CARDS_JS
 from morca._internal.ui.terms import header_help
-from morca._internal.views.pipelines import comma_list
+from morca._internal.db.pipelines_view import comma_list
 
 
 def docs_link(anchor: StaticString) -> String:
