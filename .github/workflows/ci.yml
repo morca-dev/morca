@@ -13,9 +13,9 @@ on:
 
 # A new push to a PR cancels its runs still going: only the latest commit's
 # results matter, and the old run's jobs held runners the org shares. A run
-# on main isn't cancelled as a whole (the group is the commit there): the
-# release workflow waits for the runtime image runtime-image-main pushes for
-# a release PR's merge commit. Only its long test jobs give way to a newer
+# on main isn't cancelled as a whole (the group is the commit there): a
+# release whose PR's image is missing waits for the runtime image
+# runtime-image-main pushes for its merge commit. Only its long test jobs give way to a newer
 # push to main, each in a concurrency group of its own below.
 concurrency:
   group: ci-${{ github.event_name == 'pull_request' && github.head_ref || github.sha }}
@@ -360,10 +360,11 @@ jobs:
   # scratch project's image on it. On pull requests it's built and tested
   # for arm64 and amd64, with the project on arm64 only, the servers'
   # architecture: the project build is the same Dockerfile on both, and
-  # main runs it on both before anything is pushed. Never pushed here.
+  # main runs it on both before anything is pushed. Never pushed here; a
+  # release PR's is, by runtime-image-release instead.
   runtime-image:
     needs: [changes, release]
-    if: ${{ !cancelled() && github.event_name != 'schedule' && github.event_name != 'push' && needs.changes.outputs.code != 'false' && needs.release.outputs.release_only != 'true' }}
+    if: ${{ !cancelled() && github.event_name != 'schedule' && github.event_name != 'push' && needs.changes.outputs.code != 'false' && needs.release.outputs.release_only != 'true' && !(startsWith(github.head_ref, 'release/morca-mojo-') && github.event.pull_request.head.repo.full_name == github.repository) }}
     uses: ./.github/workflows/runtime-image.yml
     permissions:
       contents: read
@@ -371,12 +372,33 @@ jobs:
       project: arm64
 
   # On main: the same, with the project on both architectures, then pushed
-  # as ghcr.io/morca-dev/morca-runtime:<sha>. A release tags that image
-  # <version> (release.yml), so a release PR's merge commit needs it too.
-  # The only job here that can push a package.
+  # as ghcr.io/morca-dev/morca-runtime:<sha> (and inputs-<key>, unless an
+  # image has that key already). A release whose PR's image is missing tags
+  # its merge commit's (release.yml). With runtime-image-release, the only
+  # jobs here that can push a package.
   runtime-image-main:
     needs: [changes]
     if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    uses: ./.github/workflows/runtime-image.yml
+    permissions:
+      contents: read
+      packages: write
+    with:
+      push: true
+      project: arm64 amd64
+
+  # A release PR's (a branch of this repository named release/morca-mojo-*):
+  # the same as main's, pushed as morca-runtime:inputs-<key>, the key of what
+  # it's built from (deploy/runtime/inputs.sh), which the release's merge
+  # commit has too, version bump and all. The release tags that image
+  # <version> the moment it's tagged, instead of waiting for main's CI to
+  # build the merge commit's (#353). Run even when the PR is release-only.
+  runtime-image-release:
+    needs: [changes, release]
+    if: >-
+      ${{ !cancelled() && github.event_name == 'pull_request'
+      && startsWith(github.head_ref, 'release/morca-mojo-')
+      && github.event.pull_request.head.repo.full_name == github.repository }}
     uses: ./.github/workflows/runtime-image.yml
     permissions:
       contents: read
@@ -885,12 +907,13 @@ jobs:
   # gate doesn't cover.)
   ci:
     if: ${{ always() && github.event_name != 'schedule' }}
-    needs: [release, release-check, changes, version, test, kind, runtime-image, runtime-image-main, runtime-lock, project-image, project-test, project-release, fuzz, format, formal, data, rust-worker, customs]
+    needs: [release, release-check, changes, version, test, kind, runtime-image, runtime-image-main, runtime-image-release, runtime-lock, project-image, project-test, project-release, fuzz, format, formal, data, rust-worker, customs]
     runs-on: ubuntu-latest
     steps:
       - env:
           NEEDS: ${{ toJSON(needs) }}
           EVENT: ${{ github.event_name }}
+          RELEASE_PR: ${{ github.event_name == 'pull_request' && startsWith(github.head_ref, 'release/morca-mojo-') && github.event.pull_request.head.repo.full_name == github.repository }}
         run: |
           python3 - <<'PY'
           import json, os, sys
@@ -898,8 +921,16 @@ jobs:
           release = needs.pop("release")
           build = needs.pop("release-check")
           # One of the runtime image's jobs runs: main's on a push, the
-          # other otherwise.
-          needs.pop("runtime-image" if os.environ["EVENT"] == "push" else "runtime-image-main")
+          # release PR's on one, the plain one otherwise.
+          if os.environ["EVENT"] == "push":
+              runs = "runtime-image-main"
+          elif os.environ["RELEASE_PR"] == "true":
+              runs = "runtime-image-release"
+          else:
+              runs = "runtime-image"
+          for job in ("runtime-image", "runtime-image-main", "runtime-image-release"):
+              if job != runs:
+                  needs.pop(job)
           release_only = release["outputs"].get("release_only") == "true"
           prose_only = needs["changes"]["outputs"].get("code") == "false"
           ok = {"success", "skipped"} if release_only or prose_only else {"success"}

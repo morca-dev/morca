@@ -1228,8 +1228,11 @@ libcurl, OpenSSL and flare look for them, llvm-symbolizer, and the
 tzdata) with a static busybox for `sh` and the usual tools (`cat`, `test`,
 `mount`, `nc`, ...), util-linux's `setpriv`, and an `ldd`: no bash and no
 apt. morca's CI builds and tests it on every pull
-request, and on main pushes it as `morca-runtime:<sha>`; a release tags its
-commit's image `<version>` once main has pushed it, rebuilding nothing. A
+request, on main pushes it as `morca-runtime:<sha>`, and on a release PR
+pushes it under the key of what it's built from (`inputs-<key>`,
+`deploy/runtime/inputs.sh`); a release tags that image `<version>` seconds
+after the tag, rebuilding nothing (main's, if the PR's is missing). Old
+per-commit images are pruned weekly; release tags are kept forever. A
 project's image builds `FROM` it and adds only its own programs:
 [`deploy/project.Dockerfile`](../deploy/project.Dockerfile), the image
 `morca aws push` builds, compiles the project's `bin/*.mojo` and

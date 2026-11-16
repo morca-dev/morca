@@ -6,8 +6,10 @@
 # deploy/hetzner and `morca aws` run. On distroless (glibc, libstdc++, CA
 # certificates and tzdata, no shell), with a static busybox for `sh` and
 # the tools the stacks run in it (`sys`, below). morca's CI builds and tests it on every
-# pull request, and pushes main's as morca-runtime:<sha>, which a release
-# tags <version> (.github/workflows/runtime-image.yml). Build it from the
+# pull request, pushes main's as morca-runtime:<sha> and a release PR's as
+# morca-runtime:inputs-<key> (deploy/runtime/inputs.sh: the key of this
+# file and what it COPYs), which a release tags <version>
+# (.github/workflows/runtime-image.yml). Build it from the
 # repository root:
 #
 #     docker build -f deploy/runtime.Dockerfile -t morca-runtime:dev .
