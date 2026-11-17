@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.34.0 - 2026-11-17
+
+- **A release's runtime image in seconds**: the release PR's CI pushes its tested runtime image, and the release tags it `morca-runtime:<version>` instead of waiting for main to rebuild the merge commit; old per-commit images are pruned weekly (#353).
+
+- **Done follows the data version everywhere**: coverage, the calendar, keyed sensors and backfills count a key done under any code with the same steps' `version=`, as the fill does, so a rename that changes the registry hash no longer undoes them (#509).
+
+- **Package layers**: the modules over `Ctx` and `Pipeline` moved out of `morca._internal`, which no longer imports a module that imports it back, and CI checks the layers (#511).
+
+- **Weekly partitions**: `Weekly[start]` partitions a pipeline by ISO week, keys `YYYY-Www` such as `2026-W46` (#512).
+
 ## 0.33.0 - 2026-11-15
 
 - **Data tab layout:** the table first, a commit picker at the top (searchable, in the URL), and Data/Schema tabs with column types under the headers. (#501)
