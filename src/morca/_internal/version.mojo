@@ -35,7 +35,12 @@ def parse_describe(binary: String, describe: String) raises -> Value:
         d = loads(describe)
     except e:
         raise Error(
-            "morca: ", binary, " describe didn't print JSON (", e, "): ", describe
+            "morca: ",
+            binary,
+            " describe didn't print JSON (",
+            e,
+            "): ",
+            describe,
         )
     if (
         not d.is_object()
