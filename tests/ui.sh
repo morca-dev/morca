@@ -642,7 +642,7 @@ page=$(html "/runs?pipeline=toy&status=succeeded&trigger=manual")
 echo "$page" | grep -qF '<td class="num"></td>' || fail "a run started once isn't empty under Tries"
 echo "$page" | grep -qF '<td class="num">1</td>' && fail "a run started once shows 1"
 [ "$(json "/runs?pipeline=toy&status=failed" | jq '.runs[0].starts')" -eq 3 ] || fail "the JSON's starts"
-# Actions beside their statuses: Pause per pipeline, Retry for a failed
+# Actions beside their statuses: Pause per pipeline, Resume for a failed
 # run, Rerun for a succeeded one, Rerun from here on an ended run's attempt,
 # Cancel for a queued one; each titled with its command line.
 html / | grep -qF 'action="/pipelines/toy/pause"><button type="submit" class="act__btn" title="morca pause toy">Pause</button></form>' \
@@ -650,8 +650,8 @@ html / | grep -qF 'action="/pipelines/toy/pause"><button type="submit" class="ac
 html /pipelines/toy | grep -qF '<h1>toy<form class="act" method="post" action="/pipelines/toy/pause">' \
     || fail "no Pause in the pipeline's header"
 html "/runs?pipeline=toy&status=failed" | grep -qF "action=\"/runs/$bad_run/resume\"><button type=\"submit\" class=\"act__btn\" title=\"&lt;toy binary&gt; resume $bad_run" \
-    || fail "no Retry for the failed run"
-html "/runs/$bad_run" | grep -qF '>Retry</button>' || fail "no Retry in the failed run's header"
+    || fail "no Resume for the failed run"
+html "/runs/$bad_run" | grep -qF '>Resume</button>' || fail "no Resume in the failed run's header"
 page=$(html "/runs/$ok_run")
 echo "$page" | grep -qF "<form class=\"act\" method=\"post\" action=\"/runs/$ok_run/rerun\" data-confirm=\"Rerun every step of run $ok_run?\" data-confirm-body=\"A new run of toy over the same partitions starts from its first step; run $ok_run is kept as it is.\"><input type=\"hidden\" name=\"step\" value=\"days\">" \
     || fail "no Rerun in the succeeded run's header"
@@ -803,8 +803,8 @@ echo "$page" | grep -qF '<form id="bulk-runs" class="bulk act__need" method="pos
     || fail "the bulk form doesn't carry the filters"
 echo "$page" | grep -qF ' value="1"> or all 30 that match</label><input type="hidden" name="expect" value="30">' \
     || fail "all that match doesn't say how many"
-echo "$page" | grep -q '<form id="bulk-runs"[^>]*data-confirm' && fail "the bulk form asks for Retry and Backfill too"
-echo "$page" | grep -qF '<button type="submit" name="do" value="cancel" class="danger" data-confirm="Cancel {runs}?" data-confirm-body="Queued and deferred ones won&#39;t start, and running ones stop before their next step. Runs that already finished are left as they are." data-confirm-yes="Cancel runs" data-confirm-no="Keep them" data-confirm-danger>Cancel</button><button type="submit" name="do" value="retry">Retry failed</button>' \
+echo "$page" | grep -q '<form id="bulk-runs"[^>]*data-confirm' && fail "the bulk form asks for Resume and Backfill too"
+echo "$page" | grep -qF '<button type="submit" name="do" value="cancel" class="danger" data-confirm="Cancel {runs}?" data-confirm-body="Queued and deferred ones won&#39;t start, and running ones stop before their next step. Runs that already finished are left as they are." data-confirm-yes="Cancel runs" data-confirm-no="Keep them" data-confirm-danger>Cancel</button><button type="submit" name="do" value="resume">Resume failed</button>' \
     || fail "the bulk Cancel doesn't ask"
 bpost() { curl -s -o "$log.bulk" -w '%{http_code} %{redirect_url}' -H "Origin: $base" -d "$1" "$base/runs/bulk"; }
 qr=$(q "SELECT min(id) FROM orca.runs WHERE id > $mark AND status = 'queued'")
@@ -833,12 +833,17 @@ got=$(bpost "do=cancel&view=list&pipeline=&key=2031-*&status=queued&all=1&expect
 [ "$(q "SELECT count(*) FROM orca.runs WHERE id > $mark AND status = 'queued'")" -eq 0 ] || fail "all that match weren't cancelled"
 [ "$(bpost "do=cancel&view=list&pick=")" = "409 " ] || fail "nothing picked wasn't refused"
 [ "$(bpost "do=explode&pick=$sr" | cut -d' ' -f1)" = 400 ] || fail "an unknown action wasn't refused"
-# Retry failed: a failed run is queued again, the rest left alone.
-got=$(bpost "do=retry&view=pipeline&pipeline=toy&status=failed&pick=$fr&pick=$sr")
-[ "$got" = "303 $base/pipelines/toy?tab=runs&status=failed&did=retry&done=1&skipped=1&refused=0" ] || fail "a bulk retry: $got"
+# Resume failed: a failed run is queued again, the rest left alone.
+got=$(bpost "do=resume&view=pipeline&pipeline=toy&status=failed&pick=$fr&pick=$sr")
+[ "$got" = "303 $base/pipelines/toy?tab=runs&status=failed&did=resume&done=1&skipped=1&refused=0" ] || fail "a bulk resume: $got"
 [ "$(q "SELECT status FROM orca.runs WHERE id = $fr")" = queued ] || fail "the failed run wasn't queued again"
-html "/pipelines/toy?tab=runs&status=failed&did=retry&done=1&skipped=1&refused=0" \
-    | grep -qF '<p class="notice" role="status">Queued 1 run again, 1 not failed.</p>' || fail "the Runs tab doesn't say what the retry did"
+html "/pipelines/toy?tab=runs&status=failed&did=resume&done=1&skipped=1&refused=0" \
+    | grep -qF '<p class="notice" role="status">Queued 1 run again, 1 not failed.</p>' || fail "the Runs tab doesn't say what the resume did"
+# do=retry, its name before #378, is still resume, and so is an old did=retry link.
+got=$(bpost "do=retry&view=pipeline&pipeline=toy&status=failed&pick=$sr")
+[ "$got" = "303 $base/pipelines/toy?tab=runs&status=failed&did=resume&done=0&skipped=1&refused=0" ] || fail "do=retry: $got"
+html "/pipelines/toy?tab=runs&status=failed&did=retry&done=1&skipped=0&refused=0" \
+    | grep -qF '<p class="notice" role="status">Queued 1 run again.</p>' || fail "an old did=retry link"
 # Backfill again: the partitions of the ticked runs, a run each, rerun.
 before_bf=$(q "SELECT count(*) FROM orca.runs WHERE trigger = 'backfill'")
 got=$(bpost "do=backfill&view=list&pick=$ok_run")

@@ -100,7 +100,7 @@ pixi run -e data taxi && pixi run -e data ./build/taxi run --partitions 2023-01.
 pixi run morca && ./build/morca register ./build/toy && ./build/morca scheduler   # needs MORCA_DATABASE_URL
 ./build/morca register ./build/taxi && ./build/morca backfill taxi 2011-01..2024-12   # 19 GB of TLC files
 ./build/morca backfill --rerun --allow-append taxi 2024-03   # queue a month again, though it succeeded; taxi's load appends, so say so
-./build/morca cancel taxi @all  # cancel its queued, running and retrying runs (or KEYS)
+./build/morca cancel taxi @all  # cancel its live runs, and failed ones due a retry (or KEYS)
 ./build/morca pause taxi        # the scheduler starts none of its runs until morca unpause taxi
 ./build/morca retire taxi       # no longer registered, its runs and tables kept; morca register brings it back
 ./build/morca watchdog status   # the watchdog pauses pipelines on a launch storm, runaway cost, idle workers,

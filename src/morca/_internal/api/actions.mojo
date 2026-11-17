@@ -5,14 +5,14 @@ that changes something, through `morca._internal.actions`.
 |---|---|
 | `/pipelines/<name>/runs` | start a run over `partitions` |
 | `/pipelines/<name>/backfill` | a run per partition in `partitions` that has none; `rerun=1` for done ones too |
-| `/pipelines/<name>/cancel` | cancel its queued, running and retrying runs over `partitions` (`@all` or empty: all) |
+| `/pipelines/<name>/cancel` | cancel its queued, deferred and running runs, and failed ones due a retry, over `partitions` (`@all` or empty: all) |
 | `/pipelines/<name>/pause`, `/unpause` | stop the scheduler starting its runs, or let it again |
 | `/watchdog/<rule>/snooze` | silence a watchdog rule for `duration` (`2h`, `30m`, `1d`; `off` ends it) |
 | `/watchdog/<trip>/ack`, `/watchdog/all/ack` | acknowledge a watchdog trip, or all of them |
 | `/runs/<id>/resume` | queue a failed, cancelled or stalled run again; `allow_new_code=1` confirms new code |
 | `/runs/<id>/rerun` | a new run from `step` on, the steps before it copied |
 | `/runs/<id>/cancel` | cancel a run, before its next attempt if it's running |
-| `/runs/bulk` | `do=cancel`, `retry` or `backfill` the runs picked from a list: each `pick=<id>`, or with `all=1` every run its filters (`view`, `pipeline`, `status`, ...) match, if there are still `expect` of them |
+| `/runs/bulk` | `do=cancel`, `resume` (or its old name `retry`) or `backfill` the runs picked from a list: each `pick=<id>`, or with `all=1` every run its filters (`view`, `pipeline`, `status`, ...) match, if there are still `expect` of them |
 | `/datasets/<name>/rebuild` | rebuild every pipeline downstream over `partitions` |
 
 Each answers `303 See Other` to the page of what it made (a script gets
@@ -134,11 +134,17 @@ comptime _FROM_FILE = (
 
 
 def start(mut db: State, call: Call) raises -> Page:
-    """`POST /pipelines/<name>/runs`: one run over `partitions`."""
+    """`POST /pipelines/<name>/runs`: one run over `partitions`, trigger
+    `cli` from the `morca` command (`call.source`), else `ui`."""
     var keys = call.field("partitions")
     if _from_file(keys):
         return bad_request(_FROM_FILE)
-    var o = start_run(db, call.param("name"), keys)
+    var o = start_run(
+        db,
+        call.param("name"),
+        keys,
+        "cli" if call.source == "cli" else "ui",
+    )
     return _acted(
         o,
         _operate_href(call),
@@ -336,7 +342,8 @@ def _ids_json(mut j: String, ids: List[Int]):
 
 
 def bulk(mut db: State, call: Call) raises -> Page:
-    """`POST /runs/bulk`: `do` (`cancel`, `retry` or `backfill`) to the runs
+    """`POST /runs/bulk`: `do` (`cancel`, `resume` or `backfill`; `retry` is
+    `resume`'s old name) to the runs
     picked from a list (`morca._internal.ui.runs`), each a `pick` field, or with
     `all=1` all those the list's filters match (the form's `view`,
     `pipeline`, `status`, `trigger`, `from`, `to`, `since`, `key`, `run`),
@@ -353,8 +360,10 @@ def bulk(mut db: State, call: Call) raises -> Page:
         q.view = "list"
     var back = q.href()
     var what = call.field("do")
-    if what != "cancel" and what != "retry" and what != "backfill":
-        return bad_request("do is cancel, retry or backfill")
+    if what == "retry":
+        what = "resume"  # its name before #378, still taken
+    if what != "cancel" and what != "resume" and what != "backfill":
+        return bad_request("do is cancel, resume or backfill")
     var ids = List[Int]()
     if call.field("all") == "1":
         var n = count_runs(db, q)
@@ -416,7 +425,7 @@ def bulk(mut db: State, call: Call) raises -> Page:
     var b: Bulk
     if what == "cancel":
         b = cancel_runs_picked(db, ids)
-    elif what == "retry":
+    elif what == "resume":
         b = resume_failed(db, ids)
     else:
         b = backfill_picked(db, ids, call.field("allow_append") == "1")
@@ -438,7 +447,9 @@ def bulk(mut db: State, call: Call) raises -> Page:
                 "Backfill them, appending again",
             )
     if call.user:
-        var action = String("/resume") if what == "retry" else String("/cancel")
+        var action = String("/resume") if what == "resume" else String(
+            "/cancel"
+        )
         if what != "backfill":
             for id in b.done:
                 audit(
@@ -494,6 +505,6 @@ def _verb(what: String) -> String:
     """A bulk action's button, before "all <n>"."""
     if what == "cancel":
         return String("Cancel")
-    if what == "retry":
-        return String("Retry the failed of")
+    if what == "resume":
+        return String("Resume the failed of")
     return String("Backfill again")

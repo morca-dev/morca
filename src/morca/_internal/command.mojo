@@ -15,7 +15,7 @@ Its commands:
     ./build/morca config export      # a morca.toml from the registrations
     ./build/morca backfill taxi 2011-01..2024-12
     ./build/morca backfill --rerun taxi 2024-03     # again, though it succeeded
-    ./build/morca cancel taxi @all   # its queued, running and retrying runs
+    ./build/morca cancel taxi @all   # its live runs, and failed ones due a retry
     ./build/morca pause taxi         # start none of its runs; morca unpause taxi
     ./build/morca tick
     ./build/morca scheduler
@@ -160,7 +160,8 @@ comptime USAGE = """usage:
   morca backfill --cancel <pipeline>  (its fill request, and its runs)
   morca start <pipeline> KEY[..KEY][,...]   (one run over them all)
   morca cancel <pipeline> KEY[..KEY][,...]|@all
-                (its queued, running and retrying runs over those keys)
+                (its queued, deferred and running runs over those keys,
+                and failed ones due a retry)
   morca cancel <run>
   morca resume [--allow-new-code] <run>
   morca rerun [--allow-append] <run> <step>

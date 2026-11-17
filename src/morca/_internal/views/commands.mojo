@@ -11,11 +11,14 @@ def cancel_cli(r: RunRow) -> String:
         shell_quote(r.pipeline),
         " ",
         shell_quote(r.partitions),
-        "  (its queued, running and retrying runs over these partitions)",
+        (
+            "  (its queued, deferred and running runs over these partitions,"
+            " and failed ones due a retry)"
+        ),
     )
 
 
-def retry_cli(r: RunRow) -> String:
+def resume_cli(r: RunRow) -> String:
     return String(
         "<",
         r.pipeline,

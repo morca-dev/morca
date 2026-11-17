@@ -18,6 +18,80 @@ as a value's goes in an attribute. An empty text means no help.
 """
 
 
+comptime RUN_STATUSES: List[String] = [
+    "queued",
+    "running",
+    "deferred",
+    "succeeded",
+    "failed",
+    "cancelled",
+]
+"""The statuses a run takes (`orca.runs.status`), in the order a run goes
+through them; a deferred run waits for its `retry_at`."""
+
+
+comptime STEP_STATUSES: List[String] = [
+    "pending",
+    "running",
+    "deferred",
+    "succeeded",
+    "failed",
+    "skipped",
+]
+"""The statuses a step of a run takes (`orca.steps.status`)."""
+
+
+comptime RUN_TRIGGERS: List[String] = [
+    "schedule",
+    "sensor",
+    "backfill",
+    "manual",
+    "ui",
+    "cli",
+    "rerun",
+    "rebuild",
+    "fill",
+]
+"""The triggers morca writes (`orca.runs.trigger`): the scheduler's fires and
+sensors, `backfill`, a binary's `run`, the UI's Start one run, `morca start`,
+a rerun, a rebuild and a fill (`morca._internal.fill`). Runs `morca start`
+queued before #378 have `ui`. The runs filter adds any others the table
+has."""
+
+
+comptime VOCABULARY_BEGIN = (
+    "<!-- generated from morca._internal.ui.terms: pixi run docs-vocabulary -->"
+)
+"""Where docs/ui.md's generated tables start (`vocabulary_markdown`)."""
+comptime VOCABULARY_END = "<!-- vocabulary: end -->"
+
+
+def _md_table(
+    mut out: String,
+    kind: StaticString,
+    head: StaticString,
+    values: List[String],
+):
+    out.write("| ", head, " | Means |\n|---|---|\n")
+    for v in values:
+        out.write("| `", v, "` | ", value_help(kind, v), " |\n")
+
+
+def vocabulary_markdown() -> String:
+    """The run-status, step-status and trigger tables docs/ui.md has between
+    `VOCABULARY_BEGIN` and `VOCABULARY_END`, from the texts here, so the
+    docs use the words as the UI defines them (tests/test_terms.mojo checks
+    they match)."""
+    var out = String(VOCABULARY_BEGIN, "\n\n")
+    _md_table(out, "status", "Run status", materialize[RUN_STATUSES]())
+    out.write("\n")
+    _md_table(out, "status", "Step status", materialize[STEP_STATUSES]())
+    out.write("\n")
+    _md_table(out, "trigger", "Trigger", materialize[RUN_TRIGGERS]())
+    out.write("\n", VOCABULARY_END)
+    return out^
+
+
 comptime COVERAGE_HELP = (
     "How much of the pipeline is done: its days or months done of those in "
     "its range so far (its first partition through the last that has "
@@ -458,7 +532,7 @@ def _value(key: String) -> StaticString:
     if key == "status:pending":
         return "Not started yet in this run."
     if key == "status:paused":
-        return "The scheduler starts none of its runs until resumed."
+        return "The scheduler starts none of its runs until unpaused."
     if key == "status:done":
         return "A run has done this partition."
     if key == "status:not done":
@@ -478,11 +552,16 @@ def _value(key: String) -> StaticString:
     if key == "trigger:sensor":
         return "Its sensor saw a new snapshot of a table it reads."
     if key == "trigger:backfill":
-        return "morca backfill, or the Start runs form, asked for it."
+        return (
+            "morca backfill, or a Backfill button here: Start runs' or a runs"
+            " list's Backfill again."
+        )
     if key == "trigger:manual":
         return "A binary's run command started it, outside the scheduler."
     if key == "trigger:ui":
-        return "Started from this site's Start runs."
+        return "Start runs' Start one run over the whole range, on this site."
+    if key == "trigger:cli":
+        return "morca start: one run over the partitions it was given."
     if key == "trigger:rerun":
         return "A rerun of an ended run, from a step on."
     if key == "trigger:rebuild":

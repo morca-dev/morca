@@ -1,0 +1,1 @@
+- **Resume and trigger `cli`**: the UI says Resume where it said Retry, and `morca start` runs have trigger `cli` instead of `ui`. (#534)

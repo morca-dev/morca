@@ -134,8 +134,17 @@ r cancel "$run" || fail "cancel a run: $(out)"
 r start toy 2024-05..2024-06 || fail "start: $(out)"
 started=$(q "SELECT max(id) FROM orca.runs")
 [ "$(out)" = "queued run $started" ] || fail "start said: $(out)"
-[ "$(q "SELECT trigger || ' ' || partitions FROM orca.runs WHERE id = $started")" = "ui 2024-05,2024-06" ] \
+[ "$(q "SELECT trigger || ' ' || partitions FROM orca.runs WHERE id = $started")" = "cli 2024-05,2024-06" ] \
     || fail "start's run"
+# The runs filter tells morca start's runs from the site's.
+[ "$(curl -fsS -H 'Accept: application/json' "$base/runs?trigger=cli" | jq -r '[.runs[].id] | join(",")')" = "$started" ] \
+    || fail "?trigger=cli"
+curl -fsS -H 'Accept: application/json' "$base/runs?trigger=ui" | jq -e --argjson s "$started" '[.runs[].id] | index($s) == null' > /dev/null \
+    || fail "?trigger=ui has morca start's run"
+# Without --remote, morca start's run is cli too.
+local_start=$(./build/morca start toy 2024-07 2>&1) || fail "a local start: $local_start"
+[ "$(q "SELECT trigger FROM orca.runs WHERE id = (SELECT max(id) FROM orca.runs)")" = cli ] || fail "a local start's trigger"
+q "UPDATE orca.runs SET status = 'cancelled', ended = now() WHERE id = (SELECT max(id) FROM orca.runs)" > /dev/null
 r rerun "$run" days || fail "rerun: $(out)"
 rerun=$(q "SELECT max(id) FROM orca.runs")
 [ "$(out)" = "queued run $rerun rerunning run $run from step days" ] || fail "rerun said: $(out)"
