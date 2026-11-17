@@ -660,8 +660,10 @@ impl Built {
             Some(s) => {
                 // `fills` repeats `fire` for one release, for older
                 // schedulers (#370).
-                J::V(json!({"cron": s.expr, "tz": s.tz, "fire": s.fire, "fills": s.fire,
-                            "catchup": s.catchup}))
+                J::V(
+                    json!({"cron": s.expr, "tz": s.tz, "fire": s.fire, "fills": s.fire,
+                            "catchup": s.catchup}),
+                )
             }
             None => J::V(Value::Null),
         };
