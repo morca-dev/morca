@@ -1,0 +1,17 @@
+[package]
+name = "toy-rust"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "examples/toy-rust: examples/toy.mojo rebuilt in Rust with morca-sdk (docs/rust-pipelines.md)."
+
+[[bin]]
+name = "toy_rust"
+path = "src/main.rs"
+
+[dependencies]
+morca-sdk = { path = "../../rust/morca-sdk" }
+serde = { version = "1", features = ["derive"] }
+
+[profile.release]
+strip = true

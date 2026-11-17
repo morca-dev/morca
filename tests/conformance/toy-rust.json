@@ -1,0 +1,11 @@
+{
+  "pipeline": "toy_rust",
+  "partitions": "monthly",
+  "keys": ["2024-01", "2024-02", "2024-03"],
+  "steps": [
+    {"name": "days", "kind": "mapped"},
+    {"name": "measure", "kind": "mapped"},
+    {"name": "total", "kind": "gather"}
+  ],
+  "slow_env": {"MORCA_TOY_SLEEP": "3"}
+}

@@ -525,8 +525,14 @@ class Suite:
                    "the same DAG reports the same registry hash", stable)
 
         def morca_version():
+            if "morca" not in d:
+                # A binary not built with morca-mojo (a Rust one, #521) says
+                # which protocol it speaks instead (Versions).
+                need("protocol" in d, "neither a `morca` key nor a `protocol`: "
+                     "register would check nothing")
+                return
             need(isinstance(d.get("morca"), str) and d["morca"],
-                 "no `morca` key: register would check nothing")
+                 "`morca` is empty: register would check nothing")
             if not b.morca:
                 raise Skip("no morca binary to compare with")
             code, out, _ = subprocess_run([b.morca, "version"])
@@ -534,7 +540,9 @@ class Suite:
             need(d["morca"] == want, f"`morca` is {d['morca']}, the scheduler is {want}")
 
         self.check("describe.morca", "versions",
-                   "describe's `morca` is the morca the binary targets", morca_version)
+                   "describe's `morca` is the morca the binary targets, or a binary "
+                   "not built with morca-mojo leaves it out and says `protocol`",
+                   morca_version)
 
         def protocol():
             need("protocol" in d, "describe names no protocol version")

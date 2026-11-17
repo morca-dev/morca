@@ -1,0 +1,13 @@
+{
+  "pipeline": "clean_rust",
+  "partitions": "monthly",
+  "keys": ["2024-03", "2024-04"],
+  "steps": [
+    {"name": "clean", "kind": "mapped", "reads": ["raw.events"], "writes": ["lake.clean"]}
+  ],
+  "sensor": true,
+  "warehouse": true,
+  "setup": [["build/cargo/release/examples/source", "{warehouse}", "2024-03"]],
+  "slow_env": {"MORCA_CLEAN_SLEEP": "3"},
+  "commit_input": ["build/cargo/release/examples/source", "{warehouse}"]
+}

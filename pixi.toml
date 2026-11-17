@@ -481,6 +481,10 @@ rust = ">=1.85"
 [feature.rust.tasks]
 test-rust-worker = { cmd = "tests/rust_worker.sh", depends-on = ["build-liblake"] }
 test-hindcast = { cmd = "tests/hindcast.sh", depends-on = ["build-liblake"] }
+# morca-sdk (#521): whole pipelines in Rust, with no Mojo toolchain; the
+# conformance suite on the Rust toy and a Rust sensor with tables, then the
+# Mojo toy and the Rust toy side by side under one scheduler.
+test-rust-sdk = { cmd = "scripts/with-postgres.sh tests/rust_sdk.sh" }
 
 # MinIO for the tests over object storage (scripts/with-minio.sh). conda-forge
 # builds it for these two platforms only.
