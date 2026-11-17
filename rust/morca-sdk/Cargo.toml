@@ -1,0 +1,66 @@
+[package]
+name = "morca-sdk"
+version = "0.1.0"
+edition = "2024"
+# iceberg 0.11.0 (the `tables` feature) needs 1.95; the rest builds on less,
+# but one floor keeps the crate simple.
+rust-version = "1.95"
+license = "Apache-2.0"
+description = "Write a whole morca pipeline in Rust: steps, partitions and tables, built into a pipeline binary the prebuilt morca scheduler runs (docs/rust-pipelines.md)."
+repository = "https://github.com/morca-dev/morca"
+
+[features]
+default = []
+# Iceberg tables in MORCA_WAREHOUSE: reads pinned and recorded, commits
+# fenced and carrying the orca.* summary keys, `sense` and `keys`. Pulls in
+# iceberg-rust, arrow-rs, parquet and object_store (about 400 crates).
+tables = [
+    "dep:iceberg",
+    "dep:iceberg-storage-opendal",
+    "dep:arrow-array",
+    "dep:arrow-schema",
+    "dep:parquet",
+    "dep:object_store",
+    "dep:tokio",
+    "dep:futures",
+    "dep:bytes",
+    "dep:async-trait",
+    "dep:uuid",
+    "dep:rand",
+]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# The run stores: Postgres (sync client; no TLS yet) and a SQLite file
+# (SQLite compiled in, so the binary needs no libsqlite3).
+postgres = "0.19"
+rusqlite = { version = "0.43", features = ["bundled"] }
+
+# The `tables` feature. iceberg 0.11.0 is built on arrow-rs 58, so the crate
+# is too: the batches a step hands iceberg must be the same major version.
+# morca-worker (rust/morca-worker) is on arrow 60, but the two never share a
+# batch: a worker is a cdylib morca loads, a pipeline binary is a program.
+iceberg = { version = "=0.11.0", optional = true }
+iceberg-storage-opendal = { version = "=0.11.0", default-features = false, features = ["opendal-s3"], optional = true }
+arrow-array = { version = "58.4", optional = true }
+arrow-schema = { version = "58.4", optional = true }
+parquet = { version = "58.4", features = ["async"], optional = true }
+object_store = { version = "0.14", features = ["aws"], optional = true }
+tokio = { version = "1", features = ["rt-multi-thread", "time"], optional = true }
+futures = { version = "0.3", optional = true }
+bytes = { version = "1", optional = true }
+async-trait = { version = "0.1", optional = true }
+uuid = { version = "1", features = ["v4"], optional = true }
+rand = { version = "0.9", optional = true }
+
+[[example]]
+name = "clean"
+required-features = ["tables"]
+
+[[example]]
+name = "source"
+required-features = ["tables"]
+
+[profile.release]
+strip = true

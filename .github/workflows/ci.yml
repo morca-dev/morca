@@ -694,7 +694,8 @@ jobs:
   # Rust workers (docs/rust-workers.md): the morca-worker crate's tests and
   # examples/rust-worker, a worker and its proxy pipeline over a local
   # warehouse (tests/rust_worker.sh), then examples/hindcast over its
-  # committed GRIB2 fixtures, offline (tests/hindcast.sh). In the rust
+  # committed GRIB2 fixtures, offline (tests/hindcast.sh), then morca-sdk's
+  # whole pipelines in Rust (tests/rust_sdk.sh). In the rust
   # environment: the data environment's tins plus conda-forge's rust (cargo
   # fetches crates; nothing fetches NOAA data). Where `changes` says, as
   # the test legs are. No secrets, and the token can only read.
@@ -774,6 +775,8 @@ jobs:
         run: pixi run -e rust test-rust-worker
       - name: Hindcast (examples/hindcast, on fixtures)
         run: pixi run -e rust test-hindcast
+      - name: Pipelines in Rust (morca-sdk, conformance on SQLite and Postgres, beside the Mojo toy)
+        run: pixi run -e rust test-rust-sdk
 
   # The tests that apply on macOS, on the Mac mini runner (m4-mini, an isolated
   # `ci` user; no Docker, no sudo), for the repo's own code only: a fork's
