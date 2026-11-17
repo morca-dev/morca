@@ -1,0 +1,1 @@
+- **describe's protocol version**: `describe` says `"protocol": 1` and `morca register` checks it, parsing describe's JSON so compact JSON registers. (#530)
