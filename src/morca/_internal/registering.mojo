@@ -31,7 +31,13 @@ from morca._internal.proc import (
     capture,
 )
 from morca._internal.secrets import secrets_json
-from morca._internal.version import MISMATCH_HINT, mismatch, mixed_allowed
+from morca._internal.version import (
+    MISMATCH_HINT,
+    mismatch,
+    mixed_allowed,
+    parse_describe,
+    protocol_refusal,
+)
 from morca._internal.sensors import parse_sense
 from morca._internal.scheduler import Scheduler
 from morca._internal.registered import (
@@ -67,10 +73,16 @@ def register_pipeline(
     Returns the pipeline's name."""
     var path = absolute(binary)
     var got = capture([path, "describe"], binary_seconds())
-    if got[0] != 0 or not got[1].startswith('{"pipeline": '):
+    if got[0] != 0:
         raise Error("morca: ", path, " describe exited ", got[0], ": ", got[1])
-    # The pipeline and this morca from one release (#455).
-    var other = mismatch(path, got[1])
+    # Parsed, so spacing and key order don't matter (#524).
+    var d = parse_describe(path, got[1])
+    # A protocol this morca speaks (#525), and for a morca-mojo binary,
+    # the pipeline and this morca from one release (#455).
+    var refusal = protocol_refusal(path, d)
+    if refusal:
+        raise Error("morca: ", refusal)
+    var other = mismatch(path, d)
     if other and not mixed_allowed():
         raise Error("morca: ", other, ": ", MISMATCH_HINT)
     if other:

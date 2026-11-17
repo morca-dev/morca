@@ -56,11 +56,8 @@ import uuid
 
 DOC = "docs/pipeline-protocol.md"
 
-# Checks known to fail until an issue lands: id -> issue.
-KNOWN = {
-    "register.compact": "#524",
-    "describe.protocol": "#525",
-}
+# Checks known to fail until an issue lands: id -> issue. None now.
+KNOWN: dict[str, str] = {}
 
 STALE = 2.0
 """MORCA_STALE_SECONDS for every command: the suite is the scheduler."""
@@ -541,6 +538,9 @@ class Suite:
 
         def protocol():
             need("protocol" in d, "describe names no protocol version")
+            p = d["protocol"]
+            need(isinstance(p, int) and not isinstance(p, bool) and p >= 1,
+                 f"`protocol` is {p!r}, not a version number")
 
         self.check("describe.protocol", "versions",
                    "describe says which version of the protocol it implements",
@@ -1218,7 +1218,7 @@ def describe_fields(d):
          f"`partitions` is {parts}")
     for k, t in (("max_runs", int), ("run_retries", int), ("keys_per_run", int),
                  ("workers", int), ("sensor", bool), ("tasks", list),
-                 ("source", dict), ("morca", str)):
+                 ("source", dict), ("protocol", int), ("morca", str)):
         if k in d:
             need(isinstance(d[k], t) and not (t is int and isinstance(d[k], bool)),
                  f"`{k}` is {d[k]!r}")

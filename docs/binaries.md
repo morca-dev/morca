@@ -77,6 +77,9 @@ The binary and the pipelines it runs come from one morca-mojo:
   be checked, and registers as before. Runs aren't checked: a pipeline
   registered under one morca keeps running after the scheduler moves to the
   next, as it always has (an older binary on a newer schema, AGENTS.md).
+- **A pipeline not built with morca-mojo** (#521) says `"protocol"` and no
+  `"morca"`: register checks the protocol version it speaks instead
+  ([pipeline-protocol.md](pipeline-protocol.md#versions)).
 - **The project image** (`deploy/project.Dockerfile`) stops when the runtime's
   `morca version` isn't the one in the project's environment, and says which
   `--build-arg MORCA_VERSION` to build with.

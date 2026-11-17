@@ -205,4 +205,20 @@ echo "$out" | grep -qF "toy-old was built with morca 0.0.1 and this morca is $wa
 [ "$(q "SELECT count(*) FROM orca.pipelines WHERE name = 'toy_old'")" = 0 ] || fail "the refused pipeline is registered"
 out=$(MORCA_MIXED_VERSIONS=1 ./build/morca register ./build/toy-old 2>&1) || fail "MORCA_MIXED_VERSIONS=1 register: $out"
 echo "$out" | grep -qF "morca: warning: $PWD/build/toy-old was built with morca 0.0.1" || fail "no warning: $out"
-echo "ok   versions: a run links the commit it ran, the pipeline lists its versions, register checks the morca"
+# The protocol version (#525): a binary not built with morca-mojo says
+# `protocol` and no `morca`, in compact JSON (#524), and registers; one of
+# a protocol this morca doesn't speak is refused, MORCA_MIXED_VERSIONS or not.
+./build/toy describe | jq -e '.protocol == 1' > /dev/null || fail "describe's protocol: $(./build/toy describe | jq -c .protocol)"
+./build/toy describe | jq -c '.pipeline = "toy_sdk" | del(.morca)' > build/toy-sdk.json
+printf '#!/bin/sh\ncat "%s"\n' "$PWD/build/toy-sdk.json" > build/toy-sdk
+chmod +x build/toy-sdk
+out=$(./build/morca register ./build/toy-sdk 2>&1) || fail "register a protocol-only describe: $out"
+echo "$out" | grep -qF warning && fail "a protocol-only describe warned: $out"
+[ "$(q "SELECT count(*) FROM orca.pipelines WHERE name = 'toy_sdk'")" = 1 ] || fail "the protocol-only pipeline isn't registered"
+jq -c '.pipeline = "toy_next" | .protocol = 2' build/toy-sdk.json > build/toy-next.json
+printf '#!/bin/sh\ncat "%s"\n' "$PWD/build/toy-next.json" > build/toy-next
+chmod +x build/toy-next
+out=$(MORCA_MIXED_VERSIONS=1 ./build/morca register ./build/toy-next 2>&1) && fail "registered protocol 2: $out"
+echo "$out" | grep -qF "toy-next speaks pipeline protocol 2 and this morca speaks 1" || fail "the protocol refusal: $out"
+[ "$(q "SELECT count(*) FROM orca.pipelines WHERE name = 'toy_next'")" = 0 ] || fail "the protocol-2 pipeline is registered"
+echo "ok   versions: a run links the commit it ran, the pipeline lists its versions, register checks the morca and the protocol"

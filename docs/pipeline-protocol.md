@@ -114,10 +114,14 @@ it keeps the log itself (`src/morca/_internal/tick.mojo:91-100`).
 (`src/morca/_cli.mojo:164-166`). See [`describe` and the registry
 hash](#describe-and-the-registry-hash) for its fields.
 
-- The output must **start with the bytes `{"pipeline": `** (with that one
-  space), or `morca register` refuses the binary
-  (`src/morca/_internal/registering.mojo:70`). A JSON serialiser's compact
-  output (`{"pipeline":"x"`) is refused.
+- The output must be **one JSON object with a non-empty string
+  `pipeline`**, or `morca register` refuses the binary
+  (`src/morca/_internal/version.mojo`, `parse_describe`). It's parsed, so
+  whitespace and key order don't matter: a JSON serialiser's compact output
+  (`{"pipeline":"x",...}`) registers (#524). morca before 0.35.0 required
+  the output to start with the bytes `{"pipeline": ` (one space); a binary
+  that must register with those writes that prefix
+  ([Versions](#versions)).
 - `describe` is killed after `MORCA_BINARY_SECONDS` (default 300)
   (`src/morca/_internal/proc.mojo:202-208`). It needs no database and no
   warehouse.
@@ -314,12 +318,16 @@ Only for a pipeline whose describe lists `tasks`.
 
 ## `describe` and the registry hash
 
-`describe` prints one JSON object (`src/morca/pipeline.mojo:215-290`). The
-registration keeps it as `orca.pipelines.describe` (jsonb), and the scheduler
-and UI read it there with SQL, so key order and whitespace don't matter to
-them. They do matter to the two text checks: the prefix `{"pipeline": ` (see
-[`describe`](#describe)) and the `"morca": "<version>"` key, which is found by
-searching the text from the end (`src/morca/_internal/version.mojo:19-30`).
+`describe` prints one JSON object (`src/morca/pipeline.mojo:215-292`). The
+registration parses it and keeps it as `orca.pipelines.describe` (jsonb), and
+the scheduler and UI read it there with SQL, so key order and whitespace
+don't matter. A field morca doesn't know is kept and ignored, so a new
+optional field never breaks an older scheduler.
+
+morca before 0.35.0 checked two things in the text instead: the prefix
+`{"pipeline": ` and the `"morca": "<version>"` key, found by searching from
+the end. morca-mojo binaries keep both (`pipeline` first, `morca` last), so
+older schedulers still register them.
 
 An example, from a test's stand-in binary (`tests/fake_sensor:10`):
 
@@ -332,7 +340,7 @@ An example, from a test's stand-in binary (`tests/fake_sensor:10`):
             "input": "morca.month.Month", "output": "Int",
             "reads": ["raw.a", "raw.b"], "writes": ["lake.ab"]}],
  "tasks": [], "source": {"repo": "", "commit": "", "dirty": false},
- "morca": "0.34.0"}
+ "protocol": 1, "morca": "0.34.0"}
 ```
 
 | Field | Written at | Read by | Default when absent |
@@ -352,7 +360,8 @@ An example, from a test's stand-in binary (`tests/fake_sensor:10`):
 | `steps[]` | `pipeline.mojo:252-279` | see below | required |
 | `tasks` | `pipeline.mojo:280-283` | dista task names; non-empty means the run gets a cluster (`db/registered.mojo:95`, `db/config_show.mojo:13`) | `[]` |
 | `source` | `pipeline.mojo:284-286` | `repo`, `commit`, `dirty`: the row of `orca.pipeline_versions` (`db/runs.mojo:50-86`), and whether a run is [outdated](#the-stop-notice-a-newer-version-leads) | empty |
-| `morca` | `pipeline.mojo:288` | the morca it was built with, checked at registration ([Versions](#versions)) | not checked |
+| `protocol` | `pipeline.mojo:289` | the version of this protocol the binary speaks, checked at registration ([Versions](#versions)) | not checked |
+| `morca` | `pipeline.mojo:290` | the morca-mojo it was built with, checked at registration; only for binaries built with morca-mojo ([Versions](#versions)) | not checked |
 
 Paths in the table are under `src/morca/` and `src/morca/_internal/`.
 
@@ -366,7 +375,7 @@ Each element of `steps`, in run order:
 | `function`, `input`, `output` | shown in the UI only (`ui/step_cards.mojo:266-273`) (**incidental** values: Mojo type and linkage names) |
 | `timeout_seconds` | only when set; shown in the UI. The binary enforces it ([Timeouts](#timeouts-and-a-cancel-that-ran-out)) |
 | `version` | only when set; the run's data version (`migrations.mojo:9-23`), so a fill redoes keys made at another version |
-| `reads`, `writes` | dataset names `ns.table`. `writes` includes `replaces`. Used for sensing, lineage, cycles at registration and appending writes (`db/sensing.mojo:28-33`, `registering.mojo:78`, `db/queueing.mojo:231-237`) |
+| `reads`, `writes` | dataset names `ns.table`. `writes` includes `replaces`. Used for sensing, lineage, cycles at registration and appending writes (`db/sensing.mojo:28-33`, `registering.mojo:90`, `db/queueing.mojo:231-237`) |
 | `replaces` | only when non-empty: datasets whose partitions a rerun replaces instead of appending to (`db/queueing.mojo:231-237`) |
 
 ### The registry hash
@@ -916,14 +925,24 @@ driver log and metrics (`driver.log`, `metrics/`, `timeline.json`).
 
 ## Versions
 
+- **The protocol.** describe's `"protocol": <n>` is the version of **this
+  protocol** the binary speaks; it is 1 (`PROTOCOL_VERSION`,
+  `src/morca/_internal/version.mojo`). `morca register` refuses a binary
+  whose `protocol` isn't an integer from 1 to the version it speaks,
+  whatever `MORCA_MIXED_VERSIONS` says, and registers one without the key
+  unchecked (#525). The version goes up only for a change an older binary
+  can't follow; a new optional field or subcommand doesn't raise it.
 - **`MORCA_VERSION`.** describe's last key, `"morca": "<version>"`, is the
-  morca-mojo the binary was built with (`src/morca/pipeline.mojo:287-288`).
+  morca-mojo the binary was built with (`src/morca/pipeline.mojo:290`).
   `morca register` refuses a binary of another version unless
   `MORCA_MIXED_VERSIONS=1`, and registers one without the key unchecked
-  (`src/morca/_internal/version.mojo:19-48`, [binaries.md](binaries.md#versions)).
-  A second implementation should say which version of **this protocol** it
-  implements here, and morca should check that instead. Until then, it
-  must print the `morca` of the scheduler it targets.
+  (`src/morca/_internal/version.mojo`, [binaries.md](binaries.md#versions)).
+  A binary not built with morca-mojo says `protocol` and leaves `morca` out.
+- **Older schedulers.** morca before 0.35.0 reads neither `protocol` nor
+  the JSON: it needs the bytes `{"pipeline": ` first, and checks the last
+  `"morca": "<version>"` if there is one. A binary that must register with
+  such a scheduler prints describe that way, and the `morca` of that
+  scheduler.
 - **The registry hash** says which DAG a run ran ([above](#the-registry-hash)).
 - **The source.** describe's `source` (`repo`, `commit`, `dirty`) and
   `MORCA_IMAGE` make the run's version row, which the UI shows and the
@@ -970,7 +989,8 @@ What the runners do with it:
 For `default` and `control` placement on Postgres or SQLite, with no dista
 tasks, a pipeline binary needs:
 
-1. `describe`, with the fields above and the `{"pipeline": ` prefix.
+1. `describe`: one JSON object with the fields above and `"protocol": 1`
+   (no `morca`, unless it's built with morca-mojo).
 2. `resume <run> [--allow-new-code]`: claim, version, interrupt, prior,
    execute with a heartbeat, ownership checks at every attempt, the commit
    fence, timeouts and cancels, and ending the run.
