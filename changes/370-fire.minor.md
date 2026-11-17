@@ -1,1 +1,0 @@
-- **`fire=` replaces `fills=`**: `Pipeline[..., fire=Previous]` picks the partition a fire runs and `describe` says `schedule.fire`; `fills=` and `schedule.fills` still work for one release. (#370)
