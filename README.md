@@ -54,6 +54,7 @@ them comes with a note in the changelog. Everything under `morca._internal`
 | [docs/morca-toml.md](docs/morca-toml.md) | `morca.toml`: every key, precedence, `morca config show` and `export`, and [fills](docs/morca-toml.md#fills) |
 | [docs/placement.md](docs/placement.md) | where a pipeline's runs run: `default`, `ec2`, `control` and `worker:<pool>`, and the control host's limits |
 | [docs/workers.md](docs/workers.md) | remote workers: `morca worker`, worker tokens, a worker on another machine, the run's state over the API |
+| [docs/pipeline-protocol.md](docs/pipeline-protocol.md) | the pipeline-binary protocol: the subcommands, describe's JSON, the environment, the run store's rules and the tables' summary keys a pipeline binary must keep to |
 | [docs/rust-workers.md](docs/rust-workers.md) | steps written in Rust: the `morca-worker` crate, `morca.rust_step`, the C ABI, the schema file both sides read, and Parquet files a worker writes itself |
 | [docs/watchdog.md](docs/watchdog.md) | the watchdog's rules and thresholds, what a trip pauses, `morca watchdog status`, `ack` and `snooze` |
 | [docs/alerts.md](docs/alerts.md) | alerts to your phone through ntfy: what is sent, `MORCA_NOTIFY_*`, `morca notify` |
