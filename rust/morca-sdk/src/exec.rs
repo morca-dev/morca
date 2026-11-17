@@ -163,20 +163,17 @@ fn gather_input(
             None => blocked.push(format!("{up} {k}")),
             Some(o) => match decode_value(o, want) {
                 Ok(v) => values.push(v),
-                // Shown as the step's error: its input doesn't decode.
-                Err(e) => values.push(json!({"morca-error": e})),
+                // An output an older build stored as another type: the
+                // step's decode then fails, naming it.
+                Err(e) => {
+                    let bad = json!({"type": format!("{up} [{k}]'s output ({e})"), "value": null});
+                    return (serde_json::to_vec(&bad).unwrap(), None);
+                }
             },
         }
     }
     if !blocked.is_empty() {
         return (vec![], Some(blocked.join(", ")));
-    }
-    if let Some(e) = values.iter().find_map(|v| v.get("morca-error")) {
-        let msg = e.as_str().unwrap_or("").to_string();
-        return (
-            serde_json::to_vec(&json!({"type": "", "value": msg})).unwrap(),
-            None,
-        );
     }
     let input = json!({"type": st.input, "value": Value::Array(values)});
     (serde_json::to_vec(&input).unwrap(), None)

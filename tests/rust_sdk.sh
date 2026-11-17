@@ -23,6 +23,20 @@ cd "$(dirname "$0")/.."
 . "$PWD/tests/port.sh"
 mkdir -p build/rust-sdk
 export CARGO_TARGET_DIR=$PWD/build/cargo
+# On Linux, cargo links with conda-forge's compiler, against its older
+# glibc. C code a crate builds (aws-lc-sys, under the tables feature) must
+# use that compiler too: the system's gcc compiles against the system's
+# glibc headers and leaves symbols (__isoc23_sscanf) the link can't find.
+if [ "$(uname)" = Linux ] && [ -z "${CC:-}" ]; then
+    for c in "${CONDA_TOOLCHAIN_HOST:-none}-cc" x86_64-conda-linux-gnu-cc aarch64-conda-linux-gnu-cc; do
+        if command -v "$c" > /dev/null 2>&1; then
+            CC=$c
+            CXX=${c%-cc}-c++
+            export CC CXX
+            break
+        fi
+    done
+fi
 log=build/rust-sdk/test.log
 : > "$log"
 ui=
