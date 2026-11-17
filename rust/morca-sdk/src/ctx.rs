@@ -30,7 +30,10 @@ pub struct Ctx<'a> {
     /// The location of each commit this attempt made, in order.
     pub(crate) commits: Vec<String>,
     pub(crate) declared_reads: Vec<String>,
+    /// What the step writes, `replaces` among them.
     pub(crate) declared_writes: Vec<String>,
+    /// The datasets whose partitions a new run of the step replaces.
+    pub(crate) declared_replaces: Vec<String>,
     pub(crate) log_path: Option<String>,
     pub(crate) store: &'a mut Owned,
 }
@@ -149,6 +152,20 @@ impl Ctx<'_> {
 
     pub(crate) fn commits_to(&self, location: &str) -> usize {
         self.commits.iter().filter(|t| *t == location).count()
+    }
+
+    /// Whether the step declared that it replaces `dataset`'s partitions
+    /// (`replaces`).
+    pub fn replaces(&self, dataset: &str) -> bool {
+        self.declared_replaces.iter().any(|d| d == dataset)
+    }
+
+    /// `Ctx.same_run`: whether a snapshot with `summary` was committed by
+    /// any step of this run (the same pipeline and run).
+    pub fn same_run(&self, summary: &HashMap<String, String>) -> bool {
+        self.run > 0
+            && summary.get("orca.pipeline") == Some(&self.pipeline)
+            && summary.get("orca.run") == Some(&self.run.to_string())
     }
 
     /// `Ctx.made`: whether a snapshot with `summary` is this step's next

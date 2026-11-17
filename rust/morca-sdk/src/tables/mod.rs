@@ -11,8 +11,10 @@
 //!   in `orca.commits`; before writing anything, `find_commit` looks for the
 //!   commit an earlier attempt of the run already made, and records that
 //!   instead.
-//! - Only appends: iceberg-rust 0.11.0 has no overwrite or delete
-//!   transaction, so a step can't declare `replaces=` yet.
+//! - To a dataset the step declares in `replaces`, the run's first commit
+//!   to each partition is an `overwrite` that removes what earlier runs left
+//!   there (`replace`): iceberg-rust 0.11.0 has no overwrite transaction, so
+//!   that snapshot is written from its parts.
 //!
 //! Without the feature a pipeline declares no datasets, `sense` prints
 //! nothing and `keys` can't be asked for.
@@ -21,6 +23,8 @@
 mod catalog;
 #[cfg(feature = "tables")]
 mod imp;
+#[cfg(feature = "tables")]
+mod replace;
 
 #[cfg(feature = "tables")]
 pub use imp::*;

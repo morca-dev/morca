@@ -94,7 +94,8 @@ it was stored as, so a step whose types changed fails with what it got
 rather than misreading it.
 
 `step("name")` sets a step's `retries`, `backoff_seconds` (doubling),
-`timeout_seconds`, data `version`, and its `reads` and `writes`. A plain
+`timeout_seconds`, data `version`, and its `reads`, `writes` and
+`replaces`. A plain
 `"name"` takes the defaults: no retries, no timeout.
 
 A step fails by returning an error: `?` on any error type, or
@@ -169,7 +170,41 @@ Pipeline::<Month>::new("clean_rust")
   writes nothing. `find_commit(dataset)` asks first, for a step that writes
   files itself. `arrow_schema(dataset)` is the schema the batches need.
 - `ensure_table(dataset, schema, spec)` creates a table that isn't there.
+- `write_files(dataset, batches)` writes the Parquet files without
+  committing them, and `append_files(dataset, files)` commits them as
+  `append` would; a step that does this calls `find_commit` first.
 - A step may read and write only the datasets it declares.
+
+#### Replacing partitions
+
+A dataset in `replaces` instead of `writes` is one whose partitions a new
+run replaces, as Mojo's `replaces=`: `append` and `append_files` to it make
+the run's first commit to each partition an `overwrite` that removes what
+earlier runs left there, so `morca backfill --rerun` leaves one copy of a
+key's rows.
+
+```rust
+.mapped(step("load").reads(["raw.events"]).replaces(["lake.monthly"]), load)
+```
+
+The semantics are the Mojo side's (docs/pipeline-protocol.md, "Replacing
+partitions"): the partitions are those the new rows land in, files this run
+committed are never removed, a commit that removes nothing appends, the
+plan is made again on every retry, another writer's file in the partition
+committed after the run's first commit fails the attempt, and the snapshot
+carries `orca.replaced-files` and `orca.replaced-records`. A crash between
+writing and committing, and a retry after committing, behave as for an
+append. `replace_partitions` and `replace_partition_files` replace a
+dataset declared in `writes`. A dataset in `replaces` is hashed as a write,
+so declaring it doesn't change the registry hash.
+
+iceberg-rust 0.11.0 has no overwrite transaction, so morca-sdk writes that
+snapshot itself with iceberg-rust's manifest and manifest-list writers
+(src/tables/replace.rs) and commits it through its catalog, fenced like any
+commit. [examples/replace.rs](../rust/morca-sdk/examples/replace.rs), the
+twin of tests/sensors/replace.mojo, is checked by the conformance suite as
+tests/conformance/replace-rust.json, and Mojo's `morca.tables` reads its
+table as one copy of each month.
 
 The binary then also answers `sense` (a sensor's datasets) and `keys` (a
 keyed pipeline's keys). [rust/morca-sdk/examples/clean.rs](../rust/morca-sdk/examples/clean.rs)
@@ -204,8 +239,6 @@ empty.
   later.
 - **dista tasks**: a dista task is Mojo code, and forking a threaded Rust
   process is the #135 hazard. A step parallelises inside itself instead.
-- **`replaces=`**: iceberg-rust 0.11.0 has no overwrite or delete
-  transaction, so a step only appends.
 - **Object storage for logs**: `MORCA_LOGS`, `keep-log` and `put-log` take
   local paths; an `s3://` `MORCA_LOGS` keeps no attempt logs yet.
 - **Postgres over TLS**: the client connects without TLS

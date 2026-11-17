@@ -76,6 +76,7 @@ pub struct StepSpec {
     pub(crate) version: u64,
     pub(crate) reads: Vec<String>,
     pub(crate) writes: Vec<String>,
+    pub(crate) replaces: Vec<String>,
 }
 
 /// A step named `name`, to set more on.
@@ -124,6 +125,27 @@ impl StepSpec {
     pub fn writes<I: IntoIterator<Item = S>, S: Into<String>>(mut self, ds: I) -> Self {
         self.writes = ds.into_iter().map(Into::into).collect();
         self
+    }
+    /// The warehouse datasets (`ns.table`) the step writes and whose
+    /// partitions a new run replaces rather than appends to, as Mojo's
+    /// `replaces=`: [`Ctx::append`] to one makes the run's first commit to
+    /// each partition an `overwrite` that removes what earlier runs left
+    /// there. They count as written, and needn't be in `writes` too.
+    pub fn replaces<I: IntoIterator<Item = S>, S: Into<String>>(mut self, ds: I) -> Self {
+        self.replaces = ds.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// Every dataset the step writes: `writes`, then each of `replaces` not
+    /// among them (`dataset_writes()` in src/morca/step.mojo).
+    pub(crate) fn all_writes(&self) -> Vec<String> {
+        let mut out = self.writes.clone();
+        for d in &self.replaces {
+            if !out.contains(d) {
+                out.push(d.clone());
+            }
+        }
+        out
     }
 }
 
@@ -528,15 +550,16 @@ impl Built {
                 return bad(format!("two steps are named {n}"));
             }
             names.push(n);
-            for d in s.spec.reads.iter().chain(&s.spec.writes) {
+            let writes = s.spec.all_writes();
+            for d in s.spec.reads.iter().chain(&writes) {
                 if !is_dataset(d) {
                     return bad(format!("step {n}: '{d}' isn't a dataset (namespace.table)"));
                 }
             }
-            if s.spec.writes.iter().any(|d| s.spec.reads.contains(d)) {
+            if writes.iter().any(|d| s.spec.reads.contains(d)) {
                 return bad(format!("step {n} reads a dataset it writes"));
             }
-            if !cfg!(feature = "tables") && !(s.spec.reads.is_empty() && s.spec.writes.is_empty()) {
+            if !cfg!(feature = "tables") && !(s.spec.reads.is_empty() && writes.is_empty()) {
                 return bad(format!(
                     "step {n} declares datasets: build morca-sdk with the `tables` feature"
                 ));
@@ -587,11 +610,15 @@ impl Built {
     /// Each dataset a step reads and no step writes, once, in step order,
     /// then a keyed pipeline's keys dataset.
     pub(crate) fn sensed(&self) -> Vec<String> {
-        let written: Vec<&String> = self.steps.iter().flat_map(|s| &s.spec.writes).collect();
+        let written: Vec<String> = self
+            .steps
+            .iter()
+            .flat_map(|s| s.spec.all_writes())
+            .collect();
         let mut out: Vec<String> = vec![];
         for s in &self.steps {
             for d in &s.spec.reads {
-                if !written.contains(&d) && !out.contains(d) {
+                if !written.contains(d) && !out.contains(d) {
                     out.push(d.clone());
                 }
             }
@@ -621,7 +648,10 @@ impl Built {
             for d in &s.spec.reads {
                 all.push_str(&format!("\treads {d}"));
             }
-            for d in &s.spec.writes {
+            // A dataset in `replaces` is hashed as a write, as the Mojo
+            // binary hashes it (#295): replacing changes what a rerun does,
+            // not what the runs made.
+            for d in s.spec.all_writes() {
                 all.push_str(&format!("\twrites {d}"));
             }
             if s.spec.version > 0 {
@@ -686,7 +716,11 @@ impl Built {
                     o.push(("version", J::v(s.spec.version)));
                 }
                 o.push(("reads", J::v(&s.spec.reads)));
-                o.push(("writes", J::v(&s.spec.writes)));
+                o.push(("writes", J::v(s.spec.all_writes())));
+                // Only when declared, as the Mojo binary writes it.
+                if !s.spec.replaces.is_empty() {
+                    o.push(("replaces", J::v(&s.spec.replaces)));
+                }
                 J::Obj(o)
             })
             .collect();
@@ -815,6 +849,26 @@ mod tests {
         assert!(sensor.is_err());
         let empty = Pipeline::<Month>::new("t").build();
         assert!(empty.is_err());
+    }
+
+    // A step may declare datasets only with the `tables` feature.
+    #[cfg(feature = "tables")]
+    #[test]
+    fn replaces_is_a_write() {
+        let with = |spec: StepSpec| Pipeline::<Month>::new("t").mapped(spec, days).build();
+        let writes = with(step("a").writes(["lake.x"])).unwrap();
+        let replaces = with(step("a").replaces(["lake.x"])).unwrap();
+        let both = with(step("a").writes(["lake.x"]).replaces(["lake.x"])).unwrap();
+        // Hashed as a write, as the Mojo binary hashes it (#295).
+        assert_eq!(writes.registry_hash(), replaces.registry_hash());
+        assert_eq!(writes.registry_hash(), both.registry_hash());
+        let d: Value = serde_json::from_str(&replaces.describe()).unwrap();
+        assert_eq!(d["steps"][0]["writes"], json!(["lake.x"]));
+        assert_eq!(d["steps"][0]["replaces"], json!(["lake.x"]));
+        let d: Value = serde_json::from_str(&writes.describe()).unwrap();
+        assert!(d["steps"][0].get("replaces").is_none());
+        let bad = with(step("a").reads(["lake.x"]).replaces(["lake.x"]));
+        assert!(bad.err().unwrap().contains("reads a dataset it writes"));
     }
 
     #[test]

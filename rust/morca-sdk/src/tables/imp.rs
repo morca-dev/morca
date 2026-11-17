@@ -32,6 +32,7 @@ use object_store::local::LocalFileSystem;
 use parquet::file::properties::WriterProperties;
 
 use super::catalog::MorcaCatalog;
+use super::replace;
 use crate::ctx::Ctx;
 use crate::pipeline::{Built, StepResult, fail};
 
@@ -275,44 +276,183 @@ impl Ctx<'_> {
     /// committed with the `orca.*` summary and recorded. If an earlier
     /// attempt of this run already made this commit, records that one and
     /// writes nothing.
+    ///
+    /// To a dataset the step declared in `replaces`, it's
+    /// [`Ctx::replace_partitions`]: the partitions the rows land in lose
+    /// what earlier runs left there.
     pub fn append(&mut self, dataset: &str, batches: Vec<RecordBatch>) -> StepResult<i64> {
+        let replace = self.replaces(dataset);
+        self.commit_rows(dataset, batches, replace)
+    }
+
+    /// Writes `batches` to the dataset as one snapshot that also removes the
+    /// files earlier runs left in the partitions the rows land in, and
+    /// returns it, or the snapshot an earlier attempt of this run made (Mojo's
+    /// `replace_partitions`). What [`Ctx::append`] does to a dataset in
+    /// `replaces`; this is for one the step declares in `writes`.
+    ///
+    /// The run's first commit to a partition is an `overwrite` that removes
+    /// every file in it this run didn't commit; later commits of the run to
+    /// it append, since files of this run are never removed. An
+    /// unpartitioned table is one partition. If another writer committed a
+    /// file to one of the partitions after this run's first commit to the
+    /// table, two writers are replacing it at once: the attempt fails,
+    /// committing nothing. The summary has `orca.replaced-files` and
+    /// `orca.replaced-records`.
+    pub fn replace_partitions(
+        &mut self,
+        dataset: &str,
+        batches: Vec<RecordBatch>,
+    ) -> StepResult<i64> {
+        self.commit_rows(dataset, batches, true)
+    }
+
+    /// Writes `batches` into the dataset's data files as Parquet, split by
+    /// its partition spec, without committing them: for
+    /// [`Ctx::append_files`] to commit. Call [`Ctx::find_commit`] first, so
+    /// a retry of an attempt that committed doesn't write them again.
+    pub fn write_files(
+        &mut self,
+        dataset: &str,
+        batches: Vec<RecordBatch>,
+    ) -> StepResult<Vec<DataFile>> {
         self.declared(dataset, true)?;
-        let cat = catalog()?;
-        let id = ident(dataset)?;
-        let mut t = block(load(&cat, &id))?.ok_or_else(|| {
+        let t = self.writable(&catalog()?, dataset)?;
+        block(write_files(&t, &batches))
+            .map_err(|e| fail(format!("morca: can't write {dataset}'s files: {e}")))
+    }
+
+    /// Commits data files already written ([`Ctx::write_files`]) to the
+    /// dataset as one snapshot, as [`Ctx::append`] commits what it writes:
+    /// fenced, with the `orca.*` summary, recorded, or the commit an earlier
+    /// attempt made. To a dataset in `replaces`, it replaces their
+    /// partitions.
+    pub fn append_files(&mut self, dataset: &str, files: Vec<DataFile>) -> StepResult<i64> {
+        let replace = self.replaces(dataset);
+        self.commit_data_files(dataset, files, replace)
+    }
+
+    /// [`Ctx::replace_partitions`] of data files already written.
+    pub fn replace_partition_files(
+        &mut self,
+        dataset: &str,
+        files: Vec<DataFile>,
+    ) -> StepResult<i64> {
+        self.commit_data_files(dataset, files, true)
+    }
+
+    /// The table of a dataset the step writes, which must exist.
+    fn writable(&self, cat: &MorcaCatalog, dataset: &str) -> StepResult<Table> {
+        block(load(cat, &ident(dataset)?))?.ok_or_else(|| {
             fail(format!(
                 "morca: there's no table {dataset}: ensure_table it first"
             ))
-        })?;
-        let location = t.metadata().location().to_string();
-        if let Some(found) = self.found(t.metadata()) {
-            self.log_to_file(&format!(
-                "found commit {found} to {dataset} from an earlier attempt"
-            ));
-            self.record_commit(&location, found, dataset)?;
+        })
+    }
+
+    /// The commit an earlier attempt of the run made, recorded again.
+    fn found_again(&mut self, t: &Table, dataset: &str) -> StepResult<Option<i64>> {
+        let Some(found) = self.found(t.metadata()) else {
+            return Ok(None);
+        };
+        self.log_to_file(&format!(
+            "found commit {found} to {dataset} from an earlier attempt"
+        ));
+        self.record_commit(t.metadata().location(), found, dataset)?;
+        Ok(Some(found))
+    }
+
+    fn commit_rows(
+        &mut self,
+        dataset: &str,
+        batches: Vec<RecordBatch>,
+        replace: bool,
+    ) -> StepResult<i64> {
+        self.declared(dataset, true)?;
+        let cat = catalog()?;
+        let t = self.writable(&cat, dataset)?;
+        if let Some(found) = self.found_again(&t, dataset)? {
             return Ok(found);
         }
         let files = block(write_files(&t, &batches))
             .map_err(|e| fail(format!("morca: can't write {dataset}'s files: {e}")))?;
+        self.commit(&cat, t, dataset, files, replace)
+    }
+
+    fn commit_data_files(
+        &mut self,
+        dataset: &str,
+        files: Vec<DataFile>,
+        replace: bool,
+    ) -> StepResult<i64> {
+        self.declared(dataset, true)?;
+        let cat = catalog()?;
+        let t = self.writable(&cat, dataset)?;
+        if let Some(found) = self.found_again(&t, dataset)? {
+            return Ok(found);
+        }
+        self.commit(&cat, t, dataset, files, replace)
+    }
+
+    /// Commits `files` to `t` as one snapshot, an append or (`replace`) one
+    /// replacing their partitions, reloading and trying again (planned
+    /// again) when another writer commits first, and records it.
+    fn commit(
+        &mut self,
+        cat: &MorcaCatalog,
+        mut t: Table,
+        dataset: &str,
+        files: Vec<DataFile>,
+        replace: bool,
+    ) -> StepResult<i64> {
+        let id = ident(dataset)?;
+        let location = t.metadata().location().to_string();
         let mut tries = 0;
+        let mut replaced = (0, 0);
         let snap = loop {
+            let mut summary = self.summary(&location);
+            // Planned against the snapshot this try builds on, never one an
+            // earlier try saw: a stale list would leave another writer's
+            // rows beside these.
+            let plan = if replace {
+                let p = block(replace::plan(&t, &files, |s| self.same_run(s), dataset))
+                    .map_err(fail)?;
+                summary.insert("orca.replaced-files".into(), p.files.to_string());
+                summary.insert("orca.replaced-records".into(), p.records.to_string());
+                replaced = (p.files, p.records);
+                Some(p).filter(|p| p.removed > 0)
+            } else {
+                None
+            };
             self.fence()?;
-            let summary = self.summary(&location);
-            let tx = Transaction::new(&t);
-            let tx = tx
-                .fast_append()
-                .add_data_files(files.clone())
-                .set_snapshot_properties(summary)
-                .apply(tx)?;
-            match block(tx.commit(&cat)) {
+            let got = match &plan {
+                Some(p) => block(replace::commit_overwrite(
+                    cat,
+                    &t,
+                    files.clone(),
+                    p,
+                    summary,
+                )),
+                None => {
+                    let tx = Transaction::new(&t);
+                    let tx = tx
+                        .fast_append()
+                        .add_data_files(files.clone())
+                        .set_snapshot_properties(summary)
+                        .apply(tx)?;
+                    block(tx.commit(cat))
+                }
+            };
+            match got {
                 Ok(t2) => break current(t2.metadata()),
                 Err(e) if e.retryable() && tries < COMMIT_RETRIES => {
                     tries += 1;
                     let base = 0.01 * f64::from(1u32 << (tries - 1).min(6));
                     let wait = base * rand::random_range(0.5..1.5);
                     std::thread::sleep(std::time::Duration::from_secs_f64(wait));
-                    t = block(load(&cat, &id))?
+                    t = block(load(cat, &id))?
                         .ok_or_else(|| fail(format!("morca: {dataset} went away")))?;
+                    // A commit that landed after all is done, not tried again.
                     if let Some(found) = self.found(t.metadata()) {
                         break found;
                     }
@@ -326,6 +466,13 @@ impl Ctx<'_> {
             }
         };
         self.record_commit(&location, snap, dataset)?;
+        if replaced.0 > 0 {
+            self.log(format!(
+                "replaced {} files ({} rows) of {dataset} that earlier runs committed, in \
+                 snapshot {snap}",
+                replaced.0, replaced.1
+            ));
+        }
         Ok(snap)
     }
 }
@@ -503,6 +650,31 @@ pub fn append_as_other(
             .map_err(|e| e.to_string())?;
         let t = tx.commit(&cat).await.map_err(|e| e.to_string())?;
         Ok(current(t.metadata()))
+    })
+}
+
+/// For tests and tools: the dataset's rows at its current snapshot, read as
+/// a program that isn't a morca pipeline would (nothing pinned or
+/// recorded). No table is no rows.
+pub fn read_as_other(dataset: &str) -> Result<Vec<RecordBatch>, String> {
+    let cat = catalog()?;
+    let Some(t) = block(load(&cat, &ident(dataset)?))? else {
+        return Ok(vec![]);
+    };
+    if t.metadata().current_snapshot_id().is_none() {
+        return Ok(vec![]);
+    }
+    block(async {
+        t.scan()
+            .select_all()
+            .build()
+            .map_err(|e| e.to_string())?
+            .to_arrow()
+            .await
+            .map_err(|e| e.to_string())?
+            .try_collect()
+            .await
+            .map_err(|e| e.to_string())
     })
 }
 

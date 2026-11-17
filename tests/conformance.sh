@@ -6,8 +6,10 @@
 #   examples   toy, daily and fanout (the multi-call test binary,
 #              scripts/pipelines.sh), then tests/chaos.sh in the suite's
 #              mode, over Postgres and SQLite
-#   tables     the sensor tests/sensors/clean.mojo, which reads raw.events
-#              and commits to lake.clean, in the data environment
+#   tables     the sensors tests/sensors/clean.mojo, which reads raw.events
+#              and commits to lake.clean, and tests/sensors/replace.mojo,
+#              which replaces its months of lake.monthly, in the data
+#              environment
 #
 # Each pipeline runs over SQLite and over the Postgres MORCA_DATABASE_URL
 # names (pixi run test-conformance starts a throwaway server).
@@ -32,7 +34,7 @@ examples)
     ;;
 tables)
     pids=
-    for p in source clean; do
+    for p in source clean replace rows_by; do
         # shellcheck disable=SC2086
         scripts/mojo-build.sh -I src -I tests/sensors -I tests/lineage $DEP_INC "tests/sensors/$p.mojo" -o "build/sn-$p" &
         pids="$pids $!"
@@ -40,6 +42,7 @@ tables)
     scripts/build-shared.sh morca &
     for pid in $pids $!; do wait "$pid"; done
     python3 tests/conformance.py build/sn-clean tests/conformance/clean.json || fail=1
+    python3 tests/conformance.py build/sn-replace tests/conformance/replace.json || fail=1
     ;;
 *)
     echo "usage: tests/conformance.sh [examples|tables]" >&2

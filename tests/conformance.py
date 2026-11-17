@@ -13,7 +13,9 @@ suite knows what to expect without reading the binary's code:
      "partitions": "monthly",
      "keys": ["2024-01", "2024-02"],             the keys a run covers
      "steps": [{"name": "days", "kind": "mapped",
-                "reads": [], "writes": []}, ...],   in run order
+                "reads": [], "writes": [],
+                "replaces": []}, ...],   in run order; a dataset in
+                                `replaces` counts as written
      "sensor": false,
      "env": {...},              set for every command
      "slow_env": {...},         makes the first step's attempts take 3 s or
@@ -22,8 +24,12 @@ suite knows what to expect without reading the binary's code:
                                 checks are skipped
      "warehouse": true,         runs get a fresh MORCA_WAREHOUSE
      "setup": [[cmd...]],       run once per warehouse, before anything
-     "commit_input": [cmd...]}  commits a new snapshot to a table a step
+     "commit_input": [cmd...],  commits a new snapshot to a table a step
                                 reads; "{warehouse}" in these is replaced
+     "die_env": {...},          makes the step that replaces die between
+                                writing its files and committing them
+     "rows": [[cmd...]]}        readers of the dataset a step replaces, each
+                                printing `<partition key> <rows>` lines
 
 Runs are started only as a runner starts them: the suite inserts the run
 row the way the scheduler does (`running`, owner `scheduler`, no
@@ -384,6 +390,13 @@ def until(fn, seconds, what):
 # --- Expectations from the manifest ---
 
 
+def writes_of(s):
+    """What a manifest's step writes: `writes`, then `replaces`."""
+    out = list(s.get("writes", []))
+    out += [d for d in s.get("replaces", []) if d not in out]
+    return out
+
+
 def expected_steps(m):
     """(step, partition, ord) of a whole run over the manifest's keys."""
     out = set()
@@ -398,7 +411,7 @@ def expected_steps(m):
 
 def sensed(m):
     """Each dataset a step reads and no step writes, once, in step order."""
-    written = {d for s in m["steps"] for d in s.get("writes", [])}
+    written = {d for s in m["steps"] for d in writes_of(s)}
     out = []
     for s in m["steps"]:
         for d in s.get("reads", []):
@@ -1092,7 +1105,7 @@ class Suite:
             got = rows("commits", run)
             seen = {}
             for aid, s, p, loc, snap, ds in got:
-                need(ds in by_step[s].get("writes", []),
+                need(ds in writes_of(by_step[s]),
                      f"{s} committed to {ds or loc}, which describe doesn't list")
                 summ = snapshots(loc).get(int(snap), {}).get("summary")
                 need(summ is not None, f"{s} [{p}]: snapshot {snap} isn't in {loc}")
@@ -1107,7 +1120,7 @@ class Suite:
                 need(not bad, f"{s} [{p}]'s commit {snap}: {bad}, not "
                      f"{ {k: want[k] for k in bad} }")
             for s in m["steps"]:
-                for ds in s.get("writes", []):
+                for ds in writes_of(s):
                     need(any(x[1] == s["name"] and x[5] == ds for x in got),
                          f"{s['name']} recorded no commit to {ds}")
 
@@ -1133,7 +1146,7 @@ class Suite:
 
         # A crash after a step committed: its attempt left running, then a
         # new snapshot of what it reads, then a resume.
-        writer = next((s for s in m["steps"] if s.get("writes")), None)
+        writer = next((s for s in m["steps"] if writes_of(s)), None)
         ctx = {}
 
         def crashed_after_commit():
@@ -1204,6 +1217,146 @@ class Suite:
                    "a later attempt reads the snapshots the first attempt read, not "
                    "the newer ones", pinned, where=w)
 
+        self.replaces(db, rows)
+
+    # Replacing partitions: a step with `replaces`.
+
+    def replaces(self, db, rows):
+        b, m, w = self.b, self.b.m, db.where
+        keys = m["keys"]
+        step = next((s for s in m["steps"] if s.get("replaces")), None)
+        ids = ("tables.replace", "tables.replace_rerun", "tables.replace_die_before_commit",
+               "tables.replace_readers")
+        if step is None:
+            for cid in ids:
+                self.check(cid, "replacing-partitions", "",
+                           lambda: _skip("no step replaces a table"), where=w)
+            return
+        locs = {ds: dataset_location(b.warehouse, ds) for ds in step["replaces"]}
+
+        def resume(r, extra=None):
+            code, out, err = b.run(["resume", str(r)], db, extra=extra, timeout=300)
+            return code, (out + err).strip()[-300:]
+
+        def current(loc):
+            md = metadata(loc)
+            snap = md and md.get("current-snapshot-id")
+            return snaps_of(loc).get(snap, {}).get("summary", {}) if snap else {}
+
+        def snaps_of(loc):
+            return snapshots(loc)
+
+        def commits_of(r):
+            """{dataset: {partition: summary}} of the run's commits to what
+            the step replaces, its last commit to each partition."""
+            out = {ds: {} for ds in locs}
+            for _, s, p, loc, snap, ds in rows("commits", r):
+                if s == step["name"] and ds in locs:
+                    out[ds][p] = snaps_of(loc)[int(snap)]["summary"]
+            return out
+
+        def one_copy(r, what):
+            """The tables hold only what run `r` added: one copy of each key."""
+            for ds, by in commits_of(r).items():
+                need(set(by) == set(keys) if step["kind"] == "mapped" else by,
+                     f"{what}: run {r} committed {ds} for {sorted(by)}, not {keys}")
+                added = sum(int(x.get("added-records", 0)) for x in by.values())
+                total = int(current(locs[ds]).get("total-records", -1))
+                need(total == added, f"{what}: {ds} has {total} rows, but run {r} "
+                     f"added {added}: the runs before it weren't replaced")
+
+        ctx = {}
+
+        def replace():
+            r = db.new_run(b.name(), b.hash(), keys)
+            code, out = resume(r)
+            need(db.run_row(r)["status"] == "succeeded", f"run {r} exited {code}: {out}")
+            for ds, by in commits_of(r).items():
+                for p, summ in by.items():
+                    for k in ("orca.replaced-files", "orca.replaced-records"):
+                        need(k in summ, f"{ds} [{p}]'s commit has no {k}")
+                    n = int(summ["orca.replaced-files"])
+                    need(n > 0, f"{ds} [{p}]: replaced no files, though earlier runs "
+                         "wrote the partition")
+                    need(summ.get("operation") == "overwrite",
+                         f"{ds} [{p}]'s commit is `{summ.get('operation')}`, not overwrite")
+                    need(int(summ.get("deleted-data-files", 0)) == n,
+                         f"{ds} [{p}]: deleted-data-files {summ.get('deleted-data-files')}, "
+                         f"orca.replaced-files {n}")
+                    need(int(summ.get("deleted-records", 0)) ==
+                         int(summ["orca.replaced-records"]),
+                         f"{ds} [{p}]: deleted-records {summ.get('deleted-records')}, "
+                         f"orca.replaced-records {summ['orca.replaced-records']}")
+            one_copy(r, "after a new run")
+            ctx["run"] = r
+
+        self.check("tables.replace", "replacing-partitions",
+                   "a new run's commit to a partition it replaces is an `overwrite` "
+                   "carrying orca.replaced-files and orca.replaced-records, and leaves "
+                   "one copy of the partition's rows", replace, where=w)
+
+        def rerun():
+            if "run" not in ctx:
+                raise Skip("no replacing run")
+            r = db.new_run(b.name(), b.hash(), keys)
+            code, out = resume(r)
+            need(db.run_row(r)["status"] == "succeeded", f"run {r} exited {code}: {out}")
+            one_copy(r, "after another run of the same keys")
+            ctx["run"] = r
+
+        self.check("tables.replace_rerun", "replacing-partitions",
+                   "running the same keys again still leaves one copy", rerun, where=w)
+
+        def die_before_commit():
+            if not m.get("die_env"):
+                raise Skip("no die_env in the manifest")
+            before = {ds: len(snaps_of(loc)) for ds, loc in locs.items()}
+            r = db.new_run(b.name(), b.hash(), keys)
+            code, out = resume(r, extra=m["die_env"])
+            need(code != 0, f"the run didn't die (exit {code}): {out}")
+            for ds, loc in locs.items():
+                need(len(snaps_of(loc)) == before[ds],
+                     f"{ds} got a snapshot from the run that died before committing")
+            row = db.run_row(r)
+            need(row["status"] == "running", f"the dead run is {row['status']}")
+            time.sleep(STALE + 0.3)
+            code, out = resume(r)
+            need(db.run_row(r)["status"] == "succeeded",
+                 f"the resumed run exited {code}: {out}")
+            att = [x for x in db.attempts(r) if x[1] == step["name"]]
+            need(any(x[4] == "failed" for x in att) and att[-1][4] == "succeeded",
+                 f"{step['name']}'s attempts are {[(x[2], x[3], x[4]) for x in att]}")
+            one_copy(r, "after a crash between writing and committing")
+            ctx["run"] = r
+
+        self.check("tables.replace_die_before_commit", "replacing-partitions",
+                   "a step that dies between writing its files and committing them "
+                   "commits nothing; the resumed run commits once and leaves one copy",
+                   die_before_commit, where=w)
+
+        def readers():
+            if not m.get("rows"):
+                raise Skip("no readers in the manifest")
+            if "run" not in ctx:
+                raise Skip("no replacing run")
+            (ds, by), = list(commits_of(ctx["run"]).items())[:1]
+            want = {p: int(x.get("added-records", 0)) for p, x in by.items()}
+            for cmd in m["rows"]:
+                p = subprocess.run(b.subst(cmd), env=b.env(), capture_output=True,
+                                   text=True, timeout=300)
+                need(p.returncode == 0, f"{cmd[0]} exited {p.returncode}: {p.stderr[-300:]}")
+                got = {}
+                for line in p.stdout.split("\n"):
+                    if line.strip():
+                        k, n = line.split()
+                        got[k] = int(n)
+                need(got == want, f"{os.path.basename(cmd[0])} reads {ds} as {got}, "
+                     f"not {want}")
+
+        self.check("tables.replace_readers", "replacing-partitions",
+                   "other readers of the replaced table see one copy of each partition",
+                   readers, where=w)
+
 
 def _skip(why):
     raise Skip(why)
@@ -1239,7 +1392,7 @@ def describe_fields(d):
         after = s.get("after")
         need(after is None if not names else after in names,
              f"{s['name']}: after {after!r}")
-        for k in ("reads", "writes"):
+        for k in ("reads", "writes", "replaces"):
             ds = s.get(k, [])
             need(isinstance(ds, list) and all(isinstance(x, str) and "." in x for x in ds),
                  f"{s['name']}: `{k}` isn't a list of `ns.table` names")
@@ -1252,10 +1405,10 @@ def describe_manifest(d, m):
     need(kind == m.get("partitions", "monthly"), f"partitions are {kind}")
     need(bool(d.get("sensor", False)) == bool(m.get("sensor", False)),
          f"sensor is {d.get('sensor')}")
-    got = [(s["name"], s["kind"], sorted(s.get("reads", [])), sorted(s.get("writes", [])))
-           for s in d["steps"]]
-    want = [(s["name"], s["kind"], sorted(s.get("reads", [])), sorted(s.get("writes", [])))
-            for s in m["steps"]]
+    got = [(s["name"], s["kind"], sorted(s.get("reads", [])), sorted(s.get("writes", [])),
+            sorted(s.get("replaces", []))) for s in d["steps"]]
+    want = [(s["name"], s["kind"], sorted(s.get("reads", [])), sorted(writes_of(s)),
+             sorted(s.get("replaces", []))) for s in m["steps"]]
     need(got == want, f"steps {got}, not {want}")
 
 
