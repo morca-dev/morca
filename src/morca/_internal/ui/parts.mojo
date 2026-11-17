@@ -12,7 +12,7 @@ from morca._internal.db.run_rows import Usage
 from morca._internal.ui.layout import act_button, fact_item
 from morca._internal.usage import bytes_text, cpu_text, usage_text
 from morca._internal.views.code import CodeLinks, CodeRef, RunCode
-from morca._internal.views.commands import cancel_cli, retry_cli, shell_quote
+from morca._internal.views.commands import cancel_cli, resume_cli, shell_quote
 from morca._internal.views.runs import RunResources, RunRow
 from morca._internal.db.run_view import VersionRow
 
@@ -289,7 +289,7 @@ def cancel_tell(r: RunRow) -> String:
 
 
 def row_actions(mut h: Html, r: RunRow):
-    """A runs table row's Cancel (queued or running) or Retry (failed)."""
+    """A runs table row's Cancel (queued or running) or Resume (failed)."""
     if (r.status == "queued" or r.status == "running") and not (
         r.cancel_requested
     ):
@@ -309,9 +309,9 @@ def row_actions(mut h: Html, r: RunRow):
         act_button(
             h,
             String("/runs/", r.id, "/resume"),
-            "Retry",
-            "retry",
-            retry_cli(r),
+            "Resume",
+            "resume",
+            resume_cli(r),
         )
 
 

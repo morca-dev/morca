@@ -81,6 +81,7 @@ scheduler-ui:tests/test_upgrade.mojo:test-upgrade
 scheduler-ui:tests/test_config.mojo:test-config
 scheduler-ui:tests/test_fill.mojo:test-fill
 scheduler-ui:tests/test_metrics.mojo:test-metrics
+scheduler-ui:tests/test_terms.mojo:test-terms
 scheduler-ui:tests/test_remote.mojo:test-remote
 scheduler-ui:tests/test_worker.mojo:test-worker-api
 scheduler-ui:tests/test_watchdog.mojo:test-watchdog

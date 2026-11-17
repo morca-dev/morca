@@ -1,7 +1,7 @@
 """`/runs`, the runs list: newest first, filtered by pipeline, status
 (any of several, each with its count), trigger, when it was created, a run
 and its partitions, a page at a time (`morca._internal.views.runs.RunsPage`), and its
-runs picked to cancel, retry or backfill again in one go
+runs picked to cancel, resume or backfill again in one go
 (`morca._internal.api.actions.bulk`); `/runs/table` is a list's page as the fragment
 it refreshes from, for `/runs`, a pipeline's Runs tab and the home page.
 """
@@ -26,6 +26,7 @@ from morca._internal.ui.layout import (
 )
 from morca._internal.ui.parts import runs_table_html
 from morca._internal.ui.recent import recent_table
+from morca._internal.ui.terms import RUN_STATUSES, RUN_TRIGGERS
 from morca._internal.views.code import runs_code
 from morca._internal.views.runs import (
     BULK_MAX,
@@ -37,33 +38,6 @@ from morca._internal.views.runs import (
     runs_query,
 )
 from morca._internal.web.page import Page
-
-
-comptime RUN_STATUSES: List[String] = [
-    "queued",
-    "running",
-    "deferred",
-    "succeeded",
-    "failed",
-    "cancelled",
-]
-"""The statuses a run takes (`orca.runs.status`), in the order a run goes
-through them; a deferred run waits for its `retry_at`."""
-
-
-comptime RUN_TRIGGERS: List[String] = [
-    "schedule",
-    "sensor",
-    "backfill",
-    "manual",
-    "ui",
-    "rerun",
-    "rebuild",
-    "fill",
-]
-"""The triggers morca writes (`orca.runs.trigger`): the scheduler's fires and
-sensors, `backfill`, a binary's `run`, the UI's start button, a rerun, a
-rebuild and a fill (`morca._internal.fill`). The filter adds any others the table has."""
 
 
 comptime _SUBMIT_ON_CHANGE = (
@@ -371,7 +345,9 @@ def runs_done_html(mut h: Html, url: String):
     """What a bulk action did (`morca._internal.api.actions.bulk`, which sends the
     browser back with `?did=` and its counts), said over the list."""
     var did = query_param(url, "did")
-    if did != "cancel" and did != "retry" and did != "backfill":
+    if did == "retry":
+        did = "resume"  # a link from before #378
+    if did != "cancel" and did != "resume" and did != "backfill":
         return
     var done = int_or_zero(query_param(url, "done"))
     var skipped = int_or_zero(query_param(url, "skipped"))
@@ -383,7 +359,7 @@ def runs_done_html(mut h: Html, url: String):
         if skipped:
             t.write(", ", grouped(skipped), " already finished")
         t.write(". Running ones stop before their next step.")
-    elif did == "retry":
+    elif did == "resume":
         t.write("Queued ", _runs_word(done), " again")
         if skipped:
             t.write(", ", grouped(skipped), " not failed")
@@ -413,7 +389,7 @@ def runs_done_html(mut h: Html, url: String):
 
 def runs_bulk_html(mut h: Html, p: RunsPage):
     """The form the runs list's checkboxes belong to (`form="bulk-runs"`):
-    cancel, retry or backfill again the runs ticked, or every run that
+    cancel, resume or backfill again the runs ticked, or every run that
     matches the filters, its number on the box that picks them, which the
     action checks is still so. Hidden until logged in, where login is on
     (`act__need`)."""
@@ -455,12 +431,12 @@ def runs_bulk_html(mut h: Html, p: RunsPage):
     )
     h.raw(
         ">Cancel</button>",
-        '<button type="submit" name="do" value="retry">Retry failed</button>',
+        '<button type="submit" name="do" value="resume">Resume failed</button>',
         '<button type="submit" name="do" value="backfill">Backfill again',
         "</button></form>",
         '<p class="act__login bulk__login"><a href="/login?next=',
         HERE_SLOT,
-        '">Log in</a> to cancel, retry or backfill runs from here.</p>',
+        '">Log in</a> to cancel, resume or backfill runs from here.</p>',
     )
 
 

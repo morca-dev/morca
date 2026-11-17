@@ -23,18 +23,27 @@ def _cancel_set(kill_seconds: StaticString) -> String:
     )
 
 
-def add_ui_run(
-    mut tx: Transaction, pipeline: String, registry_hash: String, keys: String
+def add_started_run(
+    mut tx: Transaction,
+    pipeline: String,
+    registry_hash: String,
+    keys: String,
+    trigger: String,
 ) raises -> Int64:
-    """A new queued run of `pipeline` over `keys`, trigger `ui`; its id."""
+    """A new queued run of `pipeline` over `keys`, with `trigger` (`ui` or
+    `cli`); its id."""
     return (
         tx.query(
             (
                 "INSERT INTO orca.runs (pipeline, registry_hash, partitions,"
-                " trigger, status) VALUES ($1, $2, $3, 'ui', 'queued')"
+                " trigger, status) VALUES ($1, $2, $3, $4, 'queued')"
                 " RETURNING id"
             ),
-            Params().text(pipeline).text(registry_hash).text(keys),
+            Params()
+            .text(pipeline)
+            .text(registry_hash)
+            .text(keys)
+            .text(trigger),
         )
         .row(0)
         .int64("id")

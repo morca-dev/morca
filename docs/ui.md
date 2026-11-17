@@ -76,7 +76,7 @@ refreshing with them applied (its `/runs/table` fragment carries them).
 | Parameter | |
 |---|---|
 | `?status=` | runs with any of the statuses: `?status=failed&status=queued`, or `failed,queued`. The box lists every status with its runs under the other filters, which the JSON has as `counts` |
-| `?trigger=` | `schedule`, `sensor`, `backfill`, `fill`, `manual`, `ui`, `rerun`, `rebuild` |
+| `?trigger=` | `schedule`, `sensor`, `backfill`, `fill`, `manual`, `ui`, `cli`, `rerun`, `rebuild` (each in [the table below](#help-on-every-page)) |
 | `?pipeline=` | on `/runs` |
 | `?from=`, `?to=` | created on or after, and by the end of, a day (`2024-06-01`) or at a time (`2024-06-01T09:30`), UTC; one that isn't a time is left out |
 | `?since=` | created in the last `1h`, `24h`, `7d` (any `<n>h` or `<n>d`), or `today` since midnight UTC: the quick picks beside the dates |
@@ -96,8 +96,8 @@ and a few with one.
 
 Logged in (or with login off), each row has a checkbox and the bar over
 the table acts on the runs ticked: **Cancel** (queued, deferred and
-running ones, as each row's Cancel does; the others are left), **Retry
-failed** (failed and stalled ones queued again, as each row's Retry does,
+running ones, as each row's Cancel does; the others are left), **Resume
+failed** (failed and stalled ones queued again, as each row's Resume does,
 except one whose code has changed, which is resumed from its own page)
 and **Backfill again** (what `morca backfill --rerun` does, over the
 partitions of the runs ticked, a backfill per pipeline; one whose steps
@@ -108,7 +108,8 @@ there are still that many, and if not says how many there are now, with a
 button to do it to those. One action does at most 2,000 runs. Logged out,
 the boxes and buttons give way to a link to log in.
 
-It's a `POST /runs/bulk` with `do` (`cancel`, `retry`, `backfill`), each
+It's a `POST /runs/bulk` with `do` (`cancel`, `resume`, `backfill`; `retry`,
+its name before 0.35, is taken for `resume`), each
 run ticked as `pick=<id>`, or `all=1&expect=<n>` and the list's filters
 (`view`, `pipeline`, `status`, ...). It answers `303` back to the list,
 which says what it did ("Cancelled 12 runs, 3 already finished"), or to
@@ -487,6 +488,45 @@ table's, for a word that means different things, as From does in the
 Configuration and Actions tables), a value's by its kind and value, and a
 setting's by its key. The UI adds a header's "?" to every `<th>` it has a
 text for as it answers, so a new table gets them by using the same words.
+
+The statuses and triggers, as the UI explains them (generated from that
+module: `pixi run docs-vocabulary` writes them, and `pixi run test-terms`
+fails when they differ). A run started with `morca start` before 0.35 has
+trigger `ui`, as one from the site does.
+
+<!-- generated from morca._internal.ui.terms: pixi run docs-vocabulary -->
+
+| Run status | Means |
+|---|---|
+| `queued` | Waiting to start: its turn, or room for its placement. |
+| `running` | Going now. |
+| `deferred` | A step asked to run again later; the run waits until then. |
+| `succeeded` | Done, every step succeeded. |
+| `failed` | Something failed after its last retry. Resume runs what hadn't succeeded. |
+| `cancelled` | Stopped on request, before its next attempt. |
+
+| Step status | Means |
+|---|---|
+| `pending` | Not started yet in this run. |
+| `running` | Going now. |
+| `deferred` | A step asked to run again later; the run waits until then. |
+| `succeeded` | Done, every step succeeded. |
+| `failed` | Something failed after its last retry. Resume runs what hadn't succeeded. |
+| `skipped` | Not run: a step it waits for didn't succeed. |
+
+| Trigger | Means |
+|---|---|
+| `schedule` | Its schedule fired. |
+| `sensor` | Its sensor saw a new snapshot of a table it reads. |
+| `backfill` | morca backfill, or a Backfill button here: Start runs' or a runs list's Backfill again. |
+| `manual` | A binary's run command started it, outside the scheduler. |
+| `ui` | Start runs' Start one run over the whole range, on this site. |
+| `cli` | morca start: one run over the partitions it was given. |
+| `rerun` | A rerun of an ended run, from a step on. |
+| `rebuild` | A rebuild of everything downstream of a dataset. |
+| `fill` | The fill: the scheduler working through the range by itself. |
+
+<!-- vocabulary: end -->
 
 The Configuration table (a pipeline's Overview) has each key's "?", and
 its From column links to where the value is set, where morca knows it:

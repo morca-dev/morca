@@ -78,8 +78,11 @@ def _pipeline(mut db: State, name: String) raises -> Optional[Registered]:
     return ps[0].copy()
 
 
-def start_run(mut db: State, pipeline: String, keys: String) raises -> Outcome:
-    """A queued run over the partitions in `keys`, trigger `ui`. Refused
+def start_run(
+    mut db: State, pipeline: String, keys: String, trigger: String = "ui"
+) raises -> Outcome:
+    """A queued run over the partitions in `keys`, with `trigger`: `ui` from
+    the Start runs form, `cli` from `morca start`. Refused
     while a live run has one of them, which a second run would run beside;
     a partition that's done is run again."""
     var p = _pipeline(db, pipeline)
@@ -111,8 +114,8 @@ def start_run(mut db: State, pipeline: String, keys: String) raises -> Outcome:
                     " cancel it",
                 )
             )
-    var id = actions_db.add_ui_run(
-        tx, pipeline, p.value().registry_hash, joined
+    var id = actions_db.add_started_run(
+        tx, pipeline, p.value().registry_hash, joined, trigger
     )
     tx.commit()
     return Outcome.done(Int(id))
@@ -395,7 +398,7 @@ def cancel_runs_picked(mut db: State, runs: List[Int]) raises -> Bulk:
 
 
 def resume_failed(mut db: State, runs: List[Int]) raises -> Bulk:
-    """Queues again, as `resume_run` does each (Retry on a runs list), those
+    """Queues again, as `resume_run` does each (Resume on a runs list), those
     of `runs` that failed or stalled. One whose pipeline's code has changed
     since is refused, to be resumed from its page; the others are skipped."""
     var b = Bulk.none()

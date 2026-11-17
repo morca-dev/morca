@@ -259,6 +259,8 @@ struct Ui(Copyable, Handler):
                 return respond(token_refused(), True)
             var required = login_required(db)
             if post and content_type(req) == "application/json":
+                # The site's own forms never post JSON: the command does.
+                call.source = "cli"
                 try:
                     call.form = json_form(call.body)
                 except e:
@@ -316,6 +318,7 @@ def act(mut db: State, path: String, form: String) raises -> Optional[Page]:
     var call = Call(path, path)
     call.form = form
     call.body = form
+    call.source = "cli"
     return answer(routes(), db, call^, ACTION)
 
 

@@ -52,7 +52,8 @@ struct Call(Movable):
     """Who's logged in (a session or an API token), or empty
     (`morca._internal.web.auth.sign_in`)."""
     var source: String
-    """How they're logged in: "ui" (a session) or "cli" (an API token)."""
+    """Where it came from: "ui" (a session, or the site's forms) or "cli"
+    (an API token, or JSON: the `morca` command)."""
     var bearer: String
     """The API token it was sent with, or empty."""
     var session: String
