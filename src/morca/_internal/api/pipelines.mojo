@@ -60,6 +60,8 @@ def json_pipeline(
             quote(p.cron),
             ', "tz": ',
             quote(p.tz),
+            ', "fire": ',
+            quote(p.fills),
             ', "fills": ',
             quote(p.fills),
             "}",

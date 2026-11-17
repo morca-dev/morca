@@ -202,18 +202,18 @@ where
 pub struct Cron {
     pub(crate) expr: String,
     pub(crate) tz: String,
-    pub(crate) fills: String,
+    pub(crate) fire: String,
     pub(crate) catchup: bool,
 }
 
 impl Cron {
     /// Fires at `expr` (`minute hour day month weekday`), in UTC, each fire
-    /// filling the partition before it, catching up on missed fires.
+    /// running the partition before it, catching up on missed fires.
     pub fn new(expr: &str) -> Self {
         Cron {
             expr: expr.to_string(),
             tz: "UTC".into(),
-            fills: "previous".into(),
+            fire: "previous".into(),
             catchup: true,
         }
     }
@@ -222,10 +222,15 @@ impl Cron {
         self.tz = tz.to_string();
         self
     }
-    /// Each fire fills the partition it's in, not the one before.
-    pub fn fills_current(mut self) -> Self {
-        self.fills = "current".into();
+    /// Each fire runs the partition it's in, not the one before.
+    pub fn fire_current(mut self) -> Self {
+        self.fire = "current".into();
         self
+    }
+    /// `fire_current`'s old name (#370).
+    #[deprecated(note = "use `fire_current`")]
+    pub fn fills_current(self) -> Self {
+        self.fire_current()
     }
     /// Missed fires are skipped instead of run late.
     pub fn no_catchup(mut self) -> Self {
@@ -653,7 +658,12 @@ impl Built {
         }
         let schedule = match &c.schedule {
             Some(s) => {
-                J::V(json!({"cron": s.expr, "tz": s.tz, "fills": s.fills, "catchup": s.catchup}))
+                // `fills` repeats `fire` for one release, for older
+                // schedulers (#370).
+                J::V(
+                    json!({"cron": s.expr, "tz": s.tz, "fire": s.fire, "fills": s.fire,
+                            "catchup": s.catchup}),
+                )
             }
             None => J::V(Value::Null),
         };

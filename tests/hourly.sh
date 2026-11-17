@@ -1,6 +1,6 @@
 #!/bin/sh
 # Hourly partitions (morca.hour, morca.partitions.Hourly): a `*/5 * * * *`
-# schedule with fills=Current runs the hour its fire falls in, again on each
+# schedule with fire=Current runs the hour its fire falls in, again on each
 # fire once the hour's last run has ended; backfills take hour ranges; the
 # coverage calendar is a day of hours. Needs MORCA_DATABASE_URL (pixi run
 # test-hourly starts a throwaway server), curl and jq.

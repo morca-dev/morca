@@ -109,7 +109,7 @@ run starts again then, and no retries are spent.
 | Call | describe | Default |
 |---|---|---|
 | `.start("2024-01")` | `partitions.start` | none |
-| `.schedule(Cron::new("0 3 2 * *").tz("Europe/Paris"))` | `schedule` (`.fills_current()`, `.no_catchup()`) | none |
+| `.schedule(Cron::new("0 3 2 * *").tz("Europe/Paris"))` | `schedule` (`.fire_current()`, `.no_catchup()`) | none |
 | `.max_runs(n)` | `max_runs` | 1 |
 | `.run_retries(n)` | `run_retries` | 3 |
 | `.retry_seconds(first, max)` | `retry_seconds`, `max_retry_seconds` | 0 |

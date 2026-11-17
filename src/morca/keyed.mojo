@@ -18,7 +18,7 @@ name the dataset doesn't have, so a typo doesn't make a run of nothing.
 `<binary> keys` prints the snapshot and the keys, for the scheduler, which
 links no iceberg.
 
-A keyed pipeline has no calendar, so `schedule=` and `fills=` don't compile
+A keyed pipeline has no calendar, so `schedule=` and `fire=` don't compile
 with one (`Pipeline.check`). It reads the keys through `morca.tables`
 (liblake), so only binaries with a keyed pipeline load the library.
 """

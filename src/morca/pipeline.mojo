@@ -36,7 +36,14 @@ from morca.ctx import Ctx
 from morca._internal.json import quote
 from morca.civil import Civil, now
 from morca.partitions import Monthly, Partitions
-from morca.schedule import Fill, NoSchedule, Previous, Schedule, ScheduleLike
+from morca.schedule import (
+    Fill,
+    NoSchedule,
+    Previous,
+    Schedule,
+    ScheduleLike,
+    _NoFill,
+)
 from morca._internal.source import source_commit, source_dirty, source_repo
 from morca._internal.version import MORCA_VERSION, PROTOCOL_VERSION
 from morca.step import Gather, Mapped, StepLike, deferred_for, deferred_why
@@ -70,7 +77,8 @@ struct Pipeline[
     tasks: TaskSet = NoTasks,
     partitions: Partitions = Monthly[],
     schedule: ScheduleLike = NoSchedule,
-    fills: Fill = Previous,
+    fire: Fill = Previous,
+    fills: Fill = _NoFill,
     catchup: Bool = True,
     max_runs: Int = 1,
     run_retries: Int = 3,
@@ -82,7 +90,8 @@ struct Pipeline[
 ]:
     """A pipeline named `name` of the steps `Ts`, in run order, whose steps
     call the dista `tasks`, over the keys of `partitions`; run by
-    `schedule` for the partition its fires `fills` (`morca.schedule`), and,
+    `schedule`, each fire running the partition `fire` picks
+    (`morca.schedule`), and,
     with `sensor`, when a dataset it reads gets a new snapshot
     (`morca._internal.sensors`). A backfill puts `keys_per_run` keys in each run it
     queues, and so do a fill and, above 1, a sensor (#240; morca.toml's
@@ -101,10 +110,17 @@ struct Pipeline[
     backoff: `retry_seconds` (0 for the scheduler's `MORCA_RETRY_SECONDS`)
     doubling with each start, up to `max_retry_seconds` if it's set
     (`morca._internal.scheduler`). `run_retries=72, retry_seconds=3600,
-    max_retry_seconds=3600` tries hourly for three days."""
+    max_retry_seconds=3600` tries hourly for three days.
+
+    `fills=` is `fire=`'s old name, still accepted for one release (#370);
+    it isn't morca.toml's `fills`, the automatic backfill."""
 
     comptime K = Self.partitions.K
     """The partition key."""
+
+    comptime _fire = Self.fire if Self.fills == _NoFill else Self.fills
+    """Which partition a fire runs: `fire=`, or `fills=` where only that
+    old name is set."""
 
     @staticmethod
     def _find(step: StaticString) -> Int:
@@ -130,13 +146,16 @@ struct Pipeline[
             Self.keys_per_run >= 1
         ), "keys_per_run must be at least 1"
         comptime assert Self.workers >= 1, "workers must be at least 1"
+        comptime assert (
+            Self.fills == _NoFill or Self.fire == Previous
+        ), "fills= is fire='s old name; set only fire="
         comptime if Self.partitions.kind() == "keyed":
             comptime assert Self.schedule.expr() == "", (
                 "a keyed pipeline has no calendar for a schedule to fill; run"
                 " it by backfill or as a sensor of its keys dataset"
             )
             comptime assert (
-                Self.fills == Previous
+                Self._fire == Previous
             ), "a keyed pipeline has no calendar to fill"
         comptime for i in range(Self.Ts.length):
             Self.Ts[i].check()
@@ -234,7 +253,10 @@ struct Pipeline[
         comptime if Self.schedule.expr() != "":
             out.write('"schedule": {"cron": ', quote(Self.schedule.expr()))
             out.write(', "tz": ', quote(Self.schedule.zone()))
-            out.write(', "fills": ', quote(String(Self.fills)))
+            out.write(', "fire": ', quote(String(Self._fire)))
+            # The old key, for older schedulers (#370); it goes in
+            # the release after.
+            out.write(', "fills": ', quote(String(Self._fire)))
             out.write(', "catchup": ', "true" if Self.catchup else "false")
             out.write("}, ")
         else:
@@ -338,11 +360,11 @@ struct Pipeline[
         return Schedule.of[Self.schedule]()
 
     @staticmethod
-    def fills_for(fire: Int64, s: Schedule) raises -> Self.K:
-        """The partition a fire at `fire` fills."""
-        var c = Civil.of(s.zone.to_local(fire))
+    def fills_for(at: Int64, s: Schedule) raises -> Self.K:
+        """The partition a fire at `at` runs."""
+        var c = Civil.of(s.zone.to_local(at))
         return Self.partitions.fill(
-            c.year, c.month, c.day, c.hour, previous=Self.fills == Previous
+            c.year, c.month, c.day, c.hour, previous=Self._fire == Previous
         )
 
     @staticmethod

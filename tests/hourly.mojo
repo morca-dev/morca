@@ -1,4 +1,4 @@
-"""An hourly pipeline polled every five minutes (`fills=Current`): each
+"""An hourly pipeline polled every five minutes (`fire=Current`): each
 fire runs the hour it falls in, the step returning its hour (tests/hourly.sh).
 """
 
@@ -25,7 +25,7 @@ comptime Hourly5 = Pipeline[
     Poll,
     partitions=Hourly["2024-03-01T00"],
     schedule=Cron["*/5 * * * *"],
-    fills=Current,
+    fire=Current,
     catchup=False,
 ]
 

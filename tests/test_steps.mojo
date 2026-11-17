@@ -199,7 +199,7 @@ def test_hour_ranges_and_fills() raises:
         _ = parse_partitions[Hourly["2024-01-01T05"]](
             "2024-01-01T04..2024-01-01T06"
         )
-    # A fire at 2024-03-01 00:05 fills that hour, or with fills=Previous
+    # A fire at 2024-03-01 00:05 runs that hour, or with fire=Previous
     # the one before.
     assert_equal(
         String(Hourly[].fill(2024, 3, 1, 0, previous=False)), "2024-03-01T00"
@@ -293,8 +293,8 @@ def test_week_ranges_and_fills() raises:
     assert_equal(len(parse_partitions[Weekly[]]("2015-W01..2015-W53")), 53)
     with assert_raises(contains="before the pipeline's first partition"):
         _ = parse_partitions[Weekly["2026-W40"]]("2026-W39..2026-W41")
-    # A fire on Monday 2026-11-16 06:00 fills the week that just ended
-    # with fills=Previous, the one it falls in with Current.
+    # A fire on Monday 2026-11-16 06:00 runs the week that just ended
+    # with fire=Previous, the one it falls in with Current.
     assert_equal(
         String(Weekly[].fill(2026, 11, 16, 6, previous=True)), "2026-W46"
     )
