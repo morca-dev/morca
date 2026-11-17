@@ -472,7 +472,7 @@ def _status[S: RunStore](mut store: S, args: List[String]) raises -> Int:
 
 def _fires[P: type_of(Pipeline)](args: List[String]) raises -> Int:
     """The schedule's next fires after now (or `--after`), each with the
-    partition it fills: UTC time, wall-clock time, partition."""
+    partition it runs: UTC time, wall-clock time, partition."""
     comptime if not P.scheduled():
         _usage(String("pipeline ", P.name, " has no schedule"))
         return 2

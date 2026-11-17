@@ -188,7 +188,7 @@ for a sensor (`src/morca/_internal/registering.mojo:144-156`).
 
 It prints one line per **sensed dataset**: each dataset a step reads and no
 step writes, once, in step order, then a keyed pipeline's keys dataset
-(`src/morca/pipeline.mojo:305-325`). Each line is
+(`src/morca/pipeline.mojo:327-347`). Each line is
 
 ```text
 <dataset> <snapshot> <orca|other> <partitions|->
@@ -231,7 +231,7 @@ non-empty line as a key. Empty output is an error
 
 ### `fires [<count>] [--after <time>]`
 
-A scheduled pipeline's next fires, each with the partition it fills
+A scheduled pipeline's next fires, each with the partition it runs
 (`src/morca/_cli.mojo:473-509`). The scheduler computes fires itself, from
 the `schedule` in describe (`src/morca/_internal/sensing.mojo:380-420`), so
 this is for people only (**incidental**). The scheduler's computation must
@@ -318,7 +318,7 @@ Only for a pipeline whose describe lists `tasks`.
 
 ## `describe` and the registry hash
 
-`describe` prints one JSON object (`src/morca/pipeline.mojo:215-292`). The
+`describe` prints one JSON object (`src/morca/pipeline.mojo:234-314`). The
 registration parses it and keeps it as `orca.pipelines.describe` (jsonb), and
 the scheduler and UI read it there with SQL, so key order and whitespace
 don't matter. A field morca doesn't know is kept and ignored, so a new
@@ -345,23 +345,23 @@ An example, from a test's stand-in binary (`tests/fake_sensor:10`):
 
 | Field | Written at | Read by | Default when absent |
 |---|---|---|---|
-| `pipeline` | `pipeline.mojo:223` | the registration's name (`db/registering.mojo:114`) | required |
-| `registry_hash` | `pipeline.mojo:224` | the registration's code; compared with each run's (`db/registering.mojo:115`, `db/scheduler.mojo:205`, `:251-255`) | required |
-| `partitions.kind` | `pipeline.mojo:225` | `monthly`, `weekly`, `daily`, `hourly` or `keyed`: how the scheduler makes keys (`db/registered.mojo:83`) | `monthly` |
-| `partitions.start` | `pipeline.mojo:226-229` | the first key a fill covers (`db/registered.mojo:84`) | none |
-| `partitions.dataset`, `.column` | `pipeline.mojo:230-232`, keyed only | the keys dataset, sensed and shown (`db/registered.mojo:93`, `db/sensing.mojo:32`) | none |
-| `schedule` | `pipeline.mojo:233-241` | `cron`, `tz`, `fills` (`previous` or `current`), `catchup` (`db/registered.mojo:79-82`); `null` for none | none |
-| `max_runs` | `pipeline.mojo:242` | runs at once, unless morca.toml says (`db/registered.mojo:85`) | 1 |
-| `run_retries` | `pipeline.mojo:243` | starts of a run after a failure (`db/registered.mojo:87`) | 3 |
-| `retry_seconds`, `max_retry_seconds` | `pipeline.mojo:245-248`, only when set | the backoff between run retries (`db/registered.mojo:88-89`) | 0 |
-| `sensor` | `pipeline.mojo:249` | whether `sense` is polled (`db/registered.mojo:90`) | false |
-| `keys_per_run` | `pipeline.mojo:250` | keys a queued run covers (`db/registered.mojo:92`) | 1 |
-| `workers` | `pipeline.mojo:251` | EC2 workers for a pipeline with tasks (`db/registered.mojo:95-96`) | 2 |
-| `steps[]` | `pipeline.mojo:252-279` | see below | required |
-| `tasks` | `pipeline.mojo:280-283` | dista task names; non-empty means the run gets a cluster (`db/registered.mojo:95`, `db/config_show.mojo:13`) | `[]` |
-| `source` | `pipeline.mojo:284-286` | `repo`, `commit`, `dirty`: the row of `orca.pipeline_versions` (`db/runs.mojo:50-86`), and whether a run is [outdated](#the-stop-notice-a-newer-version-leads) | empty |
-| `protocol` | `pipeline.mojo:289` | the version of this protocol the binary speaks, checked at registration ([Versions](#versions)) | not checked |
-| `morca` | `pipeline.mojo:290` | the morca-mojo it was built with, checked at registration; only for binaries built with morca-mojo ([Versions](#versions)) | not checked |
+| `pipeline` | `pipeline.mojo:242` | the registration's name (`db/registering.mojo:114`) | required |
+| `registry_hash` | `pipeline.mojo:243` | the registration's code; compared with each run's (`db/registering.mojo:115`, `db/scheduler.mojo:205`, `:251-255`) | required |
+| `partitions.kind` | `pipeline.mojo:244` | `monthly`, `weekly`, `daily`, `hourly` or `keyed`: how the scheduler makes keys (`db/registered.mojo:83`) | `monthly` |
+| `partitions.start` | `pipeline.mojo:245-248` | the first key a fill covers (`db/registered.mojo:84`) | none |
+| `partitions.dataset`, `.column` | `pipeline.mojo:249-251`, keyed only | the keys dataset, sensed and shown (`db/registered.mojo:93`, `db/sensing.mojo:32`) | none |
+| `schedule` | `pipeline.mojo:252-263` | `cron`, `tz`, `fire` (`previous` or `current`: the partition each fire runs), `catchup` (`db/registered.mojo:79-83`); `null` for none. `fills` repeats `fire` for one release, for older schedulers, which read only `fills`; the scheduler reads `fire`, then `fills` (#370) | none; `fire` defaults to `previous` |
+| `max_runs` | `pipeline.mojo:264` | runs at once, unless morca.toml says (`db/registered.mojo:85`) | 1 |
+| `run_retries` | `pipeline.mojo:265` | starts of a run after a failure (`db/registered.mojo:87`) | 3 |
+| `retry_seconds`, `max_retry_seconds` | `pipeline.mojo:267-270`, only when set | the backoff between run retries (`db/registered.mojo:88-89`) | 0 |
+| `sensor` | `pipeline.mojo:271` | whether `sense` is polled (`db/registered.mojo:90`) | false |
+| `keys_per_run` | `pipeline.mojo:272` | keys a queued run covers (`db/registered.mojo:92`) | 1 |
+| `workers` | `pipeline.mojo:273` | EC2 workers for a pipeline with tasks (`db/registered.mojo:95-96`) | 2 |
+| `steps[]` | `pipeline.mojo:274-301` | see below | required |
+| `tasks` | `pipeline.mojo:302-305` | dista task names; non-empty means the run gets a cluster (`db/registered.mojo:95`, `db/config_show.mojo:13`) | `[]` |
+| `source` | `pipeline.mojo:306-308` | `repo`, `commit`, `dirty`: the row of `orca.pipeline_versions` (`db/runs.mojo:50-86`), and whether a run is [outdated](#the-stop-notice-a-newer-version-leads) | empty |
+| `protocol` | `pipeline.mojo:311` | the version of this protocol the binary speaks, checked at registration ([Versions](#versions)) | not checked |
+| `morca` | `pipeline.mojo:312` | the morca-mojo it was built with, checked at registration; only for binaries built with morca-mojo ([Versions](#versions)) | not checked |
 
 Paths in the table are under `src/morca/` and `src/morca/_internal/`.
 
@@ -397,7 +397,7 @@ Each element of `steps`, in run order:
 - It goes into `orca.code` on every commit ([Summary keys](#summary-keys)).
 
 **What's incidental** is how the Mojo binary computes it
-(`src/morca/pipeline.mojo:171-213`): the 64-bit FNV-1a
+(`src/morca/pipeline.mojo:190-232`): the 64-bit FNV-1a
 (`dista.task.fnv1a64`) of a text with the pipeline's name, then for each
 step its name, kind, upstream, function, `reads`/`writes` datasets and
 `version`, then its dista tasks, its partition kind and a keyed pipeline's
@@ -647,7 +647,7 @@ The binary notices in two ways:
 ### Timeouts, and a cancel that ran out
 
 The heartbeat is given the steps' timeouts as `step=seconds,...`
-(`src/morca/pipeline.mojo:291-303`, `src/morca/_cli.mojo:545`). Each beat
+(`src/morca/pipeline.mojo:313-325`, `src/morca/_cli.mojo:545`). Each beat
 runs one query for a cancel that's due and for a running attempt older than
 its step's timeout (`src/morca/_internal/db/runs.mojo:317-328`). If it finds
 one, in one transaction (`src/morca/_internal/state.mojo:290-326`):
@@ -706,13 +706,13 @@ shorter than the stale limit doesn't fail a run is what users rely on.
 ### Executing
 
 What `_execute` does once the run is claimed (`src/morca/_cli.mojo:525-578`,
-`src/morca/pipeline.mojo:368-441` and `:451-591`):
+`src/morca/pipeline.mojo:390-463` and `:451-591`):
 
 1. `own`, then start the heartbeat.
 2. For each step in describe order, for each key for a mapped step or once
    for a gather step:
    - skip it with no store call if `prior` holds it `succeeded`
-     (`src/morca/pipeline.mojo:444-448`);
+     (`src/morca/pipeline.mojo:466-470`);
    - if its upstream didn't succeed, `skip` it with `not run: <step>
      [<key>] didn't succeed` (`:468-473`);
    - else read `pinned_reads` and `run_token` once, then for each try up to
@@ -728,7 +728,7 @@ What `_execute` does once the run is claimed (`src/morca/_cli.mojo:525-578`,
 5. Exit 0 for `succeeded`, else 1.
 
 A deferred step's error is `deferred until <time>Z: <why>`
-(`src/morca/pipeline.mojo:541-567`), and the run's `retry_at` is when the
+(`src/morca/pipeline.mojo:563-589`), and the run's `retry_at` is when the
 scheduler starts it again.
 
 If a store call raises (the database stayed away, or the run was lost), the
@@ -861,13 +861,13 @@ retry or a resume sees the same data:
   attempt of this run's step and partition read; reads are ordered newest
   attempt first and folded so the earliest attempt's wins
   (`src/morca/_internal/db/steps.mojo:280-298`). It's read once per step
-  and partition (`src/morca/pipeline.mojo:479`).
+  and partition (`src/morca/pipeline.mojo:501`).
 - When the step scans a table, it reads the snapshot it already read in
   this attempt, else the pinned one, else the current one, and records that
   read (`Ctx.pin`, `src/morca/ctx.mojo:148-160`). A snapshot of `-1` pins a
   table as empty.
 - A table first read by a later attempt is pinned for the attempts after it
-  (`src/morca/pipeline.mojo:533-535`).
+  (`src/morca/pipeline.mojo:555-557`).
 
 The table's key is its **location**, not its dataset name.
 
@@ -880,13 +880,13 @@ input, raising if bytes are left over, and appends its result's encoding to
 its output (`src/morca/step.mojo:448-457`). The input of a first step is its
 partition key's encoding, or a gather step's `Seq` of keys; a gather step
 over a mapped one gets an `int64` count and the upstream outputs one after
-the other (`src/morca/pipeline.mojo:399-437`).
+the other (`src/morca/pipeline.mojo:421-459`).
 
 Who reads them:
 
 - **The same pipeline's binary, on resume.** `prior` hands it the outputs of
   the steps that succeeded, which become the next steps' inputs as they
-  are; the executor doesn't decode them (`src/morca/pipeline.mojo:404-408`).
+  are; the executor doesn't decode them (`src/morca/pipeline.mojo:426-430`).
 - **A rerun** copies a run's succeeded steps into a new run, bytes and all
   (`copy_steps`, `src/morca/_internal/db/actions.mojo:162-174`), and its
   process resumes from them.
@@ -933,7 +933,7 @@ driver log and metrics (`driver.log`, `metrics/`, `timeline.json`).
   unchecked (#525). The version goes up only for a change an older binary
   can't follow; a new optional field or subcommand doesn't raise it.
 - **`MORCA_VERSION`.** describe's last key, `"morca": "<version>"`, is the
-  morca-mojo the binary was built with (`src/morca/pipeline.mojo:290`).
+  morca-mojo the binary was built with (`src/morca/pipeline.mojo:312`).
   `morca register` refuses a binary of another version unless
   `MORCA_MIXED_VERSIONS=1`, and registers one without the key unchecked
   (`src/morca/_internal/version.mojo`, [binaries.md](binaries.md#versions)).

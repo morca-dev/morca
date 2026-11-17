@@ -1,6 +1,6 @@
 #!/bin/sh
 # Weekly partitions (morca.week, morca.partitions.Weekly): a Monday 06:00
-# schedule with fills=Previous runs the ISO week that just ended; backfills
+# schedule with fire=Previous runs the ISO week that just ended; backfills
 # take week ranges; the coverage calendar is an ISO year of weeks. Needs
 # MORCA_DATABASE_URL (pixi run test-weekly starts a throwaway server), curl
 # and jq.

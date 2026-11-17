@@ -393,14 +393,14 @@ def _progress_html(
             "next",
             (
                 "When the schedule fires next, in UTC, and the partition that"
-                " run fills. Next runs, further down, lists the next five."
+                " fire runs. Next runs, further down, lists the next five."
             ),
             "partitions",
         )
         h.raw("<code>")
         h.text(fires[0].at)
         h.raw("</code>")
-        h.text(", fills ", fires[0].partition)
+        h.text(", runs ", fires[0].partition)
         h.raw("</dd>")
     _coverage_fact(h, p, cov)
     h.raw("</dl>")
@@ -493,7 +493,7 @@ def _config_html(mut h: Html, p: PipelineRow):
         h.raw("<code>")
         h.text(p.cron)
         h.raw("</code> ")
-        h.text(p.tz, ", fills the ", p.fills, " partition")
+        h.text(p.tz, ", each fire runs the ", p.fills, " partition")
     else:
         h.raw('<span class="muted">none</span>')
     h.raw("</dd>")

@@ -1,5 +1,5 @@
 """A weekly pipeline (ISO weeks) run at 06:00 every Monday, filling the week
-that just ended (`fills=Previous`), the step returning its week number
+that just ended (`fire=Previous`), the step returning its week number
 (tests/weekly.sh).
 """
 
@@ -26,7 +26,7 @@ comptime Mondays = Pipeline[
     Count,
     partitions=Weekly["2026-W40"],
     schedule=Cron["0 6 * * 1"],
-    fills=Previous,
+    fire=Previous,
     catchup=False,
 ]
 

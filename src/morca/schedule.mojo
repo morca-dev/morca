@@ -1,17 +1,19 @@
-"""Schedules: when a pipeline runs by itself, and which partition it fills.
+"""Schedules: when a pipeline runs by itself, and which partition each fire runs.
 
 ```mojo
 comptime Taxi = Pipeline[
     "taxi", Download, Load, Compact,
     partitions=Monthly["2011-01"],
     schedule=Cron["0 3 2 * *", "America/New_York"],  # 03:00 on the 2nd
-    fills=Previous,                                   # last month
+    fire=Previous,                                    # last month
 ]
 ```
 
-A fire at some time fills the partition the time falls in on the schedule's
-wall clock (`Current`), or the one before it (`Previous`, the default): a
-monthly load that runs on the 2nd loads the month that just ended.
+A fire at some time runs the partition the time falls in on the schedule's
+wall clock (`fire=Current`), or the one before it (`fire=Previous`, the
+default): a monthly load that runs on the 2nd loads the month that just
+ended. `fills=` is `fire=`'s old name, accepted for one more release; it
+is unrelated to morca.toml's `fills`, which backfills a pipeline's range.
 `catchup=False` tells the scheduler to start only the latest of the fires it
 missed while it was down. The scheduler itself is phase 2's next PR; until
 then a schedule is declared, checked, and shown by `describe` and `fires`.
@@ -23,7 +25,7 @@ from morca.tz import Zone
 
 @fieldwise_init
 struct Fill(Equatable, TrivialRegisterPassable, Writable):
-    """Which partition a fire fills."""
+    """Which partition a fire runs (`Pipeline[..., fire=]`)."""
 
     var value: Int
 
@@ -38,6 +40,8 @@ comptime Previous = Fill(0)
 """The partition before the one the fire's time falls in."""
 comptime Current = Fill(1)
 """The partition the fire's time falls in."""
+comptime _NoFill = Fill(-1)
+"""`Pipeline`'s `fills=` when it isn't set: `fire=` decides."""
 
 
 trait ScheduleLike:

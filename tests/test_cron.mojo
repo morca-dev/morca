@@ -284,16 +284,32 @@ comptime Monthly2nd = Pipeline[
     MonthSize,
     partitions=Monthly["2011-01"],
     schedule=Cron["0 3 2 * *"],
+    fire=Current,
+    catchup=False,
+]
+# `fills=` is `fire=`'s old name (#370): the same schedule.
+comptime Monthly2ndOld = Pipeline[
+    "monthly",
+    MonthSize,
+    partitions=Monthly["2011-01"],
+    schedule=Cron["0 3 2 * *"],
     fills=Current,
     catchup=False,
+]
+comptime NightlyOld = Pipeline[
+    "nightly",
+    DaySize,
+    partitions=Daily[],
+    schedule=Cron["30 2 * * *", "America/New_York"],
+    fills=Previous,
 ]
 comptime Unscheduled = Pipeline["unscheduled", MonthSize]
 
 
-def test_fills() raises:
+def test_fire() raises:
     var s = Nightly.load_schedule()
-    # 02:30 in New York on the 2nd fills the 1st; a fire at 03:00 UTC on
-    # March 1 is still February 29 in New York, so it fills the 28th.
+    # 02:30 in New York on the 2nd runs the 1st; a fire at 03:00 UTC on
+    # March 1 is still February 29 in New York, so it runs the 28th.
     var t = s.next_fire(utc(2024, 3, 2, 0, 0))
     assert_equal(String(Civil.of(t)), "2024-03-02T07:30:00")
     assert_equal(String(Nightly.fills_for(t, s)), "2024-03-01")
@@ -308,15 +324,34 @@ def test_fills() raises:
         _ = Unscheduled.load_schedule()
 
 
+def test_fills_is_fire() raises:
+    # A pipeline with `fills=` describes and fires as one with `fire=`.
+    assert_equal(Monthly2ndOld.describe(), Monthly2nd.describe())
+    assert_equal(NightlyOld.describe(), Nightly.describe())
+    assert_equal(Monthly2ndOld.registry_hash(), Monthly2nd.registry_hash())
+    var m = Monthly2nd.load_schedule()
+    var n = Nightly.load_schedule()
+    var t = utc(2024, 1, 5)
+    for _ in range(30):
+        t = m.next_fire(t)
+        assert_equal(
+            String(Monthly2ndOld.fills_for(t, m)),
+            String(Monthly2nd.fills_for(t, m)),
+        )
+        assert_equal(
+            String(NightlyOld.fills_for(t, n)), String(Nightly.fills_for(t, n))
+        )
+
+
 def test_describe_schedules() raises:
     assert_true(
         '"schedule": {"cron": "30 2 * * *", "tz": "America/New_York",'
-        ' "fills": "previous", "catchup": true}'
+        ' "fire": "previous", "fills": "previous", "catchup": true}'
         in Nightly.describe()
     )
     assert_true(
-        '"schedule": {"cron": "0 3 2 * *", "tz": "UTC", "fills": "current",'
-        ' "catchup": false}'
+        '"schedule": {"cron": "0 3 2 * *", "tz": "UTC", "fire": "current",'
+        ' "fills": "current", "catchup": false}'
         in Monthly2nd.describe()
     )
     assert_true('"schedule": null' in Unscheduled.describe())
