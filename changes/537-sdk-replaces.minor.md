@@ -1,0 +1,1 @@
+- **morca-sdk `replaces`**: a Rust step can replace the partitions it writes, as Mojo's `replaces=` does. (#537)

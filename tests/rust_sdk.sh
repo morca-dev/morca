@@ -6,9 +6,13 @@
 #   and the registry hash, the crash summary), with and without tables;
 # - examples/toy-rust, examples/toy.mojo rebuilt in Rust, links no Mojo
 #   runtime;
-# - the conformance suite (tests/conformance.py) passes for the Rust toy and
+# - the conformance suite (tests/conformance.py) passes for the Rust toy,
 #   for the Rust sensor with tables (rust/morca-sdk/examples/clean.rs, the
-#   twin of tests/sensors/clean.mojo), over SQLite and Postgres;
+#   twin of tests/sensors/clean.mojo), and for the Rust sensor that replaces
+#   its partitions (examples/replace.rs, the twin of
+#   tests/sensors/replace.mojo), whose table Mojo's morca.tables
+#   (tests/sensors/rows_by.mojo) and iceberg-rust then read as one copy of
+#   each month, over SQLite and Postgres;
 # - side by side: the Mojo toy and the Rust toy registered with one morca
 #   scheduler (the Rust one placed on the control host), fired by the same
 #   schedule, then a backfill each, every run succeeding; `morca status`
@@ -57,6 +61,10 @@ mojo_morca=$!
 # shellcheck disable=SC2086
 scripts/mojo-build.sh -I src $DEP_INC examples/toy.mojo -o build/rust-sdk/toy >> "$log" 2>&1 &
 mojo_toy=$!
+# The Mojo reader of the table the Rust replace example writes.
+# shellcheck disable=SC2086
+scripts/mojo-build.sh -I src $DEP_INC tests/sensors/rows_by.mojo -o build/sn-rows_by >> "$log" 2>&1 &
+mojo_rows=$!
 
 cargo test --manifest-path rust/morca-sdk/Cargo.toml >> "$log" 2>&1 || fail "cargo test"
 cargo test --manifest-path rust/morca-sdk/Cargo.toml --features tables >> "$log" 2>&1 \
@@ -77,10 +85,13 @@ echo "ok   the Rust toy builds with cargo alone ($(wc -c < "$rtoy" | tr -d ' ') 
 
 wait "$mojo_morca" || fail "build morca"
 wait "$mojo_toy" || fail "build the Mojo toy"
+wait "$mojo_rows" || fail "build the Mojo reader (tests/sensors/rows_by.mojo)"
 
 python3 tests/conformance.py "$rtoy" tests/conformance/toy-rust.json || fail "conformance: the Rust toy"
 python3 tests/conformance.py "$CARGO_TARGET_DIR/release/examples/clean" tests/conformance/clean-rust.json \
     || fail "conformance: the Rust sensor with tables"
+python3 tests/conformance.py "$CARGO_TARGET_DIR/release/examples/replace" tests/conformance/replace-rust.json \
+    || fail "conformance: the Rust sensor that replaces its partitions"
 
 # Side by side under one scheduler, in a database of their own.
 db=morca_side_by_side

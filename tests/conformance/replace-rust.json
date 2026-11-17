@@ -1,0 +1,18 @@
+{
+  "pipeline": "replace_rust",
+  "partitions": "monthly",
+  "keys": ["2024-03", "2024-04"],
+  "steps": [
+    {"name": "load", "kind": "mapped", "reads": ["raw.events"], "replaces": ["lake.monthly"]}
+  ],
+  "sensor": true,
+  "warehouse": true,
+  "setup": [["build/cargo/release/examples/source", "{warehouse}", "2024-03"]],
+  "slow_env": {"MORCA_REPLACE_SLEEP": "3"},
+  "commit_input": ["build/cargo/release/examples/source", "{warehouse}"],
+  "die_env": {"MORCA_REPLACE_DIE": "1"},
+  "rows": [
+    ["build/cargo/release/examples/replace", "rows", "{warehouse}"],
+    ["build/sn-rows_by", "{warehouse}", "lake.monthly", "month"]
+  ]
+}

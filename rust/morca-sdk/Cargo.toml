@@ -62,5 +62,9 @@ required-features = ["tables"]
 name = "source"
 required-features = ["tables"]
 
+[[example]]
+name = "replace"
+required-features = ["tables"]
+
 [profile.release]
 strip = true

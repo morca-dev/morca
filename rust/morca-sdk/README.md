@@ -37,8 +37,10 @@ cargo build --release && morca register target/release/days
   Postgres or a SQLite file, and passes the conformance suite
   (tests/conformance.py).
 - The `tables` feature adds Iceberg reads (pinned on a retry, recorded) and
-  appends (fenced, with the `orca.*` summary keys, found again on a retry)
-  through iceberg-rust 0.11.0 and arrow-rs 58, plus `sense` and `keys`.
+  commits (fenced, with the `orca.*` summary keys, found again on a retry)
+  through iceberg-rust 0.11.0 and arrow-rs 58, plus `sense` and `keys`. A
+  commit appends, or with `step(..).replaces([..])` replaces the partitions
+  it writes in one `overwrite` snapshot, as Mojo's `replaces=` does.
 - Rust 1.95 or later.
 
 docs/rust-pipelines.md in the morca repository is the guide, including what

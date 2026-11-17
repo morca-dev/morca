@@ -30,6 +30,7 @@
 //! Data and manifest files go through iceberg-rust's own `FileIO`.
 
 use std::collections::HashMap;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -39,8 +40,8 @@ use iceberg::io::FileIO;
 use iceberg::spec::{TableMetadata, TableMetadataBuilder};
 use iceberg::table::Table;
 use iceberg::{
-    Catalog, Error, ErrorKind, Namespace, NamespaceIdent, Result, Runtime, TableCommit,
-    TableCreation, TableIdent,
+    Catalog, Error, ErrorKind, MetadataLocation, Namespace, NamespaceIdent, Result, Runtime,
+    TableCommit, TableCreation, TableIdent,
 };
 use object_store::aws::AmazonS3;
 use object_store::list::{PaginatedListOptions, PaginatedListStore};
@@ -338,6 +339,50 @@ impl MorcaCatalog {
         Ok(true)
     }
 
+    /// Commits `metadata`, built on `base`, as the table's next version
+    /// (`<V+1>-<uuid>.metadata.json`), as `update_table` commits a
+    /// transaction: for a snapshot iceberg-rust has no transaction for
+    /// (`overwrite`). Refuses, retryably, unless `base` is still the
+    /// table's current metadata.
+    pub async fn commit_next(&self, base: &Table, metadata: TableMetadata) -> Result<Table> {
+        let current = self.load_table(base.identifier()).await?;
+        let at = base.metadata_location_result()?;
+        if current.metadata_location() != Some(at) {
+            return Err(conflict(format!(
+                "{} moved on from {at}; reload and retry",
+                base.identifier()
+            )));
+        }
+        let path = MetadataLocation::from_str(at)?
+            .with_next_version()
+            .try_with_new_metadata(&metadata)?
+            .to_string();
+        let staged = self.table(base.identifier().clone(), path, metadata)?;
+        self.write_staged(staged).await
+    }
+
+    /// Writes a staged table's metadata as the version its location names,
+    /// unless another writer committed that version first.
+    async fn write_staged(&self, staged: Table) -> Result<Table> {
+        let path = staged.metadata_location_result()?.to_string();
+        let (dir, name) = path.rsplit_once('/').unwrap();
+        let v = version_of(name).unwrap();
+        if !self.files_of_version(dir, v).await?.is_empty()
+            || self.read_hint(dir).await.is_some_and(|h| h >= v)
+        {
+            return Err(conflict(format!(
+                "another writer committed version {v} first"
+            )));
+        }
+        let doc = Bytes::from(serde_json::to_vec(staged.metadata())?);
+        if !self.claim_and_write(dir, v, &path, doc).await? {
+            return Err(conflict(format!(
+                "several writers claimed version {v}; reload and retry"
+            )));
+        }
+        Ok(staged)
+    }
+
     fn table(&self, ident: TableIdent, location: String, metadata: TableMetadata) -> Result<Table> {
         Table::builder()
             .file_io(self.file_io.clone())
@@ -466,22 +511,6 @@ impl Catalog for MorcaCatalog {
                 e
             }
         })?;
-        let path = staged.metadata_location_result()?.to_string();
-        let (dir, name) = path.rsplit_once('/').unwrap();
-        let v = version_of(name).unwrap();
-        if !self.files_of_version(dir, v).await?.is_empty()
-            || self.read_hint(dir).await.is_some_and(|h| h >= v)
-        {
-            return Err(conflict(format!(
-                "another writer committed version {v} first"
-            )));
-        }
-        let doc = Bytes::from(serde_json::to_vec(staged.metadata())?);
-        if !self.claim_and_write(dir, v, &path, doc).await? {
-            return Err(conflict(format!(
-                "several writers claimed version {v}; reload and retry"
-            )));
-        }
-        Ok(staged)
+        self.write_staged(staged).await
     }
 }

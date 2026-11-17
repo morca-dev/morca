@@ -852,6 +852,34 @@ The run token is what keeps two databases over the same tables, or a
 database restored from a backup, from taking each other's commits for their
 own (#292).
 
+### Replacing partitions
+
+A dataset in a step's `replaces` (describe's `replaces`, also in its
+`writes`) is one whose partitions a new run replaces rather than appends to
+(`replace_partitions`, `src/morca/_lake/impl.mojo:1051-1325`):
+
+- The run's first commit to a partition is one `overwrite` snapshot that
+  removes every data and delete file in it that this run didn't commit, and
+  adds the new files. A file is this run's if its snapshot's summary has
+  this run's `orca.pipeline` and `orca.run` (`Ctx.same_run`), so later
+  commits of the run to the partition, from any step or attempt, find only
+  its own files and append. A commit that removes nothing is an `append`.
+- The partitions are those of the new files under the table's current
+  spec; files under an older spec are left alone, and an unpartitioned
+  table is one partition.
+- What to remove is planned again on every try, against the snapshot the
+  try commits on top of.
+- A file in a partition being replaced that another writer committed after
+  this run's first commit to the table fails the attempt, committing
+  nothing.
+- The snapshot carries `orca.replaced-files` and `orca.replaced-records`,
+  and is found again on a retry or resume as any commit is
+  ([Finding an earlier attempt's commit](#finding-an-earlier-attempts-commit)).
+
+**Contract** that a rerun of a key leaves one copy of its rows: `morca
+backfill --rerun` relies on it, and refuses a pipeline that appends
+instead (`appending_writes`, `src/morca/_internal/queueing.mojo:356-366`).
+
 ### Pinned reads
 
 Every attempt of a step reads the snapshots the first attempt read, so a

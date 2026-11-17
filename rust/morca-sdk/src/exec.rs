@@ -242,7 +242,8 @@ fn run_step(
             reads: vec![],
             commits: vec![],
             declared_reads: st.spec.reads.clone(),
-            declared_writes: st.spec.writes.clone(),
+            declared_writes: st.spec.all_writes(),
+            declared_replaces: st.spec.replaces.clone(),
             log_path: log,
             store,
         };
