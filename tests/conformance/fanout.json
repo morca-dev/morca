@@ -1,0 +1,12 @@
+{
+  "pipeline": "fanout",
+  "registry_hash": "0x1f0ebf1f2a93d993",
+  "partitions": "monthly",
+  "keys": ["2024-01", "2024-02"],
+  "steps": [
+    {"name": "month_trips", "kind": "mapped"},
+    {"name": "all_trips", "kind": "gather"}
+  ],
+  "env": {"MORCA_WORKERS": "2"},
+  "slow_env": {"MORCA_FANOUT_SLEEP": "0.25"}
+}

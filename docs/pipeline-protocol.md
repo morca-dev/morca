@@ -6,7 +6,8 @@ deals with it only through four things: the binary's command line, its
 environment, the run store (Postgres, SQLite, or the UI's worker API) and the
 Iceberg tables. This page writes that contract down, so that a second
 implementation, such as a pipeline binary written in Rust (#521), can be
-built from it. The conformance suite (#519) tests against it.
+built from it. The conformance suite (`tests/conformance.py`, #519) tests
+against it: `pixi run conformance <binary> <manifest>`.
 
 Today the Mojo side of the contract is `morca_main` (`src/morca/_cli.mojo`),
 `Pipeline` (`src/morca/pipeline.mojo`), `Ctx` (`src/morca/ctx.mojo`) and the

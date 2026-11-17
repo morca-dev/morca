@@ -25,6 +25,14 @@
 # --allow-new-code, which resumes it to the end (what tests/kill.sh checked
 # before it was folded in here, #447).
 #
+# With CHAOS_BIN, the conformance suite's mode (tests/conformance.py,
+# docs/pipeline-protocol.md): CHAOS_BIN is a prebuilt binary of the chaos
+# pipeline, in any language, with its knobs (CHAOS_NAP, CHAOS_FLAKY,
+# CHAOS_SEED and a `TOTAL <n>` log line), and every run, the reference one
+# too, is started as the runners start one: a run row as the scheduler
+# makes it (`conformance.py new-run`) and `resume`, never `run`. The keys are
+# CHAOS_KEYS, comma-separated (the twelve months of 2024).
+#
 # Needs MORCA_DATABASE_URL and MORCA_PGDATA (pixi run test-chaos starts a
 # throwaway server), or MORCA_DATABASE_URL=sqlite:<path>, a file it starts
 # afresh (pixi run test-chaos-sqlite). CHAOS_TIMEOUT (default 120) seconds
@@ -36,7 +44,9 @@ src=${CHAOS_SRC:-tests/chaos_pipeline.mojo}
 # By its full path, so the check for processes left behind (pgrep) sees
 # only this checkout's, not another job's on the same machine.
 bin=$PWD/build/$(basename "$src" .mojo)
-if [ "$src" = tests/chaos_pipeline.mojo ]; then
+if [ -n "${CHAOS_BIN:-}" ]; then
+    bin=$(cd "$(dirname "$CHAOS_BIN")" && pwd)/$(basename "$CHAOS_BIN")
+elif [ "$src" = tests/chaos_pipeline.mojo ]; then
     scripts/pipelines.sh chaos_pipeline
 else
     # shellcheck disable=SC2086
@@ -48,6 +58,7 @@ export MORCA_WORKERS=2
 export CHAOS_NAP=${CHAOS_NAP:-0.05}
 export CHAOS_FLAKY=${CHAOS_FLAKY:-30}
 months=${CHAOS_MONTHS:-2024-01..2024-12}
+keys=${CHAOS_KEYS:-2024-01,2024-02,2024-03,2024-04,2024-05,2024-06,2024-07,2024-08,2024-09,2024-10,2024-11,2024-12}
 case $MORCA_DATABASE_URL in
 sqlite:*)
     # The same queries, on Postgres's tables without the morca schema.
@@ -66,6 +77,10 @@ sqlite:*)
     ;;
 esac
 
+# A new run of the pipeline over its months, left for `resume` as the
+# scheduler leaves one (conformance mode only).
+new_run() { python3 tests/conformance.py new-run "$bin" "$keys" "$@"; }
+
 # A fresh warehouse for a pipeline with tables.
 fresh_warehouse() {
     CHAOS_WH=$(pwd)/build/chaos-wh-$1-$$
@@ -76,7 +91,12 @@ fresh_warehouse() {
 
 # What an uninterrupted run gives: its total and its number of steps.
 [ "${CHAOS_CHECK:-0}" = 1 ] && fresh_warehouse ref
-ref=$(env -u MORCA_DATABASE_URL CHAOS_FLAKY=0 CHAOS_NAP= "$bin" run --partitions "$months" 2>&1)
+if [ -n "${CHAOS_BIN:-}" ]; then
+    ref_run=$(new_run) || { echo "FAIL: no reference run"; exit 1; }
+    ref=$(CHAOS_FLAKY=0 CHAOS_NAP= "$bin" resume "$ref_run" 2>&1)
+else
+    ref=$(env -u MORCA_DATABASE_URL CHAOS_FLAKY=0 CHAOS_NAP= "$bin" run --partitions "$months" 2>&1)
+fi
 want=$(echo "$ref" | sed -n 's/.*TOTAL //p')
 steps=$(echo "$ref" | grep ' succeeded$' | grep -vc '^run ')
 [ -n "$want" ] || { echo "FAIL: the reference run printed no total"; echo "$ref"; exit 1; }
@@ -116,9 +136,14 @@ for seed in ${CHAOS_SEEDS:-1 2 3}; do
         fresh_warehouse "$seed" || fail "init failed"
     fi
     started=$SECONDS
-    "$bin" run --partitions "$months" >> "$log" 2>&1 &
-    pids=($!)
     run=""
+    if [ -n "${CHAOS_BIN:-}" ]; then
+        run=$(new_run) || fail "no run"
+        "$bin" resume "$run" >> "$log" 2>&1 &
+    else
+        "$bin" run --partitions "$months" >> "$log" 2>&1 &
+    fi
+    pids=($!)
     until [ -n "$run" ]; do
         run=$(sed -n 's/^run \([0-9][0-9]*\)$/\1/p' "$log" | head -1)
         [ $((SECONDS - started)) -lt 20 ] || fail "the run never started"
@@ -224,10 +249,14 @@ if [ "${CHAOS_CHECK:-0}" != 1 ]; then
         tail -40 "$log"
         exit 1
     }
-    CHAOS_FLAKY=100 CHAOS_NAP= "$bin" run --partitions "$months" > "$log" 2>&1 && fail "a run whose flaky step always fails succeeded"
-    run=$(sed -n 's/^run \([0-9][0-9]*\)$/\1/p' "$log" | head -1)
-    [ -n "$run" ] || fail "the failing run never started"
-    q "UPDATE orca.runs SET registry_hash = '0xdead' WHERE id = $run" > /dev/null
+    if [ -n "${CHAOS_BIN:-}" ]; then
+        run=$(new_run --hash 0xdead) || fail "no run"
+    else
+        CHAOS_FLAKY=100 CHAOS_NAP= "$bin" run --partitions "$months" > "$log" 2>&1 && fail "a run whose flaky step always fails succeeded"
+        run=$(sed -n 's/^run \([0-9][0-9]*\)$/\1/p' "$log" | head -1)
+        [ -n "$run" ] || fail "the failing run never started"
+        q "UPDATE orca.runs SET registry_hash = '0xdead' WHERE id = $run" > /dev/null
+    fi
     set +e
     CHAOS_FLAKY=0 CHAOS_NAP= "$bin" resume "$run" > "$log" 2>&1
     code=$?
