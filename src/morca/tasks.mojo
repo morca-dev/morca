@@ -66,10 +66,10 @@ def _accepts(host: String, port: Int) raises -> Bool:
         )
         var addr = _sockaddr(resolve_ipv4(host), port)
         if (
-            external_call["connect", c_int](
-                fd,
-                addr.unsafe_ptr().unsafe_bitcast[NoneType](),
-                c_uint(SOCKADDR_IN_SIZE),
+            # dista's and flare's argument types: one program can't
+            # declare a libc function twice with different ones.
+            external_call["connect", Int32](
+                fd, Int(addr.unsafe_ptr()), Int32(SOCKADDR_IN_SIZE)
             )
             == 0
         ):
@@ -79,14 +79,11 @@ def _accepts(host: String, port: Int) raises -> Bool:
             err[] = -1
             var size = stack_allocation[1, c_uint]()
             size[] = 4
-            _ = external_call["getsockopt", c_int](
-                fd,
-                SOL_SOCKET,
-                _SO_ERROR,
-                err.unsafe_bitcast[NoneType](),
-                size.unsafe_bitcast[NoneType](),
+            _ = external_call["getsockopt", Int32](
+                fd, SOL_SOCKET, _SO_ERROR, Int(err), Int(size)
             )
             ok = err[] == 0
+        _ = addr[0]  # addr stays alive until connect has returned
     except:
         pass
     _ = external_call["close", c_int](fd)
