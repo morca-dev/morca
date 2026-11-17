@@ -1,1 +1,0 @@
-- **Conformance suite**: `pixi run conformance <binary> <manifest>` checks a pipeline binary against docs/pipeline-protocol.md. (#528)

@@ -1,1 +1,0 @@
-- **Pipelines in Rust**: the `morca-sdk` crate builds a whole pipeline in Rust, with no Mojo, into a binary the scheduler registers and runs (docs/rust-pipelines.md). (#521)

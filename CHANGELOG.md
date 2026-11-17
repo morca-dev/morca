@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.35.0 - 2026-11-17
+
+- **`fire=` replaces `fills=`**: `Pipeline[..., fire=Previous]` picks the partition a fire runs and `describe` says `schedule.fire`; `fills=` and `schedule.fills` still work for one release. (#370)
+
+- **Pipelines in Rust**: the `morca-sdk` crate builds a whole pipeline in Rust, with no Mojo, into a binary the scheduler registers and runs (docs/rust-pipelines.md). (#521)
+
+- **Conformance suite**: `pixi run conformance <binary> <manifest>` checks a pipeline binary against docs/pipeline-protocol.md. (#528)
+
+- **describe's protocol version**: `describe` says `"protocol": 1` and `morca register` checks it, parsing describe's JSON so compact JSON registers. (#530)
+
+- **Resume and trigger `cli`**: the UI says Resume where it said Retry, and `morca start` runs have trigger `cli` instead of `ui`. (#534)
+
 ## 0.34.0 - 2026-11-17
 
 - **A release's runtime image in seconds**: the release PR's CI pushes its tested runtime image, and the release tags it `morca-runtime:<version>` instead of waiting for main to rebuild the merge commit; old per-commit images are pruned weekly (#353).
