@@ -1,0 +1,1 @@
+- **A conformance suite for pipeline binaries**: `pixi run conformance <binary> <manifest>` checks any pipeline binary against docs/pipeline-protocol.md, over SQLite and Postgres. (#519)

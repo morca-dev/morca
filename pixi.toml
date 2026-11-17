@@ -171,6 +171,13 @@ test-scheduler = { cmd = "scripts/with-postgres.sh tests/scheduler.sh" }
 test-chaos = { cmd = "scripts/with-postgres.sh tests/chaos.sh" }
 # The same over a SQLite file (morca.sqlite_store), with no server.
 test-chaos-sqlite = { cmd = "MORCA_DATABASE_URL=sqlite:build/chaos.db tests/chaos.sh" }
+# The conformance suite (#519): any pipeline binary against
+# docs/pipeline-protocol.md, over SQLite and a throwaway Postgres, given a
+# manifest of what the pipeline is (tests/conformance.py):
+#   pixi run conformance <binary> <manifest>
+conformance = { cmd = "scripts/with-postgres.sh python3 tests/conformance.py" }
+# The suite on toy, daily and fanout, and tests/chaos.sh in its mode.
+test-conformance = { cmd = "scripts/with-postgres.sh tests/conformance.sh examples" }
 test-ui = { cmd = "scripts/with-postgres.sh tests/ui.sh" }
 test-actions = { cmd = "scripts/with-postgres.sh tests/actions.sh" }
 # The fleet page (morca.fleet): samples kept in Postgres, hosts, cost, charts.
@@ -283,7 +290,7 @@ test-kind = { cmd = "tests/kind.sh" }
 build-shared = { cmd = "scripts/build-shared.sh" }
 # CI runs these three parts on runners of their own; `test` is all of them.
 # The executor, stores, crashes, what runs use and the data a run makes:
-test-executor-core = { depends-on = ["build-shared", "test-sample", "test-steps", "test-cron", "test-warehouse", "test-cli", "test-hetzner", "test-compile-fail", "test-store", "test-formal-pins", "test-state", "test-formal-migrate", "test-formal-fence", "test-crash", "test-tasks", "test-logs", "test-usage", "test-resources", "test-recommend", "test-cgroups", "test-aws", "test-source", "test-highlight", "test-step-cards", "test-graph", "test-locate", "test-timeline", "test-datasets", "test-db-blip", "test-chaos", "test-chaos-sqlite"] }
+test-executor-core = { depends-on = ["build-shared", "test-sample", "test-steps", "test-cron", "test-warehouse", "test-cli", "test-hetzner", "test-compile-fail", "test-store", "test-formal-pins", "test-state", "test-formal-migrate", "test-formal-fence", "test-crash", "test-tasks", "test-logs", "test-usage", "test-resources", "test-recommend", "test-cgroups", "test-aws", "test-source", "test-highlight", "test-step-cards", "test-graph", "test-locate", "test-timeline", "test-datasets", "test-db-blip", "test-chaos", "test-chaos-sqlite", "test-conformance"] }
 # Workers, pools, placement and the clouds they run on:
 test-executor-workers = { depends-on = ["build-shared", "test-ec2", "test-autoscale", "test-no-workers", "test-pool", "test-hcloud", "test-pool-scale", "test-pool-scale-ec2", "test-pool-image", "test-run-cluster", "test-secrets", "test-placement", "test-grants", "test-pressure", "test-lost-workers"] }
 test-executor = { depends-on = ["test-executor-core", "test-executor-workers"] }
@@ -438,6 +445,9 @@ test-commits = { cmd = "tests/concurrent_commits.sh", depends-on = ["build-libla
 # Snapshot expiry: morca expire, morca_maintain and the scheduler's sweep.
 test-expire = { cmd = "scripts/with-postgres.sh tests/expire.sh", depends-on = ["build-liblake"] }
 test-sensors = { cmd = "scripts/with-postgres.sh tests/sensors.sh", depends-on = ["build-liblake"] }
+# The conformance suite (#519) on a sensor with tables: commits, reads,
+# pinned snapshots and a retry after a commit, then `sense`.
+test-conformance-tables = { cmd = "scripts/with-postgres.sh tests/conformance.sh tables", depends-on = ["build-liblake"] }
 # keys_per_run for sensors and fills (#240), over tests/sensors.
 test-keys-per-run = { cmd = "scripts/with-postgres.sh tests/keys_per_run.sh", depends-on = ["build-liblake"] }
 # A snapshot sensed while a run of its partition is live (#139).
@@ -456,7 +466,7 @@ test-keyed-names = { cmd = "scripts/with-postgres.sh tests/keyed_names.sh", depe
 test-worker = { cmd = "scripts/with-postgres.sh tests/worker.sh", depends-on = ["build-liblake"] }
 # CI runs these three groups on runners of their own; test-data is all three.
 test-data-tables = { depends-on = ["build-shared", "test-tables", "test-tables-source", "test-lake", "test-lake-batch", "test-lake-batch-source", "test-append-files", "test-replace", "test-replace-concurrent", "test-formal-retry", "test-run-token", "test-chaos-tables", "test-lineage", "test-dataview", "test-commits", "test-expire", "test-taxi"] }
-test-data-sensors = { depends-on = ["build-shared", "test-sensors", "test-keys-per-run", "test-sensed-behind-live", "test-lineage-s3", "test-sensors-s3", "test-sample-s3", "test-worker"] }
+test-data-sensors = { depends-on = ["build-shared", "test-sensors", "test-conformance-tables", "test-keys-per-run", "test-sensed-behind-live", "test-lineage-s3", "test-sensors-s3", "test-sample-s3", "test-worker"] }
 test-data-keyed = { depends-on = ["build-shared", "test-keyed", "test-keyed-backfills", "test-keyed-sensor", "test-keyed-names"] }
 test-data = { depends-on = ["test-data-tables", "test-data-sensors", "test-data-keyed"] }
 taxi = { cmd = "scripts/mojo-build.sh -I src -I examples/taxi $DEP_INC examples/taxi/taxi.mojo -o build/taxi", depends-on = ["build-liblake"] }

@@ -1,0 +1,11 @@
+{
+  "pipeline": "daily",
+  "registry_hash": "0x81ead348d0a21c1f",
+  "partitions": "daily",
+  "keys": ["2024-02-28", "2024-02-29", "2024-03-01"],
+  "steps": [
+    {"name": "trips", "kind": "mapped"},
+    {"name": "total", "kind": "gather"}
+  ],
+  "slow_env": {"MORCA_DAILY_SLEEP": "3"}
+}
