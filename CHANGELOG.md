@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.36.0 - 2026-11-18
+
+- **morca-sdk `replaces`**: a Rust step can replace the partitions it writes, as Mojo's `replaces=` does. (#537)
+
+- **UI workers and request log**: `morca ui` serves on `MORCA_UI_WORKERS` threads (the Hetzner stack runs 4) and logs each request. (#539)
+
 ## 0.35.0 - 2026-11-17
 
 - **`fire=` replaces `fills=`**: `Pipeline[..., fire=Previous]` picks the partition a fire runs and `describe` says `schedule.fire`; `fills=` and `schedule.fills` still work for one release. (#370)
