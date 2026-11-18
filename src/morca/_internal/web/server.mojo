@@ -33,7 +33,7 @@ own as well (`morca._internal.api.worker`). SIGTERM or SIGINT drains it: no new
 connections, `/healthz` 503, the requests in flight answered, then exit 0 within
 `MORCA_UI_DRAIN_SECONDS` (8; `morca._internal.web.drain`).
 
-It answers on `MORCA_UI_WORKERS` threads (default: the cores, at most 4),
+It answers on `MORCA_UI_WORKERS` threads (default 1; the Hetzner stack runs 4),
 sharing one listening socket (flare's `FLARE_REUSEPORT_WORKERS=0`, unless
 that's set), so a new connection goes to a thread that's free rather than
 one a slow page holds up.
@@ -43,7 +43,6 @@ path, status, milliseconds, the client (`client`), Cloudflare's
 """
 
 from std.os import getenv, setenv
-from std.sys import num_logical_cores
 from std.time import perf_counter_ns
 
 from flare.http import (
@@ -98,8 +97,6 @@ from morca._internal.web.routes import routes
 comptime DEFAULT_ADDR = "127.0.0.1:8270"
 comptime STYLESHEET = "/static/morca.css"
 comptime HEALTHZ = "/healthz"
-comptime MAX_WORKERS = 4
-"""The default's cap: each worker opens a database connection per request."""
 
 
 def _path_of(url: String) -> String:
@@ -381,12 +378,12 @@ struct Logged[H: Handler & Copyable](Copyable, Handler):
 
 
 def ui_workers() -> Int:
-    """`MORCA_UI_WORKERS`, or the cores up to `MAX_WORKERS` if it's unset or
-    not a number of at least 1."""
-    var default = max(1, min(num_logical_cores(), MAX_WORKERS))
+    """`MORCA_UI_WORKERS`, or 1 if it's unset or not a number of at least 1.
+    One worker's drain refuses new connections at once; several keep
+    answering them until the loop stops (docs/ui.md#stopping)."""
     var raw = getenv("MORCA_UI_WORKERS")
     if not raw:
-        return default
+        return 1
     try:
         var n = Int(raw)
         if n >= 1:
@@ -396,10 +393,9 @@ def ui_workers() -> Int:
     print(
         "morca ui: MORCA_UI_WORKERS isn't a number of workers:",
         raw,
-        "- using",
-        default,
+        "- using 1",
     )
-    return default
+    return 1
 
 
 def read_page(mut db: State, url: String) raises -> Page:

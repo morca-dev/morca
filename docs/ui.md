@@ -715,8 +715,8 @@ tripped on. See [watchdog.md](watchdog.md).
 
 ## Workers and the request log
 
-`morca ui` answers on `MORCA_UI_WORKERS` threads (default: the machine's
-cores, at most 4). They share one listening socket, so a new connection goes
+`morca ui` answers on `MORCA_UI_WORKERS` threads (default 1; the Hetzner
+stack's UI runs 4). They share one listening socket, so a new connection goes
 to a free thread instead of waiting behind a slow page. Each request except
 `/healthz` and the stylesheet is logged as one line on standard output:
 
