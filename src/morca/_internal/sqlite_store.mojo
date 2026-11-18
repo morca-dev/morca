@@ -46,7 +46,6 @@ from morca._internal.store import (
     FINAL,
     INTERRUPTED,
     RUNNING,
-    SKIPPED,
     SUCCEEDED,
     Backoff,
     RunResult,
@@ -55,7 +54,7 @@ from morca._internal.store import (
     StepRun,
     TableSnapshot,
 )
-from morca._internal.db.run_rows import RunInfo, StepInfo, Usage
+from morca._internal.db.run_rows import RunInfo, StepInfo
 
 comptime _BUSY_MS = 1000
 """How long a write waits for another writer's lock before it fails (and,

@@ -45,12 +45,10 @@ from morca._internal.handover import set_outdated
 from morca._internal.store import (
     FINAL,
     Backoff,
-    Recorder,
     RunResult,
     RunStore,
     StepRun,
     SUCCEEDED,
-    Store,
     TableSnapshot,
 )
 from morca._internal.db.run_rows import RunInfo, StepInfo, Usage

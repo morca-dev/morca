@@ -31,7 +31,7 @@ gets a fresh entry.
 from std.ffi import c_int, c_uint, external_call
 from std.memory import stack_allocation
 from std.os import getenv
-from std.sys.info import CompilationTarget, platform_map
+from std.sys.info import platform_map
 from std.time import perf_counter_ns, sleep
 
 from dista import Runtime, TaskLike

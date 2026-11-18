@@ -246,7 +246,6 @@ from morca._internal.pressure import (
     pct_text,
     read_psi,
 )
-from morca._internal.recommend import learned
 from morca._internal.state import State
 from morca._internal.watchdog import (
     check as check_watchdog,

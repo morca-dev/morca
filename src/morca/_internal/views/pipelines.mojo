@@ -11,7 +11,6 @@ from morca._internal.db.pipelines_view import (
     PipelineRow,
     StepDef,
     UsageSummary,
-    comma_list,
 )
 
 from morca.civil import Civil, now

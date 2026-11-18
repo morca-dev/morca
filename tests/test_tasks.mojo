@@ -1,6 +1,6 @@
 """Dista inside steps: one runtime per run, reached through `Ctx.runtime`."""
 
-from std.testing import TestSuite, assert_equal, assert_raises, assert_true
+from std.testing import TestSuite, assert_equal, assert_true
 
 from dista import ObjectRef, Seq, Task
 from morca import (
@@ -8,7 +8,6 @@ from morca import (
     Gather,
     Mapped,
     Month,
-    NoTasks,
     Pipeline,
     Step,
     Tasks,

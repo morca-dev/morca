@@ -21,7 +21,6 @@ from std.os import getenv
 from std.time import sleep
 
 import morca._internal.db.schedulers as schedulers_db
-from morca._internal.db.schedulers import live_cond
 
 from morca._internal.db.live import stale_limit
 from morca._internal.migrations import known_migrations, migration_floor

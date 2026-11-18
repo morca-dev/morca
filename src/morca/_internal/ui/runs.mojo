@@ -14,7 +14,6 @@ from morca._internal.api.runs import (
     runs_filters_json,
 )
 from morca._internal.html import Html, query_param, url_encode
-from morca._internal.json import quote
 from morca._internal.state import State
 from morca._internal.system import alert_html
 from morca._internal.ui.layout import (
@@ -30,7 +29,6 @@ from morca._internal.ui.terms import RUN_STATUSES, RUN_TRIGGERS
 from morca._internal.views.code import runs_code
 from morca._internal.views.runs import (
     BULK_MAX,
-    RUNS_PAGE,
     RunsPage,
     RunsQuery,
     int_or_zero,

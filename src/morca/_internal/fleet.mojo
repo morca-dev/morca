@@ -35,11 +35,10 @@ from std.os import getenv
 from json import Value, loads
 import morca._internal.db.fleet as fleet_db
 
-from morca._internal.html import Html, escape, url_encode
+from morca._internal.html import Html, escape
 from morca._internal.json import quote
 from morca._internal.db.live import stale_limit, start_grace
 from morca._internal.logs import read_location
-from morca._internal.metrics import bytes_text
 from morca._internal.sample import metrics_location
 from morca._internal.state import State
 

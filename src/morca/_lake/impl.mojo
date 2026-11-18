@@ -65,8 +65,6 @@ from parquet_full import AllCodecs
 
 from morca._lake.host import Host
 from morca._lake.names import (
-    DAY_MS,
-    DEFAULT_HISTORY_DAYS,
     _split,
     dataset_of,
     table_defaults,

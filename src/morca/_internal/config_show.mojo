@@ -38,7 +38,6 @@ from morca._internal.config import (
     FROM_FLAG,
     Setting,
     flag_of,
-    max_runs_auto,
     max_runs_text,
     parse_env,
 )

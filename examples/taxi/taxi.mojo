@@ -43,7 +43,6 @@ later.
 from std.os import getenv, setenv
 
 from dista import Seq
-from parquet import RecordBatch
 
 from morca import (
     Cron,

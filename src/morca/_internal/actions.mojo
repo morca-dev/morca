@@ -20,7 +20,7 @@ from std.os import getenv
 
 import morca._internal.db.actions as actions_db
 import morca._internal.db.starting as starting_db
-from morca._internal.db.live import live_runs, stale_seconds, stalled_sql
+from morca._internal.db.live import live_runs
 from morca.name import parse_names
 from morca._internal.pause import set_paused
 from morca._internal.queueing import (

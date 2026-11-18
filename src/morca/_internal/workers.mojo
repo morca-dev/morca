@@ -48,7 +48,7 @@ worker checks the spec again before it starts anything (`morca._internal.worker`
 
 from std.os import getenv
 
-from json import Value, loads
+from json import Value
 import morca._internal.db.audit as audit_db
 import morca._internal.db.pools as pools_db
 import morca._internal.db.scheduler as scheduler_db
@@ -72,9 +72,8 @@ from morca._internal.admission import (
     row_json,
     worker_host,
 )
-from morca._internal.control import WORKER_PREFIX, pool_of, pool_problem
+from morca._internal.control import WORKER_PREFIX, pool_problem
 from morca._internal.http_store import (
-    STORE_PATH,
     Body,
     bytes_of_hex,
     pins_json,

@@ -80,7 +80,6 @@ from morca._internal.state import PgStore
 from morca._internal.store import (
     CANCELLED,
     DEFERRED,
-    FAILED,
     RUNNING,
     SUCCEEDED,
     MemoryStore,

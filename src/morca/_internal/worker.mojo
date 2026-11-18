@@ -52,7 +52,6 @@ started has its start given back.
 
 from std.ffi import c_int, external_call
 from std.os import getenv, makedirs, remove
-from std.os.path import exists
 from std.sys.info import CompilationTarget, num_logical_cores
 from std.time import perf_counter_ns, sleep
 

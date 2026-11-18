@@ -8,7 +8,6 @@ buttons, and the 404 and 400 pages.
 from std.os import getenv
 
 from morca._internal.html import Html, escape
-from morca._internal.json import quote
 from morca._internal.ui.loading import LOADING_JS
 from morca._internal.ui.step_cards import LEAD_JS, STEP_CARDS_JS
 from morca._internal.ui.terms import header_help

@@ -1,6 +1,6 @@
 # expect: a step follows a step not in its pipeline
 from dista import Seq
-from morca import Ctx, Gather, Mapped, Month, Pipeline, Step
+from morca import Ctx, Mapped, Month, Pipeline, Step
 
 
 def key(mut ctx: Ctx, m: Month) raises -> Int:

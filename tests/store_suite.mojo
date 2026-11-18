@@ -22,7 +22,6 @@ from morca import (
     TableSnapshot,
     parse_months,
 )
-from morca.store import Recorder
 
 # --- a pipeline whose second step fails its first attempt ---
 

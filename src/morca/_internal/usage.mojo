@@ -34,7 +34,6 @@ seconds before the request, so neither clock needs to agree with the
 database's).
 """
 
-from std.ffi import c_int, external_call
 from std.time import perf_counter_ns
 
 from json import Value

@@ -14,7 +14,6 @@ from std.testing import (
 )
 
 from morca._internal.hcloud import (
-    Created,
     HCloud,
     ServerSpec,
     error_of,

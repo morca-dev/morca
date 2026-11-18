@@ -27,7 +27,7 @@ host block cross; each function's doc says what its failure value is.
 from std.memory import bitcast
 from std.memory.alloc import unsafe_alloc
 
-from arrow_mlake import AT_STRUCT, ArrayArena, ArrayData, ArrowType
+from arrow_mlake import AT_STRUCT, ArrayData, ArrowType
 from arrow_mlake.carrow import ExportedArray, export_c
 from arrow_mlake.carrow_import import ImportedArray
 from arrow_mlake.carrow_stream import export_stream_of
@@ -48,9 +48,7 @@ from parquet_full import AllCodecs
 from morca._lake.abi import (
     ABI_VERSION,
     MODE_APPEND,
-    MODE_BY_STEP,
     MODE_REPLACE,
-    SNAP_CURRENT,
     SNAP_NONE,
     RawDec,
     Enc,

@@ -26,7 +26,6 @@ The same edges are in the snapshots' own summaries, as `orca.reads`.
 
 import morca._internal.db.lineage as lineage_db
 from morca._internal.db.lineage import (
-    DEPTH,
     Commit,
     Dataset,
     Flow,

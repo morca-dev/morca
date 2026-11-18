@@ -18,7 +18,7 @@ from json import Value, loads
 
 from morca._internal.auth import login_required
 from morca._internal.dataset_config import dataset_public
-from morca._internal.html import Html, query_param, url_encode
+from morca._internal.html import Html, query_param
 from morca._internal.json import quote
 from morca._internal.lineage import datasets as dataset_rows
 from morca._internal.metrics import bytes_text

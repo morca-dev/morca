@@ -25,11 +25,10 @@ What a read keeps on disk for the next, by snapshot, is
 from std.os import getenv
 from std.os.path import exists
 
-from json import Value, loads
+from json import loads
 
 from morca._internal.expiry import maintain_binary
 from morca._internal.html import query_param, query_values, url_encode
-from morca._internal.json import quote
 from morca._internal.proc import capture
 
 comptime OPS = ["eq", "ne", "lt", "le", "gt", "ge", "in"]

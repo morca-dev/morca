@@ -40,7 +40,6 @@ from morca._internal.ui.pipeline_data import pipeline_data_html
 from morca._internal.ui.parts import (
     CPU_HELP,
     PEAK_HELP,
-    dataset_links,
     datasets_with_data,
     named_code_link,
     pause_button,
