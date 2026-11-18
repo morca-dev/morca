@@ -713,6 +713,22 @@ used.
 whether it is past it, the snooze form, and the trips with what each
 tripped on. See [watchdog.md](watchdog.md).
 
+## Workers and the request log
+
+`morca ui` answers on `MORCA_UI_WORKERS` threads (default: the machine's
+cores, at most 4). They share one listening socket, so a new connection goes
+to a free thread instead of waiting behind a slow page. Each request except
+`/healthz` and the stylesheet is logged as one line on standard output:
+
+```
+morca ui: GET /runs?status=failed 200 42 ms 172.18.0.5 cf=203.0.113.7 "Mozilla/5.0 ..."
+```
+
+That's the method, URL, status, milliseconds, and the client address (from
+`X-Forwarded-For` with `MORCA_UI_TRUST_PROXY=1`), followed by Cloudflare's
+`CF-Connecting-IP` when the request came through a tunnel, and the
+User-Agent.
+
 ## Stopping
 
 SIGTERM (what `docker stop` sends) or SIGINT (Ctrl-C) drains `morca ui`
@@ -724,5 +740,7 @@ exits 0 once none has been for 200 ms. `MORCA_UI_DRAIN_SECONDS` (default 8,
 under `docker stop`'s 10 s grace) bounds the wait; when it's up the server
 stops and closes its kept-alive connections, and a request still running
 half a second later is given up, with exit code 1. A second signal stops
-it at once. The worker API on `MORCA_WORKER_ADDR`, if any, ends with the
+it at once. On more than one worker, the drain doesn't close the workers'
+listening socket, so a new connection keeps being answered until the loop
+stops. The worker API on `MORCA_WORKER_ADDR`, if any, ends with the
 process. `src/morca/_internal/web/drain.mojo` has the details.

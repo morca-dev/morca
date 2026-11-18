@@ -1,0 +1,1 @@
+- **UI workers and request log**: `morca ui` serves on several threads (`MORCA_UI_WORKERS`, by default the cores up to 4) and logs each request. (#539)
