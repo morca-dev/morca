@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.37.0 - 2026-11-18
+
+- **No crawlers**: the UI serves a `robots.txt` that disallows everything, and marks each page `noindex`. (#542)
+
 ## 0.36.0 - 2026-11-18
 
 - **morca-sdk `replaces`**: a Rust step can replace the partitions it writes, as Mojo's `replaces=` does. (#537)
