@@ -1,0 +1,1 @@
+- **No crawlers**: the UI serves a `robots.txt` that disallows everything, and marks each page `noindex`. (#542)

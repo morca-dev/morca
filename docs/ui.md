@@ -729,6 +729,10 @@ That's the method, URL, status, milliseconds, and the client address (from
 `CF-Connecting-IP` when the request came through a tunnel, and the
 User-Agent.
 
+`/robots.txt` disallows every crawler, and each answer carries
+`X-Robots-Tag: noindex, nofollow`: run, snapshot and data pages are endless
+and the data views are costly.
+
 ## Stopping
 
 SIGTERM (what `docker stop` sends) or SIGINT (Ctrl-C) drains `morca ui`

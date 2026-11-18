@@ -97,6 +97,7 @@ from morca._internal.web.routes import routes
 comptime DEFAULT_ADDR = "127.0.0.1:8270"
 comptime STYLESHEET = "/static/morca.css"
 comptime HEALTHZ = "/healthz"
+comptime ROBOTS = "/robots.txt"
 
 
 def _path_of(url: String) -> String:
@@ -188,6 +189,19 @@ def _stylesheet() raises -> Response:
     return resp^
 
 
+def _robots() raises -> Response:
+    """`/robots.txt`: no crawler is welcome. Pages that a crawler can reach
+    without a login (runs, snapshots, data downloads) are endless, and the
+    data views cost the database a second each."""
+    var resp = Response(
+        status=200,
+        reason="OK",
+        body=List[UInt8]("User-agent: *\nDisallow: /\n".as_bytes()),
+    )
+    resp.headers.set("Content-Type", "text/plain; charset=utf-8")
+    return resp^
+
+
 def _healthz(url: String, draining: Bool) -> Response:
     """`/healthz`: 200 `ok` once the database answers a query, 503 if it
     doesn't, and 503 `draining` without asking it once SIGTERM or SIGINT
@@ -240,6 +254,8 @@ struct Ui(Copyable, Handler):
         var post = req.method == "POST"
         if path == STYLESHEET:
             return _stylesheet()
+        if path == ROBOTS:
+            return _robots()
         if path == HEALTHZ and (req.method == "GET" or req.method == "HEAD"):
             return _healthz(self.url, self.draining.is_set())
         if post and path.startswith("/api/worker/"):
@@ -353,7 +369,8 @@ def _log(req: Request, status: Int, start_ns: Int):
 
 struct Logged[H: Handler & Copyable](Copyable, Handler):
     """`H`, logging each request but `/healthz` and the stylesheet as it's
-    answered."""
+    answered, and telling crawlers not to index any answer (`X-Robots-Tag`;
+    `/robots.txt` turns them away first)."""
 
     comptime BodyType = Self.H.BodyType
 
@@ -368,6 +385,10 @@ struct Logged[H: Handler & Copyable](Copyable, Handler):
         var quiet = path == HEALTHZ or path == STYLESHEET
         try:
             var resp = self.inner.serve(req)
+            try:
+                resp.headers.set("X-Robots-Tag", "noindex, nofollow")
+            except:
+                pass
             if not quiet:
                 _log(req, resp.status, start)
             return resp^

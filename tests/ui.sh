@@ -168,6 +168,9 @@ done
 code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$base/runs")
 [ "$code" = 405 ] || fail "POST answered $code, not 405"
 curl -fsS "$base/static/morca.css" | grep -q -- '--ember' || fail "the stylesheet"
+# No crawler: robots.txt turns them all away, and no page is to be indexed.
+[ "$(curl -fsS "$base/robots.txt")" = "$(printf 'User-agent: *\nDisallow: /')" ] || fail "robots.txt"
+curl -fsSI "$base/runs" | grep -qi '^X-Robots-Tag: noindex, nofollow' || fail "no X-Robots-Tag on /runs"
 
 # An attempt's page: its error, its log, the step's other attempts.
 failed=$(json "/runs/$bad_run" | jq -r '[.steps[] | select(.status == "failed")][0].attempt_id')
