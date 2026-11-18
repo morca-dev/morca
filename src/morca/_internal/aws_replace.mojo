@@ -49,7 +49,7 @@ one (started again), the Elastic IP moved back, and the new slot off.
 stay paused throughout: unpause them once it's done.
 """
 
-from std.os import getenv, remove
+from std.os import getenv
 from std.os.path import exists
 from std.time import sleep
 

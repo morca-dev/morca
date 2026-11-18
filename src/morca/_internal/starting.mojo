@@ -32,7 +32,6 @@ from morca._internal.db.concurrency import FILLS, OTHERS
 from morca._internal.key_wait import key_room, started
 from morca._internal.kube import (
     RunSpec,
-    cpu_millis,
 )
 from morca._internal.logs import (
     is_remote,

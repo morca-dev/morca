@@ -1,6 +1,6 @@
 """A sensor over a dataset nothing writes: raw.other to lake.other."""
 
-from morca import Ctx, Mapped, Month, Monthly, Pipeline, Step, morca_main
+from morca import Ctx, Mapped, Month, Pipeline, Step, morca_main
 from morca.tables import append, table
 from rows import count, dataset, rows
 

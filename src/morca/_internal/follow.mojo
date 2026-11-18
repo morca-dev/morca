@@ -21,12 +21,10 @@ from std.collections import Dict
 
 import morca._internal.db.sensing as sensing_db
 
-from morca._internal.calendar import Cell, states_of
+from morca._internal.calendar import states_of
 from morca.civil import Civil, now
-from morca.day import Day
 from morca._internal.estimate import Pace, pace
 from morca._internal.json import quote
-from morca.month import Month
 from morca.name import sort_texts
 from morca._internal.sensors import key_kind, map_keys, split_keys
 from morca._internal.state import State

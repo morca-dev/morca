@@ -81,10 +81,8 @@ one message, and it carries on: a sampler never fails a run.
 """
 
 from std.ffi import c_int, external_call
-from std.memory import stack_allocation
 from std.os import getenv, listdir, makedirs
 from std.os.path import exists
-from std.sys import exit
 from std.sys.info import CompilationTarget
 from std.time import perf_counter_ns, sleep
 

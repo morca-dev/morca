@@ -18,7 +18,6 @@ from morca._internal.sample import parse_pid_usage, tree_usage
 from morca._internal.db.run_rows import Usage
 from morca._internal.usage import (
     MAX_MARKS,
-    Mark,
     Meter,
     attribute,
     bytes_text,

@@ -6,7 +6,6 @@ refreshes from; Alerts (`/ops/alerts`, where `/ops` goes) is
 Workers' old paths redirect to Pools (`moved`, `to_pools`).
 """
 
-from std.os import getenv
 
 from morca._internal.admission import (
     pressure_html,
@@ -44,7 +43,6 @@ from morca._internal.watchdog import (
     config as watchdog_config,
     prometheus as watchdog_prometheus,
     rule_rows,
-    trips_json,
     watchdog_html,
     watchdog_json,
 )

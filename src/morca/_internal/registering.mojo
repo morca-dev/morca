@@ -45,7 +45,6 @@ from morca._internal.registered import (
     repeated_fill,
 )
 from morca._internal.queueing import (
-    backfill,
     dataset_cycle,
     kind_mismatch,
 )

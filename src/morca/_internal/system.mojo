@@ -38,7 +38,7 @@ from morca._internal.db.system import Container, Minute
 
 from morca.civil import Civil
 from morca._internal.fleet import Series, Summary, _chart, _fixed
-from morca._internal.html import Html, escape
+from morca._internal.html import Html
 from morca._internal.json import quote
 from morca._internal.logs import (
     is_remote,

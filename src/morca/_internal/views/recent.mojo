@@ -4,7 +4,6 @@ what needs attention first.
 """
 
 import morca._internal.db.home_view as home_db
-from morca._internal.db.home_view import FAILED_LATELY
 
 from morca._internal.json import quote
 from morca._internal.state import State

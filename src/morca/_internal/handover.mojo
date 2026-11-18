@@ -49,7 +49,6 @@ from postgres import Connection
 from threads import AtomicCounter, Mutex
 
 import morca._internal.db.handover as handover_db
-from morca._internal.db.handover import differs_sql, label_sql, outdated_sql
 from morca._internal.source import source_commit, source_dirty
 
 

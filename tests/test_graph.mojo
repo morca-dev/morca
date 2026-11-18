@@ -1,7 +1,7 @@
 """The graph drawing (`morca._internal.graph`): cycles found, and the layout top to
 bottom, two boxes wide at most."""
 
-from std.testing import TestSuite, assert_equal, assert_false, assert_true
+from std.testing import TestSuite, assert_false, assert_true
 
 from morca._internal.graph import Edge, Node, back_edges, graph_svg
 

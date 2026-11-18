@@ -25,7 +25,7 @@ one over a `mut` borrow of it, and says so at compile time.
 from arrow_mlake.carrow_import import ImportedArray, ImportedStream
 from parquet import RecordBatch
 
-from morca._lake.abi import Enc, Slots, bytes_of, get_int, put_int, text_of
+from morca._lake.abi import Enc, Slots, bytes_of, put_int, text_of
 from morca._lake.client import Api, Exported
 
 

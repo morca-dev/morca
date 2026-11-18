@@ -14,7 +14,6 @@ from morca import (
 )
 from store_suite import (
     Retrying,
-    Touching,
     check_a_store_that_lost_its_run_stops,
     check_claim_needs_a_stale_heartbeat,
     check_execute_records_attempts_and_retries,

@@ -8,7 +8,6 @@ from morca._internal.db.batches import mark_batch
 import morca._internal.db.queueing as queueing_db
 import morca._internal.db.starting as starting_db
 from morca._internal.db.live import live_runs
-from morca._internal.db.queueing import APPENDING_SQL, DONE_SQL
 from morca._internal.timekeys import parse_time_keys
 from morca.name import (
     Name,

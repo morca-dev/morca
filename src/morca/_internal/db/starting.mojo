@@ -6,7 +6,7 @@ for a run whose process died, with the stale limit as the parameter
 
 from postgres import Connection, Params, Transaction, is_retryable, sqlstate_of
 
-from morca._internal.db.live import behind_sql, ordered_runs
+from morca._internal.db.live import behind_sql
 from morca._internal.db.scheduler import RETRIED
 
 
