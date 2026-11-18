@@ -32,9 +32,27 @@ otherwise. `MORCA_WORKER_ADDR` serves the worker API on a listener of its
 own as well (`morca._internal.api.worker`). SIGTERM or SIGINT drains it: no new
 connections, `/healthz` 503, the requests in flight answered, then exit 0 within
 `MORCA_UI_DRAIN_SECONDS` (8; `morca._internal.web.drain`).
+
+It answers on `MORCA_UI_WORKERS` threads (default 1; the Hetzner stack runs 4),
+sharing one listening socket (flare's `FLARE_REUSEPORT_WORKERS=0`, unless
+that's set), so a new connection goes to a thread that's free rather than
+one a slow page holds up.
+Each request but `/healthz` and the stylesheet is logged as one line: method,
+path, status, milliseconds, the client (`client`), Cloudflare's
+`CF-Connecting-IP` when there is one, and the User-Agent.
 """
 
-from flare.http import Handler, HttpServer, Request, Response, ServerConfig
+from std.os import getenv, setenv
+from std.time import perf_counter_ns
+
+from flare.http import (
+    Handler,
+    HttpServer,
+    Request,
+    Response,
+    ResponseImpl,
+    ServerConfig,
+)
 from flare.net import SocketAddr
 import morca._internal.db.health as health_db
 from threads import AtomicFlag
@@ -304,6 +322,82 @@ struct Ui(Copyable, Handler):
             return _error(e, json)
 
 
+def _clip(s: String, n: Int) -> String:
+    if s.byte_length() <= n:
+        return s
+    return String(s[byte=:n], "...")
+
+
+def _log(req: Request, status: Int, start_ns: Int):
+    var ms = (Int(perf_counter_ns()) - start_ns) // 1_000_000
+    var cf = req.headers.get("CF-Connecting-IP")
+    print(
+        "morca ui: ",
+        req.method,
+        " ",
+        _clip(req.url, 200),
+        " ",
+        status,
+        " ",
+        ms,
+        " ms ",
+        client(req),
+        String(" cf=", _clip(cf, 64)) if cf else String(),
+        ' "',
+        _clip(req.headers.get("User-Agent"), 120),
+        '"',
+        sep="",
+        flush=True,
+    )
+
+
+struct Logged[H: Handler & Copyable](Copyable, Handler):
+    """`H`, logging each request but `/healthz` and the stylesheet as it's
+    answered."""
+
+    comptime BodyType = Self.H.BodyType
+
+    var inner: Self.H
+
+    def __init__(out self, var inner: Self.H):
+        self.inner = inner^
+
+    def serve(self, req: Request) raises -> ResponseImpl[Self.BodyType]:
+        var start = Int(perf_counter_ns())
+        var path = _path_of(req.url)
+        var quiet = path == HEALTHZ or path == STYLESHEET
+        try:
+            var resp = self.inner.serve(req)
+            if not quiet:
+                _log(req, resp.status, start)
+            return resp^
+        except e:
+            if not quiet:
+                _log(req, 500, start)
+            raise e^
+
+
+def ui_workers() -> Int:
+    """`MORCA_UI_WORKERS`, or 1 if it's unset or not a number of at least 1.
+    One worker's drain refuses new connections at once; several keep
+    answering them until the loop stops (docs/ui.md#stopping)."""
+    var raw = getenv("MORCA_UI_WORKERS")
+    if not raw:
+        return 1
+    try:
+        var n = Int(raw)
+        if n >= 1:
+            return n
+    except:
+        pass
+    print(
+        "morca ui: MORCA_UI_WORKERS isn't a number of workers:",
+        raw,
+        "- using 1",
+    )
+    return 1
+
+
 def read_page(mut db: State, url: String) raises -> Page:
     """What `GET url` answers, for `morca` commands that print a page's JSON
     over the database (`morca._internal.remote`)."""
@@ -334,7 +428,12 @@ def serve_ui(url: String, addr: String, worker_addr: String = "") raises:
         worker_api.listen(url, worker_addr)
         print("morca ui: the worker API on http://", worker_addr, sep="")
     var drain = Drain(server)
-    print("morca ui on http://", addr, sep="")
-    server.serve(drain.counting(Ui(url, drain.draining())))
+    var workers = ui_workers()
+    if workers > 1 and not getenv("FLARE_REUSEPORT_WORKERS"):
+        # Per-worker listeners would hash some new connections to a worker
+        # that's busy with a slow page.
+        _ = setenv("FLARE_REUSEPORT_WORKERS", "0")
+    print("morca ui on http://", addr, " (", workers, " workers)", sep="")
+    server.serve(Logged(drain.counting(Ui(url, drain.draining()))), workers)
     _ = drain^
     print("morca ui: stopped")

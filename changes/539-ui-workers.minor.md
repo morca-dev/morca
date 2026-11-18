@@ -1,0 +1,1 @@
+- **UI workers and request log**: `morca ui` serves on `MORCA_UI_WORKERS` threads (the Hetzner stack runs 4) and logs each request. (#539)

@@ -9,7 +9,12 @@
 #   MORCA_UI_DRAIN_SECONDS;
 # - SIGTERM with nothing in flight: it exits 0 at once;
 # - SIGINT with a request that outlasts MORCA_UI_DRAIN_SECONDS: it exits
-#   (1, the request cut) within the bound plus half a second.
+#   (1, the request cut) within the bound plus half a second;
+# - on 2 workers (MORCA_UI_WORKERS), a new request is answered while a slow
+#   one waits, both are logged, and SIGTERM still lets the slow one finish.
+#
+# The first three run on one worker: with several, each worker's connections
+# keep being accepted until the drain stops the loop.
 #
 # Needs MORCA_DATABASE_URL (pixi run test-ui-drain starts a throwaway server),
 # curl, and bash (its /dev/tcp holds the kept-alive connection).
@@ -36,11 +41,12 @@ fail() {
 q() { psql "$MORCA_DATABASE_URL" -Atc "$1"; }
 ./build/morca register ./build/toy >> "$log" 2>&1 || fail "register"
 
-# start DRAIN_SECONDS: morca ui on a free port, once it answers.
+# start DRAIN_SECONDS [WORKERS]: morca ui on a free port (on 1 worker
+# unless told), once it answers.
 start() {
     free_port port
     base="http://127.0.0.1:$port"
-    MORCA_UI_DRAIN_SECONDS=$1 MORCA_UI_ADDR="127.0.0.1:$port" ./build/morca ui >> "$log" 2>&1 &
+    MORCA_UI_WORKERS=${2:-1} MORCA_UI_DRAIN_SECONDS=$1 MORCA_UI_ADDR="127.0.0.1:$port" ./build/morca ui >> "$log" 2>&1 &
     ui=$!
     i=0
     until curl -fs "$base/" > /dev/null 2>&1; do
@@ -154,4 +160,19 @@ kill "$locker" 2> /dev/null || true
 wait "$locker" 2> /dev/null || true
 locker=
 wait "$slow_curl" 2> /dev/null || true
+# Two workers: a request gets its answer while the other waits on the lock.
+start 5 2
+grep -q "morca ui on http://127.0.0.1:$port (2 workers)" "$log" || fail "no 2 workers message"
+lock 3
+slow
+fast=$(curl -s -o /dev/null -w '%{http_code} %{time_total}' --max-time 2 "$base/static/morca.css" 2> /dev/null || true)
+[ "${fast% *}" = 200 ] || fail "a request beside the slow one got: $fast"
+kill -TERM "$ui"
+stopped 45
+[ "$code" = 0 ] || fail "exited $code after draining on 2 workers"
+wait "$slow_curl" || true
+[ "$(cat build/ui-drain-slow.txt)" = 200 ] || fail "the slow request on 2 workers got $(cat build/ui-drain-slow.txt)"
+wait "$locker" || true
+locker=
+grep -Eq '^morca ui: GET /runs 200 [0-9]+ ms 127\.0\.0\.1 "curl/' "$log" || fail "/runs wasn't logged"
 echo "ui drain: ok"
