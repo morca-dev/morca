@@ -750,6 +750,30 @@ are `/healthz`, the stylesheet, `/robots.txt` and the worker API.
 `X-Robots-Tag: noindex, nofollow`: run, snapshot and data pages are endless
 and the data views are costly.
 
+## Turnstile
+
+Crawlers that come from a new address each time get past the limits per
+client. With Cloudflare Turnstile on, a visitor who isn't logged in passes
+a check once a day before a data read (a Data tab, `data.csv`,
+`data.json`): the page shows the widget, which posts its token to
+`POST /turnstile`; the UI asks Cloudflare's siteverify, needs `success`,
+the action `data` and one of the hostnames, then sets the `morca_human`
+cookie (a day; signed with a key the UI makes at start, so a restart asks
+again) and sends the browser back. Without the cookie, `data.csv`,
+`data.json` and JSON get a 403 in text. People logged in, API tokens and
+the worker API never see it; nothing else is checked.
+
+| Variable | |
+|---|---|
+| `MORCA_UI_TURNSTILE_SITEKEY` | the widget's site key (public) |
+| `MORCA_UI_TURNSTILE_SECRET` | the id of its secret key, read as the other secrets are |
+| `MORCA_UI_TURNSTILE_HOSTNAMES` | the hostnames a pass may come from, comma separated |
+
+It's off unless the site key and the secret are both set. On Hetzner,
+`TURNSTILE_SITEKEY`, `secrets/orca/turnstile-secret` in `SECRETS_FILE` (or
+`TURNSTILE_SECRET_FILE`) and `TURNSTILE_HOSTNAMES` (UI_URL's host unless
+set) in `hetzner.env` set them.
+
 ## Stopping
 
 SIGTERM (what `docker stop` sends) or SIGINT (Ctrl-C) drains `morca ui`

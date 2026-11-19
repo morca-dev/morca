@@ -31,7 +31,7 @@ die() {
 # The settings that name a file: a relative one is read from the folder of
 # the settings file that sets it (resolve_paths).
 PATH_SETTINGS="SECRETS_FILE S3_CREDENTIALS_FILE TUNNEL_TOKEN_FILE GITHUB_TOKEN_FILE
-NTFY_TOPIC_FILE NTFY_TOKEN_FILE GHCR_TOKEN_FILE EXTRA_ENV_FILE CONFIG_OVERLAY_FILE SSH_PUBLIC_KEY_FILE SSH_PRIVATE_KEY_FILE"
+NTFY_TOPIC_FILE NTFY_TOKEN_FILE GHCR_TOKEN_FILE TURNSTILE_SECRET_FILE EXTRA_ENV_FILE CONFIG_OVERLAY_FILE SSH_PUBLIC_KEY_FILE SSH_PRIVATE_KEY_FILE"
 
 # resolve_paths DIR: each PATH_SETTINGS that is set and relative becomes
 # DIR/<it>. Run after each settings file, so a shared hetzner.env (in a
@@ -445,7 +445,7 @@ need_settings() {
     done
     [ -z "${GHCR_USER:-}" ] || has_secret ghcr-token \
         || die "GHCR_USER needs GHCR_TOKEN_FILE or a ghcr-token key in SECRETS_FILE"
-    for v in S3_CREDENTIALS_FILE TUNNEL_TOKEN_FILE GITHUB_TOKEN_FILE NTFY_TOPIC_FILE NTFY_TOKEN_FILE GHCR_TOKEN_FILE CONFIG_OVERLAY_FILE; do
+    for v in S3_CREDENTIALS_FILE TUNNEL_TOKEN_FILE GITHUB_TOKEN_FILE NTFY_TOPIC_FILE NTFY_TOKEN_FILE GHCR_TOKEN_FILE TURNSTILE_SECRET_FILE CONFIG_OVERLAY_FILE; do
         eval "val=\${$v:-}"
         if is_sops "$val"; then
             need_tool sops
@@ -485,7 +485,7 @@ need_handover_wait() {
 # value is the file's content (a string). It may have more secrets/orca/<id>
 # keys, the secrets the apps' [apps.<name>] secrets name (#331), sent the same way. One decrypt per run: a Secure
 # Enclave age key (age-plugin-se) asks for Touch ID once, not per file.
-SECRET_NAMES="s3.env tunnel.env secrets/orca/github-token secrets/orca/ntfy-topic secrets/orca/ntfy-token ghcr-token secrets/orca/hcloud-token"
+SECRET_NAMES="s3.env tunnel.env secrets/orca/github-token secrets/orca/ntfy-topic secrets/orca/ntfy-token ghcr-token secrets/orca/hcloud-token secrets/orca/turnstile-secret"
 SECRETS_JSON=
 SECRETS_KEYS=
 SECRETS_LOADED=0
@@ -500,6 +500,7 @@ secret_var() {
         secrets/orca/ntfy-token) echo NTFY_TOKEN_FILE ;;
         ghcr-token) echo GHCR_TOKEN_FILE ;;
         secrets/orca/hcloud-token) echo HCLOUD_POOL_TOKEN_FILE ;;
+        secrets/orca/turnstile-secret) echo TURNSTILE_SECRET_FILE ;;
     esac
 }
 
@@ -603,6 +604,20 @@ write_settings() {
         fi
         # Where links point, and where pool machines reach the UI.
         [ -z "${UI_URL:-}" ] || echo "MORCA_UI_URL=$UI_URL"
+        # Cloudflare Turnstile before the UI's data reads: the site key is
+        # public, the secret a secret file whose id is here; the hostnames a
+        # pass may come from are UI_URL's unless TURNSTILE_HOSTNAMES says.
+        if [ -n "${TURNSTILE_SITEKEY:-}" ] && has_secret secrets/orca/turnstile-secret; then
+            echo "MORCA_UI_TURNSTILE_SITEKEY=$TURNSTILE_SITEKEY"
+            echo "MORCA_UI_TURNSTILE_SECRET=orca/turnstile-secret"
+            ts_hosts=${TURNSTILE_HOSTNAMES:-}
+            if [ -z "$ts_hosts" ] && [ -n "${UI_URL:-}" ]; then
+                ts_hosts=${UI_URL#*://}
+                ts_hosts=${ts_hosts%%/*}
+                ts_hosts=${ts_hosts%%:*}
+            fi
+            [ -z "$ts_hosts" ] || echo "MORCA_UI_TURNSTILE_HOSTNAMES=$ts_hosts"
+        fi
         # Worker pools morca grows itself ([pools.<name>], morca #267): the
         # Hetzner token is a secret file, only its id is here; the machines
         # get the stack's firewall and SSH key unless POOL_FIREWALL and

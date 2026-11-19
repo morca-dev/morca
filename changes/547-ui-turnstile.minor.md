@@ -1,0 +1,1 @@
+- **ui:** with `MORCA_UI_TURNSTILE_*` set, a visitor who is not logged in passes Cloudflare Turnstile once a day before a data read; Hetzner deploy tools 0.37.0 set it from `TURNSTILE_SITEKEY` and `secrets/orca/turnstile-secret`.

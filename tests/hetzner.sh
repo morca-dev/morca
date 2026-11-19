@@ -566,18 +566,20 @@ all_secrets='{"s3.env": "AWS_ACCESS_KEY_ID=x4\nAWS_SECRET_ACCESS_KEY=onefile55\n
  "secrets/orca/ntfy-token": "tk_ntfy99",
  "ghcr-token": "ghcr11",
  "secrets/orca/hcloud-token": "hc_pool12",
+ "secrets/orca/turnstile-secret": "ts_sec14",
  "secrets/orca/posthog-key": "phc_app13"}'
 secrets_file "$all_secrets"
 sed -i.bak '/^S3_CREDENTIALS_FILE=/d; /^TUNNEL_TOKEN_FILE=/d' "$FAKE/hetzner.env"
 echo "SECRETS_FILE=$FAKE/secrets.sops.yaml" >> "$FAKE/hetzner.env"
+printf 'TURNSTILE_SITEKEY=0xSITE\nTURNSTILE_HOSTNAMES=orca.example\n' >> "$FAKE/hetzner.env"
 secret_files() { cat "$MORCA_CONF/settings.env" "$MORCA_CONF/s3.env" "$MORCA_CONF/tunnel.env" 2> /dev/null | cksum; }
-values='onefile55\|tunnel66\|ghp_gh77\|topic88\|tk_ntfy99\|ghcr11\|hc_pool12\|phc_app13'
+values='onefile55\|tunnel66\|ghp_gh77\|topic88\|tk_ntfy99\|ghcr11\|hc_pool12\|ts_sec14\|phc_app13'
 : > "$FAKE/sops.calls"
 before=$(secret_files)
 sh deploy/hetzner/deploy.sh --dry-run eee5555 > "$FAKE/out" 2>&1 || fail "a dry run with SECRETS_FILE"
-has "# a dry run doesn't decrypt $FAKE/secrets.sops.yaml: it assumes it has s3.env tunnel.env secrets/orca/github-token secrets/orca/ntfy-topic secrets/orca/ntfy-token ghcr-token secrets/orca/hcloud-token$"
+has "# a dry run doesn't decrypt $FAKE/secrets.sops.yaml: it assumes it has s3.env tunnel.env secrets/orca/github-token secrets/orca/ntfy-topic secrets/orca/ntfy-token ghcr-token secrets/orca/hcloud-token secrets/orca/turnstile-secret$"
 has "^  + sops -d $FAKE/secrets.sops.yaml (once)$"
-for n in s3.env tunnel.env secrets/orca/github-token secrets/orca/ntfy-topic secrets/orca/ntfy-token ghcr-token secrets/orca/hcloud-token; do
+for n in s3.env tunnel.env secrets/orca/github-token secrets/orca/ntfy-topic secrets/orca/ntfy-token ghcr-token secrets/orca/hcloud-token secrets/orca/turnstile-secret; do
     has "^  | ssh root@<server-ip> morca-stack sync $n$"
 done
 has "# settings.env from .*MORCA_NOTIFY_SECRET MORCA_NOTIFY_TOKEN_SECRET"
@@ -591,6 +593,12 @@ has "  morca-stack: s3.env: changed$"
 has "  morca-stack: secrets/orca/ntfy-topic: new$"
 has "  morca-stack: ghcr-token: new$"
 has "  morca-stack: secrets/orca/hcloud-token: new$"
+# Turnstile before the UI's data reads: the site key, the secret's id and the
+# hostnames in settings.env, the secret a file of its own.
+has "  morca-stack: secrets/orca/turnstile-secret: new$"
+grep -qx "MORCA_UI_TURNSTILE_SITEKEY=0xSITE" "$MORCA_CONF/settings.env" || fail "no MORCA_UI_TURNSTILE_SITEKEY"
+grep -qx "MORCA_UI_TURNSTILE_SECRET=orca/turnstile-secret" "$MORCA_CONF/settings.env" || fail "no MORCA_UI_TURNSTILE_SECRET"
+grep -qx "MORCA_UI_TURNSTILE_HOSTNAMES=orca.example" "$MORCA_CONF/settings.env" || fail "no MORCA_UI_TURNSTILE_HOSTNAMES"
 # An app's secret (#331): any secrets/orca/<id> key, sent the same way.
 has "  morca-stack: secrets/orca/posthog-key: new$"
 # Worker pools (morca #267): the Hetzner token's id, the stack's firewall and
@@ -609,6 +617,7 @@ same secrets/orca/github-token ghp_gh77
 same secrets/orca/ntfy-topic topic88
 same secrets/orca/ntfy-token tk_ntfy99
 same ghcr-token ghcr11
+same secrets/orca/turnstile-secret ts_sec14
 same secrets/orca/posthog-key phc_app13
 grep -qx 'MORCA_NOTIFY_SECRET=orca/ntfy-topic' "$MORCA_CONF/settings.env" || fail "no MORCA_NOTIFY_SECRET from SECRETS_FILE"
 grep -qx 'MORCA_NOTIFY_TOKEN_SECRET=orca/ntfy-token' "$MORCA_CONF/settings.env" || fail "no MORCA_NOTIFY_TOKEN_SECRET from SECRETS_FILE"
