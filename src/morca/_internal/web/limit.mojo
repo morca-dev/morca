@@ -1,4 +1,4 @@
-"""What one client may ask of `morca ui` (#544): a number of requests a
+"""What one client may ask of `morca ui` (#545): a number of requests a
 minute, and how many of the expensive data reads (a Data tab, `data.csv`,
 `data.json`) it and everyone together may have running at once.
 
