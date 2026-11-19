@@ -41,7 +41,10 @@ A client may send `MORCA_UI_RATE` requests a minute (off unless set; the
 Hetzner stack sets 120), and the data reads, which take a second or more,
 run `MORCA_UI_DATA_READS` at once (half the workers), one per client, so
 the other pages don't wait behind them; people logged in and scripts aren't
-limited (`morca._internal.web.limit`).
+limited (`morca._internal.web.limit`). With `MORCA_UI_TURNSTILE_SITEKEY` and
+`MORCA_UI_TURNSTILE_SECRET` set, a visitor who isn't logged in passes
+Cloudflare Turnstile once a day before a data read
+(`morca._internal.web.turnstile`, #547).
 Each request but `/healthz` and the stylesheet is logged as one line: the
 time (UTC, to the second), method, path, status, milliseconds, the client (`client`), Cloudflare's
 `CF-Connecting-IP` when there is one, and the User-Agent.
@@ -88,7 +91,13 @@ from morca._internal.web.auth import (
     token_refused,
 )
 from morca._internal.web.drain import Drain
+from morca._internal.web.cache import CacheHandle, ResponseCache, cache_key
 from morca._internal.web.limit import Gate, Limits
+from morca._internal.web.turnstile import (
+    VERIFY_PATH,
+    Turnstile,
+    challenge_page,
+)
 from morca._internal.web.page import Page, respond
 from morca._internal.web.router import (
     ACTION,
@@ -252,21 +261,46 @@ struct Ui(Copyable, Handler):
     """Set once a drain has started (`morca._internal.web.drain.Drain.draining`)."""
     var gate: Gate
     """The limits per client (`morca._internal.web.limit`)."""
+    var turnstile: Turnstile
+    """The check before a data read (`morca._internal.web.turnstile`)."""
+    var cache: CacheHandle
+    """The data reads kept (`morca._internal.web.cache`)."""
 
-    def __init__(out self, url: String, draining: AtomicFlag, gate: Gate):
+    def __init__(
+        out self,
+        url: String,
+        draining: AtomicFlag,
+        gate: Gate,
+        var turnstile: Turnstile,
+        cache: CacheHandle,
+    ):
         self.url = url
         self.table = routes()
         self.draining = draining
         self.gate = gate
+        self.turnstile = turnstile^
+        self.cache = cache
 
     def serve(self, req: Request) raises -> Response:
         var path = _path_of(req.url)
+        var key = cache_key(req, path)
+        # A kept read is for those who passed Turnstile, if it's on.
+        if key and not self.turnstile.asked(req, path):
+            var kept = self.cache.get(key)
+            if kept:
+                # Counted toward the rate, but no data-read slot.
+                var no = self.gate.check(req, path, data_read=False)
+                if no:
+                    return no.take()
+                return kept.take()
         var refused = self.gate.check(req, path)
         if refused:
             return refused.take()
         try:
             var resp = self._answer(req, path)
             self.gate.done(req, path)
+            if key:
+                self.cache.put(key, resp)
             return resp^
         except e:
             self.gate.done(req, path)
@@ -282,6 +316,21 @@ struct Ui(Copyable, Handler):
             return _healthz(self.url, self.draining.is_set())
         if post and path.startswith("/api/worker/"):
             return worker_api.worker_response(self.url, req)
+        if self.turnstile.on():
+            if post and path == VERIFY_PATH:
+                if not same_origin(req):
+                    return respond(cross_origin(), False)
+                return self.turnstile.verify(req)
+            if self.turnstile.needs_page(req, path):
+                return _with_user(
+                    challenge_page(self.turnstile.sitekey, req.url),
+                    False,
+                    "",
+                    False,
+                )
+            var refused = self.turnstile.check(req, path)
+            if refused:
+                return refused.take()
         var found = find(self.table, req.method, path)
         var reading = req.method == "GET" or req.method == "HEAD"
         if not found.route and not (reading or (post and found.miss)):
@@ -479,6 +528,8 @@ def serve_ui(url: String, addr: String, worker_addr: String = "") raises:
         # that's busy with a slow page.
         _ = setenv("FLARE_REUSEPORT_WORKERS", "0")
     var limits = Limits(workers)
+    var turnstile = Turnstile()
+    var cache = ResponseCache()
     print(
         "morca ui on http://",
         addr,
@@ -490,13 +541,28 @@ def serve_ui(url: String, addr: String, worker_addr: String = "") raises:
         String(
             ", ", limits.rate, " requests a minute a client"
         ) if limits.rate else String(),
+        ", Turnstile before data reads" if turnstile.on() else "",
+        String(
+            ", ", cache.max_bytes // (1024 * 1024), " MB of data reads kept"
+        ) if cache.max_bytes else String(),
         ")",
         sep="",
     )
     server.serve(
-        Logged(drain.counting(Ui(url, drain.draining(), limits.gate()))),
+        Logged(
+            drain.counting(
+                Ui(
+                    url,
+                    drain.draining(),
+                    limits.gate(),
+                    turnstile^,
+                    cache.handle(),
+                )
+            )
+        ),
         workers,
     )
     _ = drain^
     _ = limits^
+    _ = cache^
     print("morca ui: stopped")

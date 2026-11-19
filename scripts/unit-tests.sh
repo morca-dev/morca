@@ -86,6 +86,8 @@ scheduler-ui:tests/test_remote.mojo:test-remote
 scheduler-ui:tests/test_worker.mojo:test-worker-api
 scheduler-ui:tests/test_watchdog.mojo:test-watchdog
 scheduler-ui:tests/test_limit.mojo:test-limit
+scheduler-ui:tests/test_turnstile.mojo:test-turnstile
+scheduler-ui:tests/test_data_cache.mojo:test-data-cache
 data-tables:tests/test_tables.mojo:test-tables
 data-tables:tests/test_lake_batch.mojo:test-lake-batch
 data-tables:tests/test_replace.mojo:test-replace

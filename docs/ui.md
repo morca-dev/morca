@@ -750,6 +750,46 @@ are `/healthz`, the stylesheet, `/robots.txt` and the worker API.
 `X-Robots-Tag: noindex, nofollow`: run, snapshot and data pages are endless
 and the data views are costly.
 
+## Turnstile
+
+Crawlers that come from a new address each time get past the limits per
+client. With Cloudflare Turnstile on, a visitor who isn't logged in passes
+a check once a day before a data read (a Data tab, `data.csv`,
+`data.json`): the page shows the widget, which posts its token to
+`POST /turnstile`; the UI asks Cloudflare's siteverify, needs `success`,
+the action `data` and one of the hostnames, then sets the `morca_human`
+cookie (a day; signed with a key the UI makes at start, so a restart asks
+again) and sends the browser back. Without the cookie, `data.csv`,
+`data.json` and JSON get a 403 in text. People logged in, API tokens and
+the worker API never see it; nothing else is checked.
+
+| Variable | |
+|---|---|
+| `MORCA_UI_TURNSTILE_SITEKEY` | the widget's site key (public) |
+| `MORCA_UI_TURNSTILE_SECRET` | the id of its secret key, read as the other secrets are |
+| `MORCA_UI_TURNSTILE_HOSTNAMES` | the hostnames a pass may come from, comma separated |
+
+It's off unless the site key and the secret are both set. On Hetzner,
+`TURNSTILE_SITEKEY`, `secrets/orca/turnstile-secret` in `SECRETS_FILE` (or
+`TURNSTILE_SECRET_FILE`) and `TURNSTILE_HOSTNAMES` (UI_URL's host unless
+set) in `hetzner.env` set them.
+
+## Data reads kept
+
+A data read at a named `?snapshot=` (a snapshot never changes) by a visitor
+not logged in is kept in memory, so asking it again is answered at once
+(`X-Morca-Cache: hit`): it counts toward the client's rate but takes no
+data-read slot. The 200s are kept, and the 404s for a snapshot the table no
+longer has (an expired one); the least recently used go first, and none is
+kept past ten minutes.
+
+| Variable | Default | |
+|---|---|---|
+| `MORCA_UI_DATA_CACHE_MB` | 64 | what the kept reads may hold; 0 keeps none |
+
+A read at a snapshot the table hasn't is 404, not 400: a 400 is a mistake
+in what was asked (a column it hasn't, a filter that doesn't parse).
+
 ## Stopping
 
 SIGTERM (what `docker stop` sends) or SIGINT (Ctrl-C) drains `morca ui`

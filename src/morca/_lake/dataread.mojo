@@ -55,6 +55,10 @@ from morca._lake.dataask import DataAsk, columns_of, iso_ms, parse_ask
 from morca._lake.datarows import chart_json, csv_json, rows_json
 from morca._lake.impl import load_dataset
 
+comptime MISSING_SNAPSHOT = "morca: the table has no snapshot "
+"""What a read at a snapshot the table hasn't says; `data_text` answers it
+with a status of 404."""
+
 comptime SNAPSHOTS_SHOWN = 100
 comptime PARTITIONS_SHOWN = 1000
 comptime MANIFEST_BYTES = 256 << 20
@@ -513,6 +517,10 @@ def _data_json(a: DataAsk, mut disk: DataCache) raises -> String:
     var out = String('{"dataset": ', json_quote(a.dataset), ", ")
     var scan = t.scan()
     if a.snapshot >= 0:
+        if t.metadata.snapshot_index(a.snapshot) < 0:
+            raise Error(
+                String(MISSING_SNAPSHOT, a.snapshot, " (expired, or never)")
+            )
         scan = scan.use_snapshot(a.snapshot)
     if scan.has_any_snapshot() and scan.snapshot().manifest_list:
         _ = warm_manifests(t, scan.snapshot(), cache, disk)
@@ -554,4 +562,7 @@ def data_text(args: List[String]) raises -> String:
         return data_json(a)
     except e:
         var msg = String(e)
+        # A snapshot the table hasn't: the UI's 404, not a mistake (400).
+        if msg.startswith(MISSING_SNAPSHOT):
+            return String('{"error": ', json_quote(msg), ', "status": 404}')
         return String('{"error": ', json_quote(msg), "}")

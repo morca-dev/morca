@@ -235,9 +235,13 @@ struct Gate(Copyable, ImplicitlyCopyable, Movable):
     var rate: Int
     var max_reads: Int
 
-    def check(self, req: Request, path: String) -> Optional[Response]:
+    def check(
+        self, req: Request, path: String, data_read: Bool = True
+    ) -> Optional[Response]:
         """The refusal for `req`, or None if it may go on. One that goes on
-        as a data read (`is_data_read`) must be given back with `done`."""
+        as a data read (`is_data_read`) must be given back with `done`;
+        `data_read=False` counts it toward the rate only (an answer the
+        UI kept, `morca._internal.web.cache`)."""
         if exempt(req, path):
             return None
         ref t = _TablePtr(unsafe_from_address=self.table)[]
@@ -245,7 +249,7 @@ struct Gate(Copyable, ImplicitlyCopyable, Movable):
         var v = admit(
             t,
             client(req),
-            is_data_read(req.url),
+            data_read and is_data_read(req.url),
             self.rate,
             self.max_reads,
             _now(),
