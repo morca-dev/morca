@@ -1,1 +1,0 @@
-- **UI:** data reads at a named snapshot are kept in memory for visitors not logged in (`MORCA_UI_DATA_CACHE_MB`, 64), and a snapshot the table no longer has is 404, not 400.
