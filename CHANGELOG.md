@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.39.0 - 2026-11-19
+
+- **ui:** with `MORCA_UI_TURNSTILE_*` set, a visitor who is not logged in passes Cloudflare Turnstile once a day before a data read; Hetzner deploy tools 0.37.0 set it from `TURNSTILE_SITEKEY` and `secrets/orca/turnstile-secret`.
+
+- **UI:** data reads at a named snapshot are kept in memory for visitors not logged in (`MORCA_UI_DATA_CACHE_MB`, 64), and a snapshot the table no longer has is 404, not 400.
+
 ## 0.38.0 - 2026-11-19
 
 - **The UI limits each client:** `MORCA_UI_RATE` requests a minute (429), and data reads one at a time per client and `MORCA_UI_DATA_READS` at once (503); the Hetzner stack runs 8 workers at 120 a minute, and log lines start with the time. (#545)
