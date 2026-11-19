@@ -189,6 +189,7 @@ secrets/orca/github-token: ...   # GITHUB_TOKEN_FILE's
 secrets/orca/ntfy-topic: ...     # NTFY_TOPIC_FILE's
 secrets/orca/ntfy-token: ...     # NTFY_TOKEN_FILE's
 ghcr-token: ...                  # GHCR_TOKEN_FILE's
+secrets/orca/turnstile-secret: ... # TURNSTILE_SECRET_FILE's
 ```
 
 Write it with `sops edit prod/secrets.sops.yaml`, or, from the repository's

@@ -339,7 +339,7 @@ cmd_configure() {
 
 # The files sync may write (in $CONF): settings.env and the secret files
 # up.sh and deploy.sh send.
-SYNC_FILES="settings.env overlay/morca.overlay.toml s3.env tunnel.env ghcr-token secrets/orca/github-token secrets/orca/ntfy-topic secrets/orca/ntfy-token secrets/orca/hcloud-token"
+SYNC_FILES="settings.env overlay/morca.overlay.toml s3.env tunnel.env ghcr-token secrets/orca/github-token secrets/orca/ntfy-topic secrets/orca/ntfy-token secrets/orca/hcloud-token secrets/orca/turnstile-secret"
 
 # key_changes OLD NEW: "added A, B; removed C; changed D" between two
 # KEY=VALUE files (the last line of a key counts, as docker's --env-file

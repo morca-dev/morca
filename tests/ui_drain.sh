@@ -12,7 +12,11 @@
 #   (1, the request cut) within the bound plus half a second;
 # - on 2 workers (MORCA_UI_WORKERS), a new request is answered while a slow
 #   one waits, both are logged, and SIGTERM still lets the slow one finish;
-# - a client over MORCA_UI_RATE gets 429, unless it has a session cookie.
+# - a client over MORCA_UI_RATE gets 429, unless it has a session cookie;
+# - with Turnstile on (siteverify a stand-in, tests/fake_siteverify.py), a
+#   data read without the cookie gets the widget's 403 page (data.json a
+#   403 in text), a token that fails is 403, one that passes sets
+#   morca_human and sends the browser back, and the read with it goes on.
 #
 # The first three run on one worker: with several, each worker's connections
 # keep being accepted until the drain stops the loop.
@@ -191,6 +195,43 @@ grep -qi '^retry-after: [0-9]' build/ui-drain-429.h || fail "no Retry-After on t
 got=$(curl -s -o /dev/null -w '%{http_code}' -H 'Cookie: morca_session=x' "$base/runs")
 [ "$got" != 429 ] || fail "a request with a session cookie was counted"
 grep -Eq '^morca ui: [0-9TZ:-]+ GET /runs 429 ' "$log" || fail "the 429 wasn't logged"
+kill -TERM "$ui"
+stopped 30
+# Turnstile (morca.web.turnstile): the secret's id is its value here, and no
+# rate (a prefix to a function stays set in some shells).
+free_port vport
+verified=build/ui-drain-siteverify.jsonl
+: > "$verified"
+python3 tests/fake_siteverify.py "$vport" "$verified" >> "$log" 2>&1 &
+stub=$!
+MORCA_UI_RATE=0 MORCA_SECRET_FETCH=echo MORCA_UI_TURNSTILE_SITEKEY=1x00000000000000000000AA \
+    MORCA_UI_TURNSTILE_SECRET=sec-ret MORCA_UI_TURNSTILE_HOSTNAMES=127.0.0.1 \
+    MORCA_UI_TURNSTILE_VERIFY_URL="http://127.0.0.1:$vport/siteverify" start 1
+grep -q "Turnstile before data reads)" "$log" || { kill "$stub"; fail "no Turnstile in the start message"; }
+read_url="/datasets/toy.events?tab=data"
+got=$(curl -s -o build/ui-drain-ts.html -w '%{http_code}' "$base$read_url")
+[ "$got" = 403 ] || { kill "$stub"; fail "a data read without the cookie got $got"; }
+grep -q 'class="cf-turnstile" data-sitekey="1x00000000000000000000AA"' build/ui-drain-ts.html \
+    || { kill "$stub"; fail "no widget on the 403 page"; }
+got=$(curl -s -o /dev/null -w '%{http_code}' "$base/datasets/toy.events/data.json")
+[ "$got" = 403 ] || { kill "$stub"; fail "data.json without the cookie got $got"; }
+got=$(curl -s -o /dev/null -w '%{http_code}' "$base/runs")
+[ "$got" = 200 ] || { kill "$stub"; fail "a page that isn't a data read got $got"; }
+got=$(curl -s -o /dev/null -w '%{http_code}' -H "Origin: $base" --data 'cf-turnstile-response=nope&next=/' "$base/turnstile")
+[ "$got" = 403 ] || { kill "$stub"; fail "a token that fails got $got"; }
+got=$(curl -s -D build/ui-drain-ts.h -o /dev/null -w '%{http_code}' -H "Origin: $base" \
+    --data-urlencode 'cf-turnstile-response=pass' --data-urlencode "next=$read_url" "$base/turnstile")
+[ "$got" = 303 ] || { kill "$stub"; fail "a token that passes got $got"; }
+grep -qi "^location: /datasets/toy.events?tab=data" build/ui-drain-ts.h || { kill "$stub"; fail "a pass isn't sent back"; }
+human=$(sed -n 's/^[Ss]et-[Cc]ookie: \(morca_human=[^;]*\);.*HttpOnly.*/\1/p' build/ui-drain-ts.h)
+[ -n "$human" ] || { kill "$stub"; fail "no morca_human cookie"; }
+grep -q '"secret": "sec-ret"' "$verified" || { kill "$stub"; fail "siteverify wasn't sent the secret"; }
+got=$(curl -s -o /dev/null -w '%{http_code}' -H "Cookie: $human" "$base$read_url")
+[ "$got" != 403 ] || { kill "$stub"; fail "a data read with the cookie got 403"; }
+got=$(curl -s -o /dev/null -w '%{http_code}' -H "Cookie: morca_human=9999999999.00" "$base$read_url")
+[ "$got" = 403 ] || { kill "$stub"; fail "a forged cookie got $got"; }
+kill "$stub" 2> /dev/null || true
+wait "$stub" 2> /dev/null || true
 kill -TERM "$ui"
 stopped 30
 echo "ui drain: ok"
