@@ -159,7 +159,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: morca-dev/dista
-          ref: 628025da9e280aa07f670c681d0acd5c5f4807f1
+          ref: faec76d5ecf22111b4fc6c0edb025ee2c897a170
           path: dista.mojo
       # So does k8s, the scheduler's Kubernetes client.
       - uses: actions/checkout@v4
@@ -444,7 +444,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: morca-dev/dista
-          ref: 628025da9e280aa07f670c681d0acd5c5f4807f1
+          ref: faec76d5ecf22111b4fc6c0edb025ee2c897a170
           path: dista.mojo
       # Off before setup-pixi restores rattler's git cache: git's
       # background maintenance in a cached repo races its
@@ -562,7 +562,7 @@ jobs:
         with:
           path: morca
       - uses: actions/checkout@v4
-        with: {repository: morca-dev/dista, ref: 628025da9e280aa07f670c681d0acd5c5f4807f1, path: dista.mojo}
+        with: {repository: morca-dev/dista, ref: faec76d5ecf22111b4fc6c0edb025ee2c897a170, path: dista.mojo}
       - uses: actions/checkout@v4
         with: {repository: magmalake/k8s.mojo, ref: 831f1ebde96d35351e1ea509f2514ecb858fc166, path: k8s.mojo}
       - uses: actions/checkout@v4
@@ -570,9 +570,9 @@ jobs:
       - uses: actions/checkout@v4
         with: {repository: magmalake/arrow-mlake.mojo, ref: 472380b5d329230b8280d6b70ff70f7211f52538, path: arrow-mlake.mojo}
       - uses: actions/checkout@v4
-        with: {repository: magmalake/parquet.mojo, ref: cf8580375f7fd42ef8d1cf78cae1f9589c146195, path: parquet.mojo}
+        with: {repository: magmalake/parquet.mojo, ref: c74aa76a58150233e5d6629572b6709a8383eaf7, path: parquet.mojo}
       - uses: actions/checkout@v4
-        with: {repository: magmalake/iceberg.mojo, ref: 09d63e560dc92bc983471fea036e428ea451f404, path: iceberg.mojo}
+        with: {repository: magmalake/iceberg.mojo, ref: 86753ab7f64e649561e91686f715587331c50664, path: iceberg.mojo}
       - uses: actions/checkout@v4
         with: {repository: magmalake/threads.mojo, ref: 820a7c6e8619d49e13f944dfba73328236eb4903, path: threads.mojo}
       - uses: actions/checkout@v4
@@ -660,7 +660,7 @@ jobs:
           path: morca
           persist-credentials: false
       - uses: actions/checkout@v4
-        with: {repository: morca-dev/dista, ref: 628025da9e280aa07f670c681d0acd5c5f4807f1, path: dista.mojo, persist-credentials: false}
+        with: {repository: morca-dev/dista, ref: faec76d5ecf22111b4fc6c0edb025ee2c897a170, path: dista.mojo, persist-credentials: false}
       - uses: actions/checkout@v4
         with: {repository: magmalake/k8s.mojo, ref: 831f1ebde96d35351e1ea509f2514ecb858fc166, path: k8s.mojo, persist-credentials: false}
       - uses: actions/checkout@v4
@@ -668,9 +668,9 @@ jobs:
       - uses: actions/checkout@v4
         with: {repository: magmalake/arrow-mlake.mojo, ref: 472380b5d329230b8280d6b70ff70f7211f52538, path: arrow-mlake.mojo, persist-credentials: false}
       - uses: actions/checkout@v4
-        with: {repository: magmalake/parquet.mojo, ref: cf8580375f7fd42ef8d1cf78cae1f9589c146195, path: parquet.mojo, persist-credentials: false}
+        with: {repository: magmalake/parquet.mojo, ref: c74aa76a58150233e5d6629572b6709a8383eaf7, path: parquet.mojo, persist-credentials: false}
       - uses: actions/checkout@v4
-        with: {repository: magmalake/iceberg.mojo, ref: 09d63e560dc92bc983471fea036e428ea451f404, path: iceberg.mojo, persist-credentials: false}
+        with: {repository: magmalake/iceberg.mojo, ref: 86753ab7f64e649561e91686f715587331c50664, path: iceberg.mojo, persist-credentials: false}
       - uses: actions/checkout@v4
         with: {repository: magmalake/threads.mojo, ref: 820a7c6e8619d49e13f944dfba73328236eb4903, path: threads.mojo, persist-credentials: false}
       - uses: actions/checkout@v4
@@ -760,7 +760,7 @@ jobs:
           clean: false
           persist-credentials: false
       - uses: actions/checkout@v4
-        with: {repository: morca-dev/dista, ref: 628025da9e280aa07f670c681d0acd5c5f4807f1, path: dista.mojo, clean: true, persist-credentials: false}
+        with: {repository: morca-dev/dista, ref: faec76d5ecf22111b4fc6c0edb025ee2c897a170, path: dista.mojo, clean: true, persist-credentials: false}
       - uses: actions/checkout@v4
         with: {repository: magmalake/k8s.mojo, ref: 831f1ebde96d35351e1ea509f2514ecb858fc166, path: k8s.mojo, clean: true, persist-credentials: false}
 
