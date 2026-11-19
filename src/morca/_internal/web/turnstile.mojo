@@ -198,6 +198,11 @@ struct Turnstile(Copyable, Movable):
             return False
         return not valid(self.key, cookie(req, HUMAN_COOKIE), _now())
 
+    def asked(self, req: Request, path: String) -> Bool:
+        """Whether `req` must pass the check before its data read (a kept
+        one too, `morca._internal.web.cache`)."""
+        return self._asked(req, path)
+
     def needs_page(self, req: Request, path: String) -> Bool:
         """Whether `req` gets the widget's page (`challenge_page`)."""
         return self._asked(req, path) and not _wants_text(req, path)

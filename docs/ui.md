@@ -774,6 +774,22 @@ It's off unless the site key and the secret are both set. On Hetzner,
 `TURNSTILE_SECRET_FILE`) and `TURNSTILE_HOSTNAMES` (UI_URL's host unless
 set) in `hetzner.env` set them.
 
+## Data reads kept
+
+A data read at a named `?snapshot=` (a snapshot never changes) by a visitor
+not logged in is kept in memory, so asking it again is answered at once
+(`X-Morca-Cache: hit`): it counts toward the client's rate but takes no
+data-read slot. The 200s are kept, and the 404s for a snapshot the table no
+longer has (an expired one); the least recently used go first, and none is
+kept past ten minutes.
+
+| Variable | Default | |
+|---|---|---|
+| `MORCA_UI_DATA_CACHE_MB` | 64 | what the kept reads may hold; 0 keeps none |
+
+A read at a snapshot the table hasn't is 404, not 400: a 400 is a mistake
+in what was asked (a column it hasn't, a filter that doesn't parse).
+
 ## Stopping
 
 SIGTERM (what `docker stop` sends) or SIGINT (Ctrl-C) drains `morca ui`

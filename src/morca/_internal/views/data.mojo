@@ -297,7 +297,8 @@ struct DataRead(Movable):
 def read_data(argv: List[String], limits: DataLimits) -> DataRead:
     """Runs `argv` (`data_argv`), killing it `GRACE_SECONDS` past its time
     limit. A mistake in the request (a column the table hasn't) is the
-    JSON's `error`, 400; no binary or a read that failed, 503."""
+    JSON's `error`, 400 (404 for a snapshot the table hasn't); no binary or
+    a read that failed, 503."""
     if len(argv) == 0 or not argv[0]:
         return DataRead(
             String(),
@@ -328,7 +329,11 @@ def read_data(argv: List[String], limits: DataLimits) -> DataRead:
         var v = loads(text)
         var err = v.try_at("/error")
         if err and err.value().is_string():
-            return DataRead(String(), err.value().string_value(), 400)
+            var status = 400
+            var st = v.try_at("/status")
+            if st and st.value().int_value() == 404:
+                status = 404
+            return DataRead(String(), err.value().string_value(), status)
         return DataRead(text^, String(), 200)
     except e:
         return DataRead(String(), String(e), 503)

@@ -269,6 +269,32 @@ echo "ok   the download: CSV, quoted, capped at MORCA_DATA_DOWNLOAD_ROWS with wh
 [ "$(code "$base/datasets/lake.obs/data.json?f=n:lt:abc")" = 400 ] || fail "a number that isn't"
 [ "$(code "$base/datasets/lake.obs?tab=data&f=bad")" = 400 ] && grep -q 'id="rows"' build/dataview/body || fail "a bad filter's page"
 [ "$(code "$base/datasets/lake.nope?tab=data")" = 404 ] || fail "no such dataset"
+# A snapshot the table hasn't (an expired one a crawler asks again): 404.
+[ "$(code "$base/datasets/lake.obs?tab=data&snapshot=12345")" = 404 ] && grep -qF 'the table has no snapshot 12345' build/dataview/body || fail "a missing snapshot's page: $(grep -o 'notice[^<]*<' build/dataview/body)"
+[ "$(code "$base/datasets/lake.obs/data.json?snapshot=12345")" = 404 ] || fail "a missing snapshot's JSON"
+[ "$(code "$base/datasets/lake.obs/data.csv?snapshot=12345")" = 404 ] || fail "a missing snapshot's CSV"
+echo "ok   a snapshot the table hasn't is 404"
+
+# A read at a named snapshot is kept: asked again, it's the same answer, at once.
+hdr=build/dataview/kept.hdr
+curl -fsS -D "$hdr" -o build/dataview/kept1 "$base/datasets/lake.obs/data.json?snapshot=$S1&c=city" || fail "the first read"
+! grep -qi '^x-morca-cache:' "$hdr" || fail "the first read was kept already"
+curl -fsS -D "$hdr" -o build/dataview/kept2 "$base/datasets/lake.obs/data.json?snapshot=$S1&c=city" || fail "the second read"
+grep -qi '^x-morca-cache: hit' "$hdr" || fail "the second read wasn't kept: $(cat "$hdr")"
+cmp -s build/dataview/kept1 build/dataview/kept2 || fail "the kept answer differs"
+[ "$(code -D "$hdr" "$base/datasets/lake.obs/data.json?snapshot=12345")" = 404 ] && grep -qi '^x-morca-cache: hit' "$hdr" || fail "the 404 wasn't kept"
+# Not without a snapshot (the current one moves), nor for someone logged in.
+curl -fsS -o /dev/null "$base/datasets/lake.obs/data.json?c=city"
+curl -fsS -D "$hdr" -o /dev/null "$base/datasets/lake.obs/data.json?c=city" || fail "a read at the current snapshot"
+! grep -qi '^x-morca-cache:' "$hdr" || fail "a read at the current snapshot was kept"
+curl -sS -D "$hdr" -o /dev/null -H "Cookie: morca_session=x" "$base/datasets/lake.obs/data.json?snapshot=$S1&c=city"
+! grep -qi '^x-morca-cache:' "$hdr" || fail "a read with a session was answered from the cache"
+stop_ui
+start_ui MORCA_UI_DATA_CACHE_MB=0
+curl -fsS -o /dev/null "$base/datasets/lake.obs/data.json?snapshot=$S1" || fail "a read with no cache"
+curl -fsS -D "$hdr" -o /dev/null "$base/datasets/lake.obs/data.json?snapshot=$S1" || fail "a read with no cache, again"
+! grep -qi '^x-morca-cache:' "$hdr" || fail "MORCA_UI_DATA_CACHE_MB=0 kept a read"
+echo "ok   reads at a named snapshot are kept (200s and 404s), for visitors not logged in"
 stop_ui
 start_ui MORCA_DATA_MEMORY_MB=0.001
 [ "$(json "sort=id" | jq -r .rows.stopped)" = "the scan stopped at its memory limit, 0.001 MB (MORCA_DATA_MEMORY_MB)" ] || fail "the memory limit: $(json sort=id | jq -c .rows.stopped)"
