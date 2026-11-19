@@ -37,8 +37,13 @@ It answers on `MORCA_UI_WORKERS` threads (default 1; the Hetzner stack runs 4),
 sharing one listening socket (flare's `FLARE_REUSEPORT_WORKERS=0`, unless
 that's set), so a new connection goes to a thread that's free rather than
 one a slow page holds up.
-Each request but `/healthz` and the stylesheet is logged as one line: method,
-path, status, milliseconds, the client (`client`), Cloudflare's
+A client may send `MORCA_UI_RATE` requests a minute (off unless set; the
+Hetzner stack sets 120), and the data reads, which take a second or more,
+run `MORCA_UI_DATA_READS` at once (half the workers), one per client, so
+the other pages don't wait behind them; people logged in and scripts aren't
+limited (`morca._internal.web.limit`).
+Each request but `/healthz` and the stylesheet is logged as one line: the
+time (UTC, to the second), method, path, status, milliseconds, the client (`client`), Cloudflare's
 `CF-Connecting-IP` when there is one, and the User-Agent.
 """
 
@@ -61,6 +66,7 @@ from morca._internal.api import worker as worker_api
 from morca._internal.auth import audit, login_required
 from morca._internal.html import Html, query_param, url_encode
 from morca._internal.json import quote
+from morca._internal.logs import utc_now
 from morca._internal.state import State
 from morca._internal.ui.coverage import COVERAGE_STYLE
 from morca._internal.ui.data_chart import CHART_STYLE
@@ -82,6 +88,7 @@ from morca._internal.web.auth import (
     token_refused,
 )
 from morca._internal.web.drain import Drain
+from morca._internal.web.limit import Gate, Limits
 from morca._internal.web.page import Page, respond
 from morca._internal.web.router import (
     ACTION,
@@ -243,14 +250,29 @@ struct Ui(Copyable, Handler):
     var table: List[Route]
     var draining: AtomicFlag
     """Set once a drain has started (`morca._internal.web.drain.Drain.draining`)."""
+    var gate: Gate
+    """The limits per client (`morca._internal.web.limit`)."""
 
-    def __init__(out self, url: String, draining: AtomicFlag):
+    def __init__(out self, url: String, draining: AtomicFlag, gate: Gate):
         self.url = url
         self.table = routes()
         self.draining = draining
+        self.gate = gate
 
     def serve(self, req: Request) raises -> Response:
         var path = _path_of(req.url)
+        var refused = self.gate.check(req, path)
+        if refused:
+            return refused.take()
+        try:
+            var resp = self._answer(req, path)
+            self.gate.done(req, path)
+            return resp^
+        except e:
+            self.gate.done(req, path)
+            raise e^
+
+    def _answer(self, req: Request, path: String) raises -> Response:
         var post = req.method == "POST"
         if path == STYLESHEET:
             return _stylesheet()
@@ -349,6 +371,8 @@ def _log(req: Request, status: Int, start_ns: Int):
     var cf = req.headers.get("CF-Connecting-IP")
     print(
         "morca ui: ",
+        utc_now(),
+        " ",
         req.method,
         " ",
         _clip(req.url, 200),
@@ -454,7 +478,25 @@ def serve_ui(url: String, addr: String, worker_addr: String = "") raises:
         # Per-worker listeners would hash some new connections to a worker
         # that's busy with a slow page.
         _ = setenv("FLARE_REUSEPORT_WORKERS", "0")
-    print("morca ui on http://", addr, " (", workers, " workers)", sep="")
-    server.serve(Logged(drain.counting(Ui(url, drain.draining()))), workers)
+    var limits = Limits(workers)
+    print(
+        "morca ui on http://",
+        addr,
+        " (",
+        workers,
+        " workers, ",
+        limits.max_reads,
+        " data reads at once",
+        String(
+            ", ", limits.rate, " requests a minute a client"
+        ) if limits.rate else String(),
+        ")",
+        sep="",
+    )
+    server.serve(
+        Logged(drain.counting(Ui(url, drain.draining(), limits.gate()))),
+        workers,
+    )
     _ = drain^
+    _ = limits^
     print("morca ui: stopped")

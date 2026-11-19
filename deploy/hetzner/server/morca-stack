@@ -484,7 +484,8 @@ MORCA_UI_ADDR=0.0.0.0:8270
 MORCA_UI_LOGIN=required
 MORCA_UI_SECURE_COOKIES=1
 MORCA_UI_TRUST_PROXY=1
-MORCA_UI_WORKERS=4
+MORCA_UI_WORKERS=8
+MORCA_UI_RATE=120
 EOS
         # What machines of a worker pool run: the server's own image.
         echo "MORCA_WORKER_IMAGE=$image:$tag"
