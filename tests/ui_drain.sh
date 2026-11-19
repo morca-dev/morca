@@ -204,6 +204,11 @@ verified=build/ui-drain-siteverify.jsonl
 : > "$verified"
 python3 tests/fake_siteverify.py "$vport" "$verified" >> "$log" 2>&1 &
 stub=$!
+# Listening before the UI asks it (curl's 7: couldn't connect).
+i=0
+while curl -s -o /dev/null "http://127.0.0.1:$vport/"; [ $? -eq 7 ]; do
+    i=$((i + 1)); [ "$i" -lt 100 ] || { kill "$stub"; fail "the siteverify stub didn't start"; }; sleep 0.1
+done
 MORCA_UI_RATE=0 MORCA_SECRET_FETCH=echo MORCA_UI_TURNSTILE_SITEKEY=1x00000000000000000000AA \
     MORCA_UI_TURNSTILE_SECRET=sec-ret MORCA_UI_TURNSTILE_HOSTNAMES=127.0.0.1 \
     MORCA_UI_TURNSTILE_VERIFY_URL="http://127.0.0.1:$vport/siteverify" start 1
