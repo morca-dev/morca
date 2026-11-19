@@ -213,16 +213,13 @@ struct CacheHandle(Copyable, ImplicitlyCopyable, Movable):
             return
         var names = List[String]()
         var values = List[String]()
-        try:
-            if resp.headers.get("Set-Cookie"):
-                return
-            for n in materialize[_KEPT_HEADERS]():
-                var v = resp.headers.get(n)
-                if v:
-                    names.append(String(n))
-                    values.append(v)
-        except:
+        if resp.headers.get("Set-Cookie"):
             return
+        for n in materialize[_KEPT_HEADERS]():
+            var v = resp.headers.get(n)
+            if v:
+                names.append(String(n))
+                values.append(v)
         var k = Kept(resp.status, resp.body.copy(), names^, values^, _now(), 0)
         ref s = _SharedPtr(unsafe_from_address=self.shared)[]
         s.lock.lock()

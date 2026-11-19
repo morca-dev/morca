@@ -73,7 +73,7 @@ def _same(a: String, b: String) -> Bool:
 def valid(key: Span[UInt8, _], value: String, now: Int) -> Bool:
     """Whether `value` is a cookie `sign` made with `key` that hasn't
     expired by `now`."""
-    var dot = value.find(".")
+    var dot = value.find(".").or_else(-1)
     if dot <= 0:
         return False
     var expiry: Int
