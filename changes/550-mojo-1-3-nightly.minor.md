@@ -1,0 +1,1 @@
+- **morca-mojo requires Mojo 1.3.0.dev2026111805:** it is built with that Mojo 1.3 nightly instead of 1.2.0, so a project pins `mojo-compiler = "==1.3.0.dev2026111805"` to add it. (#550)
