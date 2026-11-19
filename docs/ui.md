@@ -716,18 +716,35 @@ tripped on. See [watchdog.md](watchdog.md).
 ## Workers and the request log
 
 `morca ui` answers on `MORCA_UI_WORKERS` threads (default 1; the Hetzner
-stack's UI runs 4). They share one listening socket, so a new connection goes
+stack's UI runs 8). They share one listening socket, so a new connection goes
 to a free thread instead of waiting behind a slow page. Each request except
 `/healthz` and the stylesheet is logged as one line on standard output:
 
 ```
-morca ui: GET /runs?status=failed 200 42 ms 172.18.0.5 cf=203.0.113.7 "Mozilla/5.0 ..."
+morca ui: 2026-11-18T14:02:03Z GET /runs?status=failed 200 42 ms 172.18.0.5 cf=203.0.113.7 "Mozilla/5.0 ..."
 ```
 
-That's the method, URL, status, milliseconds, and the client address (from
-`X-Forwarded-For` with `MORCA_UI_TRUST_PROXY=1`), followed by Cloudflare's
-`CF-Connecting-IP` when the request came through a tunnel, and the
-User-Agent.
+That's the time (UTC), method, URL, status, milliseconds, and the client
+address (from `X-Forwarded-For` with `MORCA_UI_TRUST_PROXY=1`), followed by
+Cloudflare's `CF-Connecting-IP` when the request came through a tunnel, and
+the User-Agent.
+
+## Limits per client
+
+A data read (a Data tab, `data.csv`, `data.json`) runs `morca_maintain data`
+and takes a second or more, and a thread waits for it. So that the other
+pages don't queue behind them, the UI caps them:
+
+| Variable | Default | |
+|---|---|---|
+| `MORCA_UI_RATE` | 0 (off) | requests one client may send a minute; the Hetzner stack sets 120 |
+| `MORCA_UI_DATA_READS` | half the workers, at least 1 | data reads running at once, for all clients; one client may have one |
+
+A client over its rate gets 429 with `Retry-After` (the seconds left of its
+minute). A data read past the cap, or a second one from a client with one
+running, gets 503 with `Retry-After: 5`. Requests with a session cookie or an
+`Authorization` header (people logged in, and scripts) aren't counted, nor
+are `/healthz`, the stylesheet, `/robots.txt` and the worker API.
 
 `/robots.txt` disallows every crawler, and each answer carries
 `X-Robots-Tag: noindex, nofollow`: run, snapshot and data pages are endless

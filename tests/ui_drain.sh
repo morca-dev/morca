@@ -11,7 +11,8 @@
 # - SIGINT with a request that outlasts MORCA_UI_DRAIN_SECONDS: it exits
 #   (1, the request cut) within the bound plus half a second;
 # - on 2 workers (MORCA_UI_WORKERS), a new request is answered while a slow
-#   one waits, both are logged, and SIGTERM still lets the slow one finish.
+#   one waits, both are logged, and SIGTERM still lets the slow one finish;
+# - a client over MORCA_UI_RATE gets 429, unless it has a session cookie.
 #
 # The first three run on one worker: with several, each worker's connections
 # keep being accepted until the drain stops the loop.
@@ -162,7 +163,7 @@ locker=
 wait "$slow_curl" 2> /dev/null || true
 # Two workers: a request gets its answer while the other waits on the lock.
 start 5 2
-grep -q "morca ui on http://127.0.0.1:$port (2 workers)" "$log" || fail "no 2 workers message"
+grep -q "morca ui on http://127.0.0.1:$port (2 workers, 1 data reads at once)" "$log" || fail "no 2 workers message"
 lock 3
 slow
 fast=$(curl -s -o /dev/null -w '%{http_code} %{time_total}' --max-time 2 "$base/static/morca.css" 2> /dev/null || true)
@@ -174,5 +175,22 @@ wait "$slow_curl" || true
 [ "$(cat build/ui-drain-slow.txt)" = 200 ] || fail "the slow request on 2 workers got $(cat build/ui-drain-slow.txt)"
 wait "$locker" || true
 locker=
-grep -Eq '^morca ui: GET /runs 200 [0-9]+ ms 127\.0\.0\.1 "curl/' "$log" || fail "/runs wasn't logged"
+grep -Eq '^morca ui: [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z GET /runs 200 [0-9]+ ms 127\.0\.0\.1 "curl/' "$log" || fail "/runs wasn't logged"
+# A client's rate (MORCA_UI_RATE, morca.web.limit): start's request and two
+# more go, the fourth in the minute is 429 with Retry-After, and one with a
+# session cookie isn't counted.
+MORCA_UI_RATE=3 start 1
+grep -q "3 requests a minute a client)" "$log" || fail "no rate in the start message"
+for i in 1 2; do
+    got=$(curl -s -o /dev/null -w '%{http_code}' "$base/runs")
+    [ "$got" = 200 ] || fail "request $i under the rate got $got"
+done
+got=$(curl -s -D build/ui-drain-429.h -o /dev/null -w '%{http_code}' "$base/runs")
+[ "$got" = 429 ] || fail "the request over the rate got $got"
+grep -qi '^retry-after: [0-9]' build/ui-drain-429.h || fail "no Retry-After on the 429"
+got=$(curl -s -o /dev/null -w '%{http_code}' -H 'Cookie: morca_session=x' "$base/runs")
+[ "$got" != 429 ] || fail "a request with a session cookie was counted"
+grep -Eq '^morca ui: [0-9TZ:-]+ GET /runs 429 ' "$log" || fail "the 429 wasn't logged"
+kill -TERM "$ui"
+stopped 30
 echo "ui drain: ok"
