@@ -91,6 +91,7 @@ from morca._internal.web.auth import (
     token_refused,
 )
 from morca._internal.web.drain import Drain
+from morca._internal.web.cache import CacheHandle, ResponseCache, cache_key
 from morca._internal.web.limit import Gate, Limits
 from morca._internal.web.turnstile import (
     VERIFY_PATH,
@@ -262,6 +263,8 @@ struct Ui(Copyable, Handler):
     """The limits per client (`morca._internal.web.limit`)."""
     var turnstile: Turnstile
     """The check before a data read (`morca._internal.web.turnstile`)."""
+    var cache: CacheHandle
+    """The data reads kept (`morca._internal.web.cache`)."""
 
     def __init__(
         out self,
@@ -269,21 +272,35 @@ struct Ui(Copyable, Handler):
         draining: AtomicFlag,
         gate: Gate,
         var turnstile: Turnstile,
+        cache: CacheHandle,
     ):
         self.url = url
         self.table = routes()
         self.draining = draining
         self.gate = gate
         self.turnstile = turnstile^
+        self.cache = cache
 
     def serve(self, req: Request) raises -> Response:
         var path = _path_of(req.url)
+        var key = cache_key(req, path)
+        # A kept read is for those who passed Turnstile, if it's on.
+        if key and not self.turnstile.asked(req, path):
+            var kept = self.cache.get(key)
+            if kept:
+                # Counted toward the rate, but no data-read slot.
+                var no = self.gate.check(req, path, data_read=False)
+                if no:
+                    return no.take()
+                return kept.take()
         var refused = self.gate.check(req, path)
         if refused:
             return refused.take()
         try:
             var resp = self._answer(req, path)
             self.gate.done(req, path)
+            if key:
+                self.cache.put(key, resp)
             return resp^
         except e:
             self.gate.done(req, path)
@@ -512,6 +529,7 @@ def serve_ui(url: String, addr: String, worker_addr: String = "") raises:
         _ = setenv("FLARE_REUSEPORT_WORKERS", "0")
     var limits = Limits(workers)
     var turnstile = Turnstile()
+    var cache = ResponseCache()
     print(
         "morca ui on http://",
         addr,
@@ -524,15 +542,27 @@ def serve_ui(url: String, addr: String, worker_addr: String = "") raises:
             ", ", limits.rate, " requests a minute a client"
         ) if limits.rate else String(),
         ", Turnstile before data reads" if turnstile.on() else "",
+        String(
+            ", ", cache.max_bytes // (1024 * 1024), " MB of data reads kept"
+        ) if cache.max_bytes else String(),
         ")",
         sep="",
     )
     server.serve(
         Logged(
-            drain.counting(Ui(url, drain.draining(), limits.gate(), turnstile^))
+            drain.counting(
+                Ui(
+                    url,
+                    drain.draining(),
+                    limits.gate(),
+                    turnstile^,
+                    cache.handle(),
+                )
+            )
         ),
         workers,
     )
     _ = drain^
     _ = limits^
+    _ = cache^
     print("morca ui: stopped")

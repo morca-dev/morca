@@ -167,7 +167,7 @@ locker=
 wait "$slow_curl" 2> /dev/null || true
 # Two workers: a request gets its answer while the other waits on the lock.
 start 5 2
-grep -q "morca ui on http://127.0.0.1:$port (2 workers, 1 data reads at once)" "$log" || fail "no 2 workers message"
+grep -q "morca ui on http://127.0.0.1:$port (2 workers, 1 data reads at once, 64 MB of data reads kept)" "$log" || fail "no 2 workers message"
 lock 3
 slow
 fast=$(curl -s -o /dev/null -w '%{http_code} %{time_total}' --max-time 2 "$base/static/morca.css" 2> /dev/null || true)
@@ -184,7 +184,7 @@ grep -Eq '^morca ui: [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z GET /runs 200 [0-9]+ 
 # more go, the fourth in the minute is 429 with Retry-After, and one with a
 # session cookie isn't counted.
 MORCA_UI_RATE=3 start 1
-grep -q "3 requests a minute a client)" "$log" || fail "no rate in the start message"
+grep -q "3 requests a minute a client, 64 MB of data reads kept)" "$log" || fail "no rate in the start message"
 for i in 1 2; do
     got=$(curl -s -o /dev/null -w '%{http_code}' "$base/runs")
     [ "$got" = 200 ] || fail "request $i under the rate got $got"
@@ -204,10 +204,15 @@ verified=build/ui-drain-siteverify.jsonl
 : > "$verified"
 python3 tests/fake_siteverify.py "$vport" "$verified" >> "$log" 2>&1 &
 stub=$!
+# Listening before the UI asks it (curl's 7: couldn't connect).
+i=0
+while curl -s -o /dev/null "http://127.0.0.1:$vport/"; [ $? -eq 7 ]; do
+    i=$((i + 1)); [ "$i" -lt 100 ] || { kill "$stub"; fail "the siteverify stub didn't start"; }; sleep 0.1
+done
 MORCA_UI_RATE=0 MORCA_SECRET_FETCH=echo MORCA_UI_TURNSTILE_SITEKEY=1x00000000000000000000AA \
     MORCA_UI_TURNSTILE_SECRET=sec-ret MORCA_UI_TURNSTILE_HOSTNAMES=127.0.0.1 \
     MORCA_UI_TURNSTILE_VERIFY_URL="http://127.0.0.1:$vport/siteverify" start 1
-grep -q "Turnstile before data reads)" "$log" || { kill "$stub"; fail "no Turnstile in the start message"; }
+grep -q "Turnstile before data reads, 64 MB of data reads kept)" "$log" || { kill "$stub"; fail "no Turnstile in the start message"; }
 read_url="/datasets/toy.events?tab=data"
 got=$(curl -s -o build/ui-drain-ts.html -w '%{http_code}' "$base$read_url")
 [ "$got" = 403 ] || { kill "$stub"; fail "a data read without the cookie got $got"; }
