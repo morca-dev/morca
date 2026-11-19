@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.38.0 - 2026-11-19
+
+- **The UI limits each client:** `MORCA_UI_RATE` requests a minute (429), and data reads one at a time per client and `MORCA_UI_DATA_READS` at once (503); the Hetzner stack runs 8 workers at 120 a minute, and log lines start with the time. (#545)
+
 ## 0.37.0 - 2026-11-18
 
 - **No crawlers**: the UI serves a `robots.txt` that disallows everything, and marks each page `noindex`. (#542)

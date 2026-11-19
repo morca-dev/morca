@@ -1,1 +1,0 @@
-- **The UI limits each client:** `MORCA_UI_RATE` requests a minute (429), and data reads one at a time per client and `MORCA_UI_DATA_READS` at once (503); the Hetzner stack runs 8 workers at 120 a minute, and log lines start with the time. (#545)
