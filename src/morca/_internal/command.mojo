@@ -919,7 +919,7 @@ def _config_binaries(file: ProjectConfig) raises -> List[String]:
     var dir = getenv("MORCA_PIPELINES_DIR")
     if not dir:
         var full = absolute(file.path)
-        var slash = full.rfind("/")
+        var slash = full.rfind("/").or_else(-1)
         var beside = String(full[byte=:slash]) if slash > 0 else String("/")
         dir = String(beside, "/pipelines")
         if not exists(dir):

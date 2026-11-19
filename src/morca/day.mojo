@@ -17,7 +17,7 @@ struct Day(TimeKey):
     var day: Int
 
     @staticmethod
-    def parse(s: StringSlice) raises -> Day:
+    def parse(s: StringSpan) raises -> Day:
         """Reads `YYYY-MM-DD`."""
         var parts = s.split("-")
         if (

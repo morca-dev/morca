@@ -132,7 +132,7 @@ def load(mut ctx: Ctx, raw: RawFile) raises -> Loaded:
 
 def _partition(path: String) -> String:
     """A data file's partition directory, `.../data/pickup_month=2024-01`."""
-    var at = path.rfind("/")
+    var at = path.rfind("/").or_else(-1)
     return String(path[byte=0:at]) if at >= 0 else String()
 
 
@@ -160,7 +160,7 @@ def compact(mut ctx: Ctx, loads: Seq[Loaded]) raises -> Compacted:
     var groups = List[List[FileScanTask]]()
     for t in tasks:
         var p = _partition(t.data_file.file_path)
-        if String(p[byte = p.rfind("/") + 1 :]) not in mine:
+        if String(p[byte = p.rfind("/").or_else(-1) + 1 :]) not in mine:
             continue
         var g = -1
         for k in range(len(parts)):

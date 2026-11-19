@@ -203,7 +203,7 @@ def links(a: AlertRow) -> List[Link]:
                 out.append(Link(String("/pipelines/", url_encode(name)), name))
     if a.kind == "run-failed" and a.run == 0:
         # Recorded before its run was: the subject is `<run>/<start>`.
-        var slash = a.subject.find("/")
+        var slash = a.subject.find("/").or_else(-1)
         if slash > 0:
             var id = _int(String(a.subject[byte=:slash]))
             if id > 0:
@@ -215,7 +215,7 @@ def links(a: AlertRow) -> List[Link]:
     elif a.kind == "watchdog":
         out.append(Link("/watchdog", String("rule ", a.subject)))
     elif a.kind == "worker-lost":
-        var slash = a.subject.find("/")
+        var slash = a.subject.find("/").or_else(-1)
         if slash > 0:
             out.append(
                 Link(

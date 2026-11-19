@@ -39,8 +39,8 @@ struct Where(Copyable, Movable):
 
     @staticmethod
     def parse(text: String) raises -> Where:
-        var a = text.find(":")
-        var b = text.find(":", a + 1) if a >= 0 else -1
+        var a = text.find(":").or_else(-1)
+        var b = text.find(":", a + 1).or_else(-1) if a >= 0 else -1
         if a <= 0 or b < 0:
             raise Error(
                 (

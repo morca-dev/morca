@@ -45,7 +45,7 @@ def _now() -> Int:
     return Int(external_call["time", Int64](Int(0)))
 
 
-def _env_count(name: StringSlice, dflt: Int) -> Int:
+def _env_count(name: StringSpan, dflt: Int) -> Int:
     var raw = getenv(String(name))
     if not raw:
         return dflt
@@ -74,7 +74,7 @@ def is_data_read(url: String) -> Bool:
     `/datasets/<name>/data.csv` or `/datasets/<name>/data.json`."""
     if not url.startswith("/datasets/"):
         return False
-    var q = url.find("?")
+    var q = url.find("?").or_else(-1)
     var path = String(url[byte=:q]) if q >= 0 else url
     if path.endswith("/data.csv") or path.endswith("/data.json"):
         return True

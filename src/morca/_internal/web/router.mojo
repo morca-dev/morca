@@ -73,11 +73,11 @@ struct Call(Movable):
         self.session = String()
         self.address = String()
 
-    def query(self, name: StringSlice) -> String:
+    def query(self, name: StringSpan) -> String:
         """A query parameter's value, decoded, or empty."""
         return query_param(self.url, name)
 
-    def field(self, name: StringSlice) -> String:
+    def field(self, name: StringSpan) -> String:
         """A field of the form, decoded, or empty."""
         return query_param(String("?", self.form), name)
 
@@ -126,7 +126,7 @@ def auth(pattern: StaticString, handler: Endpoint) -> Route:
     return Route(GET | POST, pattern, AUTH, handler, "")
 
 
-def _segments(path: StringSlice) -> List[String]:
+def _segments(path: StringSpan) -> List[String]:
     var out = List[String]()
     var rest = path[byte=1:] if path.startswith("/") else path
     for s in rest.split("/"):

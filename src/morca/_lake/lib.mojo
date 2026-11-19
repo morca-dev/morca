@@ -316,49 +316,45 @@ def lake_table_refresh(h: Int, err: Int) abi("C") -> Int32:
 def lake_table_meta(h: Int, out_block: Int, err: Int) abi("C") -> Int32:
     """What `morca.tables.TableMeta` mirrors of the table's metadata, encoded
     in its order; 1 on error."""
-    try:
-        ref t = _table(h)[]
-        ref m = t.metadata
-        var e = Enc()
-        e.str(m.location)
-        e.str(t.metadata_location)
-        e.int(Int64(m.format_version))
-        e.str(m.table_uuid)
-        e.bool(m.has_current_snapshot)
-        e.int(m.current_snapshot_id)
-        e.int(Int64(m.current_schema_id))
-        e.int(Int64(m.default_spec_id))
-        e.int(Int64(m.default_sort_order_id))
-        e.int(m.last_updated_ms)
-        e.int(m.last_sequence_number)
-        e.map(m.properties)
-        e.int(Int64(len(m.schemas)))
-        for s in m.schemas:
-            e.int(Int64(s.schema_id))
-            e.str(s.to_json())
-        e.int(Int64(len(m.partition_specs)))
-        for p in m.partition_specs:
-            e.int(Int64(p.spec_id))
-            e.str(p.to_json())
-        e.int(Int64(len(m.snapshots)))
-        for s in m.snapshots:
-            e.int(s.snapshot_id)
-            e.bool(s.has_parent)
-            e.int(s.parent_snapshot_id)
-            e.int(s.sequence_number)
-            e.int(s.timestamp_ms)
-            e.str(s.manifest_list)
-            e.int(Int64(s.schema_id) if s.has_schema_id else -1)
-            e.map(s.summary)
-        e.int(Int64(len(m.metadata_log)))
-        for l in m.metadata_log:
-            e.int(l.timestamp_ms)
-            e.str(l.metadata_file)
-        give(out_block, Span(e.buf))
-        return 0
-    except e:
-        _fail(err, e)
-        return 1
+    ref t = _table(h)[]
+    ref m = t.metadata
+    var e = Enc()
+    e.str(m.location)
+    e.str(t.metadata_location)
+    e.int(Int64(m.format_version))
+    e.str(m.table_uuid)
+    e.bool(m.has_current_snapshot)
+    e.int(m.current_snapshot_id)
+    e.int(Int64(m.current_schema_id))
+    e.int(Int64(m.default_spec_id))
+    e.int(Int64(m.default_sort_order_id))
+    e.int(m.last_updated_ms)
+    e.int(m.last_sequence_number)
+    e.map(m.properties)
+    e.int(Int64(len(m.schemas)))
+    for s in m.schemas:
+        e.int(Int64(s.schema_id))
+        e.str(s.to_json())
+    e.int(Int64(len(m.partition_specs)))
+    for p in m.partition_specs:
+        e.int(Int64(p.spec_id))
+        e.str(p.to_json())
+    e.int(Int64(len(m.snapshots)))
+    for s in m.snapshots:
+        e.int(s.snapshot_id)
+        e.bool(s.has_parent)
+        e.int(s.parent_snapshot_id)
+        e.int(s.sequence_number)
+        e.int(s.timestamp_ms)
+        e.str(s.manifest_list)
+        e.int(Int64(s.schema_id) if s.has_schema_id else -1)
+        e.map(s.summary)
+    e.int(Int64(len(m.metadata_log)))
+    for l in m.metadata_log:
+        e.int(l.timestamp_ms)
+        e.str(l.metadata_file)
+    give(out_block, Span(e.buf))
+    return 0
 
 
 # ── reading ─────────────────────────────────────────────────────────────────

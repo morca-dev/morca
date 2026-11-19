@@ -20,7 +20,7 @@ struct Hour(TimeKey):
     var hour: Int
 
     @staticmethod
-    def parse(s: StringSlice) raises -> Hour:
+    def parse(s: StringSpan) raises -> Hour:
         """Reads `YYYY-MM-DDTHH`."""
         var parts = s.split("T")
         if len(parts) != 2 or parts[1].byte_length() != 2:

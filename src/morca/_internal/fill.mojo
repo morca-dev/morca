@@ -181,7 +181,7 @@ def parse_fill_budget(v: String) raises -> Float64:
 def parse_fill_window(v: String) raises -> Tuple[Int, Int]:
     """`A..B`: fill runs start from hour A up to (not at) hour B, UTC; A
     after B wraps past midnight (`22..6`); `0..24` is all day."""
-    var dots = v.find("..")
+    var dots = v.find("..").or_else(-1)
     if dots > 0:
         try:
             var a = Int(v[byte=:dots])

@@ -12,7 +12,7 @@ command line takes for time keys.
 
 trait Key(Copyable, Deinitable, Equatable, Movable, Writable):
     @staticmethod
-    def parse(s: StringSlice) raises -> Self:
+    def parse(s: StringSpan) raises -> Self:
         """Reads the key as `write_to` writes it, and nothing else."""
         ...
 
@@ -39,7 +39,7 @@ trait TimeKey(Key):
 
 def parse_keys[
     K: TimeKey
-](s: StringSlice, first: StringSlice = "") raises -> List[K]:
+](s: StringSpan, first: StringSpan = "") raises -> List[K]:
     """Reads a key, `A..B` (both ends included), or a comma-separated list of
     either, in the order given. A key given twice, or one before `first`
     (when given), is an error."""

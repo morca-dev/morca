@@ -131,7 +131,7 @@ keyed pipeline's `owner/repository`, say) ends in an ellipsis, whole in
 the tooltip."""
 
 
-def _key_text(key: StringSlice) -> String:
+def _key_text(key: StringSpan) -> String:
     """`key`, cut to `_KEY_CHARS` with an ellipsis if longer."""
     if key.count_codepoints() <= _KEY_CHARS:
         return String(key)

@@ -518,7 +518,7 @@ struct RunsQuery(Copyable, Movable):
         self._filters(q)
         for pair in q.split("&"):
             var p = String(pair.removeprefix("?"))
-            var eq = p.find("=")
+            var eq = p.find("=").or_else(-1)
             if eq > 0 and String(p[byte=:eq]) != "pipeline":
                 out.append(
                     (String(p[byte=:eq]), url_decode(p[byte = eq + 1 :]))
@@ -546,7 +546,7 @@ struct RunsQuery(Copyable, Movable):
         )
 
 
-def _digits(s: StringSlice, start: Int, n: Int) -> Bool:
+def _digits(s: StringSpan, start: Int, n: Int) -> Bool:
     var b = s.as_bytes()
     if start + n > len(b):
         return False
@@ -556,7 +556,7 @@ def _digits(s: StringSlice, start: Int, n: Int) -> Bool:
     return True
 
 
-def _number(s: StringSlice, start: Int, n: Int) -> Int:
+def _number(s: StringSpan, start: Int, n: Int) -> Int:
     """The `n` digits at `start` as a number (`_digits` says they are)."""
     var b = s.as_bytes()
     var v = 0
@@ -802,7 +802,7 @@ def timeline_path(mut db: State, r: RunRow) raises -> String:
         var log = found.value()
         var d = log
         for _ in range(3):
-            var at = d.rfind("/")
+            var at = d.rfind("/").or_else(-1)
             if at < 0:
                 break
             var up = String(d[byte=:at])

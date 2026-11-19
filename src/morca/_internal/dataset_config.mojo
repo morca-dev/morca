@@ -69,11 +69,11 @@ def _tables(doc: TomlDoc) -> List[Tuple[String, List[String]]]:
 
 
 def _name_problem(name: String) -> String:
-    var dot = name.find(".")
+    var dot = name.find(".").or_else(-1)
     if (
         dot <= 0
         or dot == name.byte_length() - 1
-        or name.find(".", dot + 1) >= 0
+        or name.find(".", dot + 1).or_else(-1) >= 0
     ):
         return String(
             'a dataset is named namespace.table ([datasets."ns.table"]), not ',

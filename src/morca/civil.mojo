@@ -87,7 +87,7 @@ def utc(
     return Civil(year, month, day, hour, minute, 0).seconds()
 
 
-def parse_time(s: StringSlice) raises -> Int64:
+def parse_time(s: StringSpan) raises -> Int64:
     """Reads `YYYY-MM-DDTHH:MM[:SS]Z`, a UTC time, or a number of seconds
     since the epoch."""
     var text = String(s)

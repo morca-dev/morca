@@ -16,7 +16,7 @@ struct Month(TimeKey):
     var month: Int
 
     @staticmethod
-    def parse(s: StringSlice) raises -> Month:
+    def parse(s: StringSpan) raises -> Month:
         """Reads `YYYY-MM`."""
         var parts = s.split("-")
         if len(parts) != 2 or parts[0].byte_length() != 4:
@@ -75,7 +75,7 @@ def days_in(year: Int, month: Int) -> Int:
     return 31
 
 
-def parse_months(s: StringSlice) raises -> List[Month]:
+def parse_months(s: StringSpan) raises -> List[Month]:
     """Reads `YYYY-MM`, `YYYY-MM..YYYY-MM` (both ends included), or a
     comma-separated list of either, in the order given."""
     return parse_keys[Month](s)

@@ -329,7 +329,7 @@ def _partitions_shape(text: String) -> Bool:
     ):
         return False
     try:
-        _ = Int(text[byte = text.rfind(" ") + 1 :])
+        _ = Int(text[byte = text.rfind(" ").or_else(-1) + 1 :])
         return True
     except:
         return False

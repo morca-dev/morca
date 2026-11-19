@@ -108,7 +108,7 @@ comptime ROBOTS = "/robots.txt"
 
 
 def _path_of(url: String) -> String:
-    var q = url.find("?")
+    var q = url.find("?").or_else(-1)
     return String(url[byte=:q]) if q >= 0 else url
 
 
@@ -159,7 +159,7 @@ def _run_of(location: String, path: String) -> Int:
     for p in [location, path]:
         if p.startswith("/runs/"):
             var rest = p[byte=6:]
-            var end = rest.find("/")
+            var end = rest.find("/").or_else(-1)
             try:
                 return Int(rest[byte=:end] if end >= 0 else rest)
             except:

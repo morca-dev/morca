@@ -76,7 +76,7 @@ struct Keyed[dataset_: StaticString, column_: StaticString](Partitions):
         return Self.column_
 
     @staticmethod
-    def parse(s: StringSlice, check: Bool) raises -> List[Name]:
+    def parse(s: StringSpan, check: Bool) raises -> List[Name]:
         if s == "@all":
             var out = List[Name]()
             for k in Self.keys()[1]:

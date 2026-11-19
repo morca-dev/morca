@@ -25,13 +25,13 @@ from morca._internal.json import quote
 
 def function_key(name: String) -> String:
     """`module::fn`, without the arguments describe writes after it."""
-    var paren = name.find("(")
+    var paren = name.find("(").or_else(-1)
     return String(name[byte=:paren]) if paren >= 0 else name
 
 
 def _module_file(key: String) -> String:
     """`a::b::fn` -> `a/b.mojo`; "" for a name without a module."""
-    var at = key.rfind("::")
+    var at = key.rfind("::").or_else(-1)
     if at < 0:
         return ""
     return String(key[byte=:at].replace("::", "/"), ".mojo")
@@ -44,7 +44,7 @@ def _def_line(text: String, fn_name: String) -> Int:
     var at = 0
     var n = text.byte_length()
     while at < n:
-        var end = text.find("\n", at)
+        var end = text.find("\n", at).or_else(-1)
         if end < 0:
             end = n
         var l = String(text[byte=at:end])
@@ -68,7 +68,7 @@ def _pipeline_line(text: String, name: String) -> Int:
     var want = String('"', name, '"')
     var at = 0
     while True:
-        var p = text.find("Pipeline[", at)
+        var p = text.find("Pipeline[", at).or_else(-1)
         if p < 0:
             return 0
         var q = p + 9
@@ -144,7 +144,7 @@ def locate(describe: String, root: String) raises -> String:
         var want = _module_file(key)
         if not want:
             continue
-        var fn_name = String(key[byte = key.rfind("::") + 2 :])
+        var fn_name = String(key[byte = key.rfind("::").or_else(-1) + 2 :])
         for f in files:
             if f != want and not f.endswith(String("/", want)):
                 continue

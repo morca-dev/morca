@@ -102,7 +102,7 @@ def target() raises -> Target:
     var url = base
     var secret = getenv("MORCA_NOTIFY_SECRET")
     if secret:
-        var topic = String()
+        var topic: String
         try:
             topic = String(fetch_secret(secret).strip())
         except:
@@ -172,7 +172,7 @@ def post(
     http.follow_redirects = False
     http.verify_tls = True
     http.timeout_ms = _number("MORCA_NOTIFY_TIMEOUT_MS", 5000)
-    var status = 0
+    var status: Int
     try:
         status = http.request("POST", t.url, h, body.as_bytes()).status
     except:

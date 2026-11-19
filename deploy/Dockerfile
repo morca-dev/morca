@@ -22,8 +22,8 @@
 # pixi's -bookworm image, not its default (Ubuntu): the build stage then
 # installs from Debian's mirrors, the same release as the runtime stage.
 FROM ghcr.io/prefix-dev/pixi:0.78.0-bookworm AS build
-ARG DISTA_REV=bc35e01ec26a9b29cdcdcb50d7757441ad99f0df
-ARG K8S_REV=ab456806084467af45e9a50432c27aaade4f4338
+ARG DISTA_REV=628025da9e280aa07f670c681d0acd5c5f4807f1
+ARG K8S_REV=831f1ebde96d35351e1ea509f2514ecb858fc166
 ARG PIPELINES="examples/toy.mojo examples/fanout.mojo"
 RUN apt-get update && apt-get install -y --no-install-recommends gcc libc6-dev git ca-certificates \
     && rm -rf /var/lib/apt/lists/*

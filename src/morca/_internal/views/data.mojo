@@ -39,7 +39,7 @@ comptime GRACE_SECONDS = 5.0
 checks the limit between batches, and stops by itself."""
 
 
-def _env_int(name: StringSlice, dflt: Int) -> Int:
+def _env_int(name: StringSpan, dflt: Int) -> Int:
     try:
         var v = getenv(String(name))
         return Int(v) if v else dflt
@@ -47,7 +47,7 @@ def _env_int(name: StringSlice, dflt: Int) -> Int:
         return dflt
 
 
-def _env_float(name: StringSlice, dflt: Float64) -> Float64:
+def _env_float(name: StringSpan, dflt: Float64) -> Float64:
     try:
         var v = getenv(String(name))
         return Float64(v) if v else dflt
@@ -211,8 +211,8 @@ struct DataQuery(Copyable, Movable):
 
 def filter_problem(f: String) -> String:
     """Why `f` isn't a `COLUMN:OP:VALUE` filter, or empty."""
-    var a = f.find(":")
-    var b = f.find(":", a + 1) if a >= 0 else -1
+    var a = f.find(":").or_else(-1)
+    var b = f.find(":", a + 1).or_else(-1) if a >= 0 else -1
     if a <= 0 or b < 0:
         return String(
             (

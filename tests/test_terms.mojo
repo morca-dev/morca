@@ -38,8 +38,8 @@ def test_docs_vocabulary() raises:
     var doc: String
     with open(DOC, "r") as f:
         doc = f.read()
-    var begin = doc.find(VOCABULARY_BEGIN)
-    var end = doc.find(VOCABULARY_END)
+    var begin = doc.find(VOCABULARY_BEGIN).or_else(-1)
+    var end = doc.find(VOCABULARY_END).or_else(-1)
     assert_true(begin >= 0 and end > begin, String(DOC, " has no markers"))
     end += StaticString(VOCABULARY_END).byte_length()
     var want = vocabulary_markdown()

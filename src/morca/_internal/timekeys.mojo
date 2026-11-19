@@ -9,7 +9,7 @@ from morca.month import Month
 from morca.week import Week
 
 
-def is_time_kind(kind: StringSlice) -> Bool:
+def is_time_kind(kind: StringSpan) -> Bool:
     """Whether `kind` is a calendar's: `monthly`, `weekly`, `daily` or
     `hourly`."""
     return (
@@ -20,7 +20,7 @@ def is_time_kind(kind: StringSlice) -> Bool:
     )
 
 
-def unit_of(kind: StringSlice) -> String:
+def unit_of(kind: StringSpan) -> String:
     """`month`, `week`, `day` or `hour`; `key` for any other kind."""
     if kind == "monthly":
         return "month"
@@ -33,7 +33,7 @@ def unit_of(kind: StringSlice) -> String:
     return "key"
 
 
-def example_of(kind: StringSlice) -> String:
+def example_of(kind: StringSpan) -> String:
     """A key of `kind`, for help texts."""
     if kind == "hourly":
         return "2024-01-01T00"
@@ -45,7 +45,7 @@ def example_of(kind: StringSlice) -> String:
 
 
 def parse_time_keys(
-    kind: StringSlice, s: StringSlice, first: StringSlice = ""
+    kind: StringSpan, s: StringSpan, first: StringSpan = ""
 ) raises -> List[String]:
     """`parse_keys` for the key type of `kind` (monthly for any other), as
     text."""
@@ -66,7 +66,7 @@ def parse_time_keys(
 
 
 def containing_key(
-    kind: StringSlice, year: Int, month: Int, day: Int, hour: Int
+    kind: StringSpan, year: Int, month: Int, day: Int, hour: Int
 ) -> String:
     """The key of `kind` (monthly for any other) a date and hour fall in."""
     if kind == "hourly":
@@ -78,7 +78,7 @@ def containing_key(
     return String(Month(year, month))
 
 
-def prev_key(kind: StringSlice, key: StringSlice) raises -> String:
+def prev_key(kind: StringSpan, key: StringSpan) raises -> String:
     """The key before `key`, of `kind` (monthly for any other)."""
     if kind == "hourly":
         return String(Hour.parse(key).prev())

@@ -109,12 +109,12 @@ def stage_of(location: String) -> String:
     var root = getenv("MORCA_LOG_STAGE")
     if not root:
         root = String(getenv("TMPDIR", "/tmp").rstrip("/"), "/morca-logs")
-    var rel = location[byte = location.find("://") + 3 :]
+    var rel = location[byte = location.find("://").or_else(-1) + 3 :]
     return String(root, "/", rel)
 
 
 def _parent(path: String) -> String:
-    var at = path.rfind("/")
+    var at = path.rfind("/").or_else(-1)
     return String(path[byte=:at]) if at > 0 else String(".")
 
 

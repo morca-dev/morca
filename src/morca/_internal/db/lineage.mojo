@@ -74,7 +74,7 @@ def _made(
         var text = r.text("inputs")
         if text:
             for part in text.split(","):
-                var at = part.rfind("@")
+                var at = part.rfind("@").or_else(-1)
                 inputs.append(
                     SnapshotRef(
                         String(part[byte=:at]),
@@ -272,7 +272,7 @@ struct SnapshotCursor(ImplicitlyCopyable, Movable, Writable):
     @staticmethod
     def parse(s: String) -> SnapshotCursor:
         """`<attempt>.<snapshot>`, or none if it isn't one."""
-        var dot = s.find(".")
+        var dot = s.find(".").or_else(-1)
         if dot <= 0:
             return SnapshotCursor(0, 0)
         try:

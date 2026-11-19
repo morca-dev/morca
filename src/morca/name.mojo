@@ -34,7 +34,7 @@ def _name_byte(b: Byte) -> Bool:
 comptime _NAME_BYTES = "A-Z a-z 0-9 . _ : - /"
 
 
-def path_segment(name: StringSlice) -> String:
+def path_segment(name: StringSpan) -> String:
     """`name` as one segment of a path: each `/` written `%2F`. A name holds
     no `%`, so this can't collide with another name."""
     return String(name).replace("/", "%2F")
@@ -48,7 +48,7 @@ struct Name(Key):
         self.text = text^
 
     @staticmethod
-    def parse(s: StringSlice) raises -> Name:
+    def parse(s: StringSpan) raises -> Name:
         var b = s.as_bytes()
         if len(b) == 0 or len(b) > MAX_NAME:
             raise Error(
@@ -96,7 +96,7 @@ struct Name(Key):
         writer.write(self.text)
 
 
-def parse_names(s: StringSlice) raises -> List[Name]:
+def parse_names(s: StringSpan) raises -> List[Name]:
     """A comma-separated list of names, each once. A range is refused."""
     if ".." in s:
         raise Error(

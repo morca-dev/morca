@@ -107,7 +107,7 @@ def _stall_of(words: List[String], line: String) raises -> Stall:
     var seen = 0
     for i in range(1, len(words)):
         ref w = words[i]
-        var eq = w.find("=")
+        var eq = w.find("=").or_else(-1)
         if eq < 0:
             raise Error("not a PSI line: ", line)
         var key = String(w[byte=:eq])
@@ -279,7 +279,7 @@ def cgroup_dirs(rel: String, root: String = CGROUP_ROOT) -> List[String]:
     var r = String(rel.strip().rstrip("/"))
     while r:
         out.append(String(root, r))
-        var slash = r.rfind("/")
+        var slash = r.rfind("/").or_else(-1)
         if slash <= 0:
             break
         var parent = String(r[byte=:slash])

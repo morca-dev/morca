@@ -131,7 +131,7 @@ def _colour(name: String) -> Int:
     """The same colour for a task's name every time."""
     var h = UInt64(14695981039346656037)
     # Only the function, not its arguments: `fanout::trips(…)`.
-    var paren = name.find("(")
+    var paren = name.find("(").or_else(-1)
     var fn_name = name if paren < 0 else String(name[byte=:paren])
     for b in fn_name.as_bytes():
         h = (h ^ UInt64(b)) * 1099511628211

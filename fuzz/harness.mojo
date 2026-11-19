@@ -36,7 +36,7 @@ def run_harness[
 ](name: StaticString, seeds: List[List[UInt8]], max_len: Int = 1024) raises:
     var replay = getenv("FUZZ_REPLAY")
     if replay:
-        var data = List[UInt8]()
+        var data: List[UInt8]
         with open(replay, "r") as f:
             data = f.read_bytes()
         target(data)
@@ -54,7 +54,7 @@ def run_harness[
     )
 
 
-def bytes_of(s: StringSlice) -> List[UInt8]:
+def bytes_of(s: StringSpan) -> List[UInt8]:
     var out = List[UInt8]()
     for b in s.as_bytes():
         out.append(b)

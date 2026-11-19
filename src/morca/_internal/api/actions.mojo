@@ -498,7 +498,7 @@ def bulk(mut db: State, call: Call) raises -> Page:
     )
     if what == "backfill":
         to.write("&queued=", b.queued)
-    return Page(303, j^, String(), location=to^)
+    return Page(303, j^, String(), location=to)
 
 
 def _verb(what: String) -> String:

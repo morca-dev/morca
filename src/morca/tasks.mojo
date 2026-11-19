@@ -93,7 +93,7 @@ def _accepts(host: String, port: Int) raises -> Bool:
 def wait_for_head(addr: String, timeout_s: Float64) raises:
     """Returns once the dista head at `host:port` accepts a connection;
     raises after `timeout_s` seconds."""
-    var colon = addr.rfind(":")
+    var colon = addr.rfind(":").or_else(-1)
     if colon <= 0:
         raise Error("morca: DISTA_HEAD is host:port, not ", addr)
     var host = String(addr[byte=:colon])

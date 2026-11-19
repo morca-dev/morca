@@ -62,7 +62,7 @@ def concurrency_text(key: String, limit: Int) -> String:
 
 def parse_concurrency(text: String) raises -> Tuple[String, Int]:
     """`concurrency_text`'s key and limit, checked."""
-    var colon = text.rfind(":")
+    var colon = text.rfind(":").or_else(-1)
     if colon <= 0:
         raise Error('is { key = "...", limit = N }, not ', text)
     var key = String(text[byte=:colon])

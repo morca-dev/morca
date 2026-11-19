@@ -68,11 +68,11 @@ def bearer(authorization: String) -> String:
     return String(a[byte=7:].strip())
 
 
-def cookie(req: Request, name: StringSlice) -> String:
+def cookie(req: Request, name: StringSpan) -> String:
     """A cookie the request sent, or empty."""
     for part in req.headers.get("Cookie").split(";"):
         var kv = part.strip()
-        var eq = kv.find("=")
+        var eq = kv.find("=").or_else(-1)
         if eq > 0 and kv[byte=:eq] == name:
             return String(kv[byte = eq + 1 :])
     return ""
@@ -109,7 +109,7 @@ def content_type(req: Request) -> String:
     """The request's media type, lower case, without its parameters, which
     a cross-site page may set however it likes."""
     var t = req.headers.get("Content-Type")
-    var semi = t.find(";")
+    var semi = t.find(";").or_else(-1)
     var essence = String(t[byte=:semi]) if semi >= 0 else t
     return String(essence.strip()).lower()
 
@@ -171,7 +171,8 @@ def same_origin(req: Request) raises -> Bool:
     if not referer:
         return False
     # The Referer's origin is what comes before the path's first '/'.
-    var rest = referer.find("/", referer.find("://") + 3)
+    var path_from = referer.find("://").or_else(-1) + 3
+    var rest = referer.find("/", path_from).or_else(-1)
     var ref_origin = String(referer[byte=:rest]) if rest >= 0 else referer
     return _without_default_port(ref_origin) == own
 

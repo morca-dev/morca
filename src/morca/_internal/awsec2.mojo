@@ -63,10 +63,10 @@ def _between(xml: String, tag: String, start: Int = 0) -> Tuple[String, Int]:
     closing tag ends; ("", -1) if there's none."""
     var open = String("<", tag, ">")
     var close = String("</", tag, ">")
-    var a = xml.find(open, start)
+    var a = xml.find(open, start).or_else(-1)
     if a < 0:
         return (String(), -1)
-    var b = xml.find(close, a)
+    var b = xml.find(close, a).or_else(-1)
     if b < 0:
         return (String(), -1)
     return (
@@ -92,7 +92,7 @@ def parse_instances(xml: String) -> List[Instance]:
     var marks = List[Int]()
     var at = 0
     while True:
-        var i = xml.find("<instanceId>", at)
+        var i = xml.find("<instanceId>", at).or_else(-1)
         if i < 0:
             break
         marks.append(i)
@@ -101,9 +101,9 @@ def parse_instances(xml: String) -> List[Instance]:
         var end = marks[k + 1] if k + 1 < len(marks) else xml.byte_length()
         var item = String(xml[byte = marks[k] : end])
         var tags = Dict[String, String]()
-        var ts = item.find("<tagSet>")
+        var ts = item.find("<tagSet>").or_else(-1)
         if ts >= 0:
-            var te = item.find("</tagSet>", ts)
+            var te = item.find("</tagSet>", ts).or_else(-1)
             var t = ts
             while True:
                 var key = _between(item, "key", t)
@@ -113,11 +113,11 @@ def parse_instances(xml: String) -> List[Instance]:
                 tags[key[0]] = value[0]
                 t = value[1] if value[1] > 0 else key[1]
         var state = String()
-        var si = item.find("<instanceState>")
+        var si = item.find("<instanceState>").or_else(-1)
         if si >= 0:
             state = _between(item, "name", si)[0]
         var reason = String()
-        var ri = item.find("<stateReason>")
+        var ri = item.find("<stateReason>").or_else(-1)
         if ri >= 0:
             reason = _between(item, "code", ri)[0]
         out.append(
@@ -157,7 +157,9 @@ struct Ec2(Movable):
                 String("https://ec2.", self.region, ".amazonaws.com"),
             ).rstrip("/")
         )
-        var h = self.endpoint[byte = self.endpoint.find("://") + 3 :]
+        var h = self.endpoint[
+            byte = self.endpoint.find("://").or_else(-1) + 3 :
+        ]
         self.host = String(h)
         self.http = HttpClient()
 

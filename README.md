@@ -17,7 +17,8 @@ lineage of datasets, and starts, resumes, reruns, backfills, cancels and
 rebuilds through it.
 ## Install
 
-morca is the mojoshelf tin `morca-mojo`, built for Mojo 1.2:
+morca is the mojoshelf tin `morca-mojo`, built for the Mojo 1.3 nightly
+(`mojo-compiler ==1.3.0.dev2026111805`, which a project pins too):
 
 ```sh
 pixi init lake && cd lake

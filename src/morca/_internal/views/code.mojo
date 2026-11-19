@@ -93,7 +93,7 @@ def code_links(
                 out.steps[fn_step[key]] = at^
             else:
                 out.tasks.append(
-                    (String(key[byte = key.rfind("::") + 2 :]), at^)
+                    (String(key[byte = key.rfind("::").or_else(-1) + 2 :]), at^)
                 )
     except:
         pass

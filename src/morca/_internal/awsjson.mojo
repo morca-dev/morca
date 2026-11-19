@@ -36,7 +36,7 @@ def aws_json(
             String("https://", service, ".", region, ".amazonaws.com"),
         ).rstrip("/")
     )
-    var host = String(endpoint[byte = endpoint.find("://") + 3 :])
+    var host = String(endpoint[byte = endpoint.find("://").or_else(-1) + 3 :])
     var cred = S3Credentials(
         getenv("AWS_ACCESS_KEY_ID"),
         getenv("AWS_SECRET_ACCESS_KEY"),

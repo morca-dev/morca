@@ -55,7 +55,7 @@ from morca._internal.timekeys import parse_time_keys
 from morca._internal.warehouse import Sensed
 
 
-def key_kind(key: StringSlice) -> String:
+def key_kind(key: StringSpan) -> String:
     """`monthly` for a `YYYY-MM` key, `weekly` for `YYYY-Www`, `daily` for
     `YYYY-MM-DD`, `hourly` for `YYYY-MM-DDTHH`, or empty."""
     if key.byte_length() == 7:
@@ -69,7 +69,7 @@ def key_kind(key: StringSlice) -> String:
     return ""
 
 
-def split_keys(s: StringSlice) -> List[String]:
+def split_keys(s: StringSpan) -> List[String]:
     """Comma-separated keys, without blanks."""
     var out = List[String]()
     for part in s.split(","):
@@ -176,7 +176,7 @@ def join_keys(keys: List[String]) -> String:
     return out^
 
 
-def parse_sense(text: StringSlice) raises -> List[Sensed]:
+def parse_sense(text: StringSpan) raises -> List[Sensed]:
     """What `<binary> sense` printed, a line per dataset."""
     var out = List[Sensed]()
     for line in text.splitlines():
