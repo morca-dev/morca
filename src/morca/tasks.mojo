@@ -20,6 +20,16 @@ set, `morca_main` hands the process to dista before reading its arguments.
 The runtime starts before morca opens a database connection or its heartbeat
 thread, so the forked head and workers inherit neither.
 
+On macOS a local runtime initialises libcurl (objectstore's
+`curl_global_init`) before it forks (#135). The process has threads by
+then, and in the child of a process with threads the Objective-C runtime
+crashes any class's first `+initialize`, which libcurl's macOS setup
+(`Curl_macos_init`, loading SystemConfiguration) runs. Done in the driver,
+the classes are initialised once, before the fork, and the head and workers
+inherit them: a task's first S3 request no longer crashes its worker. curl
+asks for exactly this (`curl_global_init` before `fork`). Linux needs
+nothing, and a cluster's head and workers are started, not forked.
+
 A driver or worker given `DISTA_HEAD` first waits until the head accepts a
 connection (`wait_for_head`), trying for a second at a time. On Kubernetes
 the head's Service can be a moment old: a connection sent before the node
@@ -31,10 +41,11 @@ gets a fresh entry.
 from std.ffi import c_int, c_uint, external_call
 from std.memory import stack_allocation
 from std.os import getenv
-from std.sys.info import platform_map
+from std.sys.info import CompilationTarget, platform_map
 from std.time import perf_counter_ns, sleep
 
 from dista import Runtime, TaskLike
+from objectstore.http import free_connection_pool, new_connection_pool
 from dista.socket import (
     AF_INET,
     POLLOUT,
@@ -111,6 +122,16 @@ def wait_for_head(addr: String, timeout_s: Float64) raises:
         sleep(0.25)
 
 
+def init_curl_before_fork():
+    """Initialises libcurl, through objectstore, before a local runtime forks
+    (#135, the module's docstring). Without objectstore's library there's no
+    libcurl to initialise, and nothing to do."""
+    try:
+        free_connection_pool(new_connection_pool())
+    except:
+        pass
+
+
 trait TaskSet:
     """The tasks a pipeline registers with dista."""
 
@@ -149,6 +170,9 @@ struct Tasks[*Ts: TaskLike](TaskSet):
             wait_for_head(
                 head, Float64(getenv("MORCA_HEAD_WAIT_SECONDS", "300"))
             )
+        comptime if CompilationTarget.is_macos():
+            if not head and not getenv("DISTA_ROLE"):
+                init_curl_before_fork()
         return Self.RT(workers=workers)
 
     @staticmethod
