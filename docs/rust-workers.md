@@ -23,10 +23,10 @@ Step[..., writes=["demo.numbers"]]
 ```
 
 [examples/rust-worker](../examples/rust-worker) is a complete one, run in
-CI by `pixi run -e rust test-rust-worker` (tests/rust_worker.sh), and
+CI by `pixi run -e data test-rust-worker` (tests/rust_worker.sh), and
 [examples/hindcast](../examples/hindcast) a real one: a Rust worker that
 fetches and decodes NOAA's GFS forecasts with crates.io crates, then Mojo
-steps that score them (`pixi run -e rust test-hindcast`). The
+steps that score them (`pixi run -e data test-hindcast`). The
 `morca-worker` crate, in [rust/morca-worker](../rust/morca-worker), is the
 Rust side: a worker author writes only safe Rust.
 

@@ -30,7 +30,6 @@ def step_cards_of(
     """Each step's card (`morca._internal.ui.step_cards`); with `recent`, what its
     attempts in the pipeline's latest `STEP_RUNS` runs did: how many failed,
     the p50 and most its succeeded ones took, and its peak memory's."""
-    var got = Dict[String, StepCard]()
     var out = List[StepCard]()
     for d in defs:
         var at = links.step(d.name)

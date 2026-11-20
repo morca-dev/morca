@@ -1,0 +1,2 @@
+- **morca-mojo requires Mojo 1.3.0.dev2026111805:** it is built with that Mojo 1.3 nightly instead of 1.2.0, so a project pins `mojo-compiler = "==1.3.0.dev2026111805"` to add it. (#550)
+- **The Rust tests run in the data environment:** `pixi run -e data test-rust-worker` (and `test-hindcast`, `test-rust-sdk`); the `rust` environment now holds only the Rust toolchain, which scripts/cargo.sh runs cargo in, since conda-forge's `rust` overwrites the Mojo nightly's libLLVM on macOS. (#550)

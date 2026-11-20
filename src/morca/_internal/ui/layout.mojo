@@ -602,7 +602,7 @@ def _extra_links(mut h: Html):
     `label=url` entries separated by commas, e.g. `Census ↗=https://...`.
     Entries without an http(s) url are left out."""
     for entry in comma_list(getenv("MORCA_UI_LINKS")):
-        var eq = entry.find("=")
+        var eq = entry.find("=").or_else(-1)
         if eq <= 0:
             continue
         var label = String(entry[byte=:eq].strip())
@@ -862,7 +862,7 @@ def help_tip(
     h.help(id, key, text, docs)
 
 
-def _strip_tags(s: StringSlice) -> String:
+def _strip_tags(s: StringSpan) -> String:
     """`s`'s text: its tags dropped, and a sort arrow (▲ ▼)."""
     var out = String()
     var inside = False
@@ -885,11 +885,11 @@ def with_header_help(html: String, prefix: String) -> String:
     var at = 0
     var n = 0
     while True:
-        var open = html.find("<th", at)
+        var open = html.find("<th", at).or_else(-1)
         if open < 0:
             break
-        var gt = html.find(">", open)
-        var close = html.find("</th>", open)
+        var gt = html.find(">", open).or_else(-1)
+        var close = html.find("</th>", open).or_else(-1)
         if gt < 0 or close < 0 or gt > close:
             break
         # Only <th> and <th ...>, not <thead>.
@@ -901,9 +901,9 @@ def with_header_help(html: String, prefix: String) -> String:
         var tag = String(html[byte=open:gt])
         var inner = String(html[byte = gt + 1 : close])
         var table = String()
-        var dh = tag.find('data-help="')
+        var dh = tag.find('data-help="').or_else(-1)
         if dh >= 0:
-            var q = tag.find('"', dh + 11)
+            var q = tag.find('"', dh + 11).or_else(-1)
             table = String(tag[byte = dh + 11 : q])
         var label = _strip_tags(inner)
         var text = header_help(label, table)

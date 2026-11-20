@@ -92,9 +92,9 @@ def remote_url(given: String) raises -> String:
     var u = String(given.strip())
     if not u:
         raise Error("morca: no UI to go to (--remote <url>, or MORCA_REMOTE)")
-    if u.find("://") < 0:
+    if "://" not in u:
         u = String("https://", u)
-    var sep = u.find("://")
+    var sep = u.find("://").or_else(-1)
     var scheme = String(u[byte=:sep]).lower()
     var rest = String(u[byte = sep + 3 :])
     if rest.endswith("/"):
@@ -120,8 +120,8 @@ def remote_url(given: String) raises -> String:
         raise Error("morca: no host in ", given)
     # The host is what comes before the port: after `]` for an IPv6 one.
     var host = authority
-    var close = authority.find("]")
-    var colon = authority.rfind(":")
+    var close = authority.find("]").or_else(-1)
+    var colon = authority.rfind(":").or_else(-1)
     if colon > close:
         var port = String(authority[byte = colon + 1 :])
         host = String(authority[byte=:colon])
@@ -163,7 +163,7 @@ def remote_target(mut args: List[String]) raises -> String:
             _ = args.pop(1)
             _ = args.pop(1)
         elif a.startswith("--remote=") or a.startswith("--url="):
-            given = String(a[byte = a.find("=") + 1 :])
+            given = String(a[byte = a.find("=").or_else(-1) + 1 :])
             _ = args.pop(1)
     if not given:
         given = getenv("MORCA_REMOTE", getenv("MORCA_URL"))
@@ -468,7 +468,7 @@ def _hostname() -> String:
     var n = 0
     while n < 255 and buf[n] != 0:
         n += 1
-    return String(StringSlice(unsafe_from_utf8=Span(buf)[0:n]))
+    return String(StringSpan(unsafe_from_utf8=Span(buf)[0:n]))
 
 
 def login_command(args: List[String], target: String) raises -> Int:

@@ -45,4 +45,4 @@ cargo build --release && morca register target/release/days
 
 docs/rust-pipelines.md in the morca repository is the guide, including what
 version 1 leaves out. examples/toy-rust is examples/toy.mojo rebuilt with
-it; `pixi run -e rust test-rust-sdk` runs both under one scheduler.
+it; `pixi run -e data test-rust-sdk` runs both under one scheduler.

@@ -313,7 +313,7 @@ def _watch(arg: OpaquePtr) -> OpaquePtr:
     )[]
     while not done.is_set():
         if stop_when():
-            _flag(base)[].store[ordering=Ordering.RELEASE](1)
+            _flag(base)[].store[ordering=Ordering.release](1)
         sleep(0.05)
     return arg
 
@@ -416,7 +416,7 @@ struct WorkerCall[mut: Bool, //, origin: Origin[mut=mut]](Movable):
 
     def stopping(self) -> Bool:
         """Whether the stop flag is set."""
-        return _flag(self.watch)[].load[ordering=Ordering.ACQUIRE]() != 0
+        return _flag(self.watch)[].load[ordering=Ordering.acquire]() != 0
 
     def take_files(mut self) -> List[String]:
         """The files reported since the last call, in order."""

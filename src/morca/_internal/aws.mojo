@@ -106,7 +106,7 @@ def _q(s: String) -> String:
 def env_problem(kv: String) -> String:
     """Why `kv` can't be one of the control instance's settings
     (`--env KEY=VALUE`, the stack's `ControlEnv`), or empty if it can."""
-    var eq = kv.find("=")
+    var eq = kv.find("=").or_else(-1)
     if eq <= 0:
         return String("is KEY=VALUE, not ", kv)
     var key = String(kv[byte=:eq])
@@ -347,10 +347,10 @@ def lock_morca_version(lock: String) -> String:
         if line.startswith("- "):
             in_morca = line.startswith("- conda_source: morca-mojo[")
             var name = "/morca-mojo-"
-            var at = line.find(name)
+            var at = line.find(name).or_else(-1)
             if line.startswith("- conda: ") and at >= 0:
                 var rest = String(line[byte = at + name.byte_length() :])
-                var dash = rest.find("-")
+                var dash = rest.find("-").or_else(-1)
                 if dash > 0:
                     return String(rest[byte=:dash])
             continue
@@ -515,7 +515,7 @@ def _push(o: _Opts) raises -> Int:
         )
         return 2
     var repo = _output(_outputs(o), "Repository")
-    var registry = String(repo[byte = : repo.find("/")])
+    var registry = String(repo[byte = : repo.find("/").or_else(-1)])
     var tag = _tag(o)
     var ctx = String(_DIR, "/context")
     _run(
@@ -703,7 +703,7 @@ def _register(o: _Opts) raises -> Int:
         var text: String
         with open(config_path, "r") as f:
             text = f.read()
-        var slash = config_path.rfind("/")
+        var slash = config_path.rfind("/").or_else(-1)
         reg.write(
             " --config-b64 ",
             _q(b64encode(text)),

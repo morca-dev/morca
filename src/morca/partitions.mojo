@@ -54,7 +54,7 @@ trait Partitions:
         ...
 
     @staticmethod
-    def parse(s: StringSlice, check: Bool) raises -> List[Self.K]:
+    def parse(s: StringSpan, check: Bool) raises -> List[Self.K]:
         """The keys `s` names, as `run --partitions` takes them. With
         `check`, keyed partitions refuse a name their dataset doesn't have
         now; a resume doesn't check, as the run's keys were checked when it
@@ -105,7 +105,7 @@ struct Monthly[first: StaticString = ""](Partitions):
         return ""
 
     @staticmethod
-    def parse(s: StringSlice, check: Bool) raises -> List[Month]:
+    def parse(s: StringSpan, check: Bool) raises -> List[Month]:
         return parse_keys[Month](s, Self.first)
 
     @staticmethod
@@ -142,7 +142,7 @@ struct Weekly[first: StaticString = ""](Partitions):
         return ""
 
     @staticmethod
-    def parse(s: StringSlice, check: Bool) raises -> List[Week]:
+    def parse(s: StringSpan, check: Bool) raises -> List[Week]:
         return parse_keys[Week](s, Self.first)
 
     @staticmethod
@@ -178,7 +178,7 @@ struct Daily[first: StaticString = ""](Partitions):
         return ""
 
     @staticmethod
-    def parse(s: StringSlice, check: Bool) raises -> List[Day]:
+    def parse(s: StringSpan, check: Bool) raises -> List[Day]:
         return parse_keys[Day](s, Self.first)
 
     @staticmethod
@@ -215,7 +215,7 @@ struct Hourly[first: StaticString = ""](Partitions):
         return ""
 
     @staticmethod
-    def parse(s: StringSlice, check: Bool) raises -> List[Hour]:
+    def parse(s: StringSpan, check: Bool) raises -> List[Hour]:
         return parse_keys[Hour](s, Self.first)
 
     @staticmethod
@@ -229,7 +229,7 @@ struct Hourly[first: StaticString = ""](Partitions):
         raise Error("morca: hourly partitions have no keys dataset")
 
 
-def parse_partitions[P: Partitions](s: StringSlice) raises -> List[P.K]:
+def parse_partitions[P: Partitions](s: StringSpan) raises -> List[P.K]:
     """The keys of `P` that `s` names, as `run --partitions` takes them: for
     time keys a key, `A..B`, or a comma-separated list of either; for keyed
     partitions a list of names, `@all` or `@file:<path>`."""

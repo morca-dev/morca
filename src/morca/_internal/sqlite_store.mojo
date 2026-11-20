@@ -160,7 +160,7 @@ struct SqliteBeat(Beater):
             return ""
         ref db = self._db.value()
         for pair in self.timeouts.split(","):
-            var eq = pair.find("=")
+            var eq = pair.find("=").or_else(-1)
             if eq <= 0:
                 continue
             var step = String(pair[byte=:eq])

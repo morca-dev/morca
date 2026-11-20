@@ -16,7 +16,7 @@ comptime _CODE_MAX = 1 << 20
 """The largest file `/code` colours: 1 MiB."""
 
 
-def _code_part(s: StringSlice, path: Bool) -> Bool:
+def _code_part(s: StringSpan, path: Bool) -> Bool:
     """Whether `s` is a safe owner, repository or (with `path`) file path
     in a GitHub URL: letters, digits, `.`, `_`, `-` (and `/` in a path),
     with no `..` segment."""

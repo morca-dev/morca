@@ -179,10 +179,10 @@ def vcpus(instance_type: String) raises -> Int:
     """An instance type's vCPUs: from `MORCA_EC2_VCPUS` (`type=n,...`), else
     by its size, as Graviton families are sized."""
     for pair in getenv("MORCA_EC2_VCPUS").split(","):
-        var eq = pair.find("=")
+        var eq = pair.find("=").or_else(-1)
         if eq > 0 and String(pair[byte=:eq].strip()) == instance_type:
             return Int(pair[byte = eq + 1 :].strip())
-    var dot = instance_type.find(".")
+    var dot = instance_type.find(".").or_else(-1)
     if dot < 0:
         raise Error("morca: not an instance type: ", instance_type)
     var family = String(instance_type[byte=:dot])
@@ -923,7 +923,7 @@ struct Ec2Runner(Movable):
         if self.pool_seconds <= 0:
             return ""
         var ud = self._user_data(r, role, "-")
-        var body = ud.find(_POOL_BODY)
+        var body = ud.find(_POOL_BODY).or_else(-1)
         return sha256_hex(
             String(
                 role,
@@ -1232,7 +1232,7 @@ struct Ec2Runner(Movable):
                     )
                     continue
                 drained += 1
-                var ip = String(addr[byte = : addr.rfind(":")])
+                var ip = String(addr[byte = : addr.rfind(":").or_else(-1)])
                 ec2_db.drained_one(db.conn, r.run, r.start, ip)
         # Forget runs that ended.
         var gone = List[String]()
@@ -1365,7 +1365,7 @@ struct Ec2Runner(Movable):
                 doomed.append(i.id)
         for id in leaving:
             var k = serves[id]
-            var dash = k.find("-")
+            var dash = k.find("-").or_else(-1)
             var n = ec2_db.end_row(
                 db.conn,
                 id,

@@ -102,7 +102,7 @@ def _sense(mut self: Scheduler, p: Registered, now: Int64) raises:
         # Keys that aren't partitions, such as a week another writer
         # put in `orca.partitions`, run nothing: the snapshot is seen,
         # with why, so it doesn't stop the others or the next tick.
-        var mk = List[String]()
+        var mk: List[String]
         try:
             mk = map_keys(ks, p.kind, p.start)
         except e:

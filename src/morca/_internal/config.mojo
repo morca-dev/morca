@@ -189,7 +189,7 @@ def parse_workers(v: String) raises -> Tuple[Int, Int]:
     """`--workers`' value, `N` or `MIN..MAX`: the fewest (-1 for a fixed
     count) and the most."""
     try:
-        var dots = v.find("..")
+        var dots = v.find("..").or_else(-1)
         if dots >= 0:
             var lo = Int(v[byte=:dots])
             var hi = Int(v[byte = dots + 2 :])
@@ -284,7 +284,7 @@ def max_runs_text(n: Int, auto: Bool) -> String:
 
 
 def _instance_type(v: String) raises -> String:
-    var dot = v.find(".")
+    var dot = v.find(".").or_else(-1)
     var ok = dot > 0 and dot < v.byte_length() - 1
     for b in v.as_bytes():
         var c = Int(b)
@@ -541,7 +541,7 @@ struct ProjectConfig(Movable):
         with open(path, "r") as f:
             text = f.read()
         var full = absolute(path)
-        var slash = full.rfind("/")
+        var slash = full.rfind("/").or_else(-1)
         var dir = String(full[byte=:slash]) if slash > 0 else String("/")
         var commit = String()
         var dirty = False
@@ -1141,7 +1141,7 @@ def resolve(
             r.overrides.append(("secrets", joined))
         r.secrets = List[Tuple[String, Setting]]()
         for s in flags.secrets:
-            var eq = s.find("=")
+            var eq = s.find("=").or_else(-1)
             _set(
                 r.secrets,
                 String(s[byte=:eq]),

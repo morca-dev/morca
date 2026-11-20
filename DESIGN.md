@@ -1,6 +1,6 @@
 # morca: design
 
-November 1, 2026 · targets stable Mojo 1.2.0
+November 1, 2026 · targets Mojo 1.3 (the nightly 1.3.0.dev2026111805)
 
 This turns [VISION.md](VISION.md) into a buildable plan. It covers phase 1 in detail, sketches phases 2 to 6 and keyed partitions, and proposes answers to the vision's open questions. Everything marked *verified* was compiled and run on Mojo 1.2.0; every other claim about what Mojo accepts is checked in the PR that first needs it, and this file is corrected when one turns out wrong.
 

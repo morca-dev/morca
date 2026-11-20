@@ -97,12 +97,12 @@ def defer(seconds: Int, why: String = "") -> Error:
     return Error(_DEFER, max(seconds, 1), ": ", why)
 
 
-def deferred_for(error: StringSlice) -> Int:
+def deferred_for(error: StringSpan) -> Int:
     """The seconds a `defer` error asks to wait, or 0 for another error."""
     if not error.startswith(_DEFER):
         return 0
     var rest = error[byte = _DEFER.byte_length() :]
-    var colon = rest.find(":")
+    var colon = rest.find(":").or_else(-1)
     if colon <= 0:
         return 0
     try:
@@ -111,16 +111,16 @@ def deferred_for(error: StringSlice) -> Int:
         return 0
 
 
-def deferred_why(error: StringSlice) -> String:
+def deferred_why(error: StringSpan) -> String:
     """The reason a `defer` error gives."""
-    var colon = error.find(":", _DEFER.byte_length())
+    var colon = error.find(":", _DEFER.byte_length()).or_else(-1)
     return String(error[byte = colon + 1 :].strip()) if colon >= 0 else String()
 
 
 def _is_dataset(name: StaticString) -> Bool:
     """Whether `name` is `namespace.table`: a dot with a name either side,
     and nothing that would leave the warehouse."""
-    var dot = name.rfind(".")
+    var dot = name.rfind(".").or_else(-1)
     return (
         dot > 0
         and dot < name.byte_length() - 1

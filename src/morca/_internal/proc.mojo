@@ -59,7 +59,7 @@ def spawn(
     var names = List[List[UInt8]]()
     var values = List[List[UInt8]]()
     for kv in env:
-        var eq = kv.find("=")
+        var eq = kv.find("=").or_else(-1)
         if eq <= 0:
             # The value may be a secret: it stays out of the message.
             raise Error("spawn: an environment entry isn't NAME=VALUE")

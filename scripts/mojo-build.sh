@@ -33,7 +33,8 @@
 # moves it) and compiles only the functions an edit changed: a rebuild of
 # build/morca takes about half the time. Its binaries run a few percent
 # slower and are larger, so it is for development only: CI, the images and
-# the releases build in the other environments, with `mojo`.
+# the releases build in the other environments, with `mojo`. (pixi.toml has
+# the environment off while no ouromo matches its Mojo.)
 #
 # Usage: scripts/mojo-build.sh <mojo build arguments...> -o <out>
 set -eu

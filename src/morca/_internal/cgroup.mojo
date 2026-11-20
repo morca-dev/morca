@@ -283,7 +283,7 @@ def owner_of(name: String) -> Int:
     """The pid in a run cgroup's name, or -1 for another name."""
     if not name.startswith(RUN_PREFIX):
         return -1
-    var dash = name.rfind("-")
+    var dash = name.rfind("-").or_else(-1)
     try:
         return Int(String(name[byte = dash + 1 :]))
     except:
@@ -540,11 +540,11 @@ struct Cgroups(Copyable, Movable):
             return Cgroups.off(String("off: no cgroup v2 mounted at ", ROOT))
         var dir = String(ROOT, own) if own != "/" else String(ROOT)
         var base = dir
-        var leaf_name = String(own[byte = own.rfind("/") + 1 :])
+        var leaf_name = String(own[byte = own.rfind("/").or_else(-1) + 1 :])
         if leaf_name == LEAF and own != "/":
             # Moved here by an earlier scheduler, or another scheduler on
             # this host: the runs go beside it.
-            var up = String(dir[byte = : dir.rfind("/")])
+            var up = String(dir[byte = : dir.rfind("/").or_else(-1)])
             if has_word(_read(String(up, "/cgroup.subtree_control")), "memory"):
                 base = up
         if not has_word(_read(String(base, "/cgroup.controllers")), "memory"):

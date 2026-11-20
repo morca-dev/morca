@@ -17,7 +17,8 @@
 # - a cycle that isn't in the bucket defers when it's recent, and fails
 #   when it's old.
 #
-# Run in the rust environment (pixi run -e rust test-hindcast).
+# Run in the data environment (pixi run -e data test-hindcast); cargo runs
+# in the rust environment (scripts/cargo.sh).
 set -eu
 cd "$(dirname "$0")/.."
 dir=build/hindcast
@@ -31,8 +32,8 @@ fail() {
     exit 1
 }
 
-cargo test --quiet --manifest-path examples/hindcast/Cargo.toml >> "$log" 2>&1 || fail "cargo test of the worker"
-cargo build --quiet --release --manifest-path examples/hindcast/Cargo.toml >> "$log" 2>&1 || fail "cargo build"
+scripts/cargo.sh test --quiet --manifest-path examples/hindcast/Cargo.toml >> "$log" 2>&1 || fail "cargo test of the worker"
+scripts/cargo.sh build --quiet --release --manifest-path examples/hindcast/Cargo.toml >> "$log" 2>&1 || fail "cargo build"
 echo "ok   cargo test: the .idx lookup, and the fixtures decode as ecCodes does"
 
 case $(uname) in

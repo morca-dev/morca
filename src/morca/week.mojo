@@ -36,7 +36,7 @@ struct Week(TimeKey):
     var week: Int
 
     @staticmethod
-    def parse(s: StringSlice) raises -> Week:
+    def parse(s: StringSpan) raises -> Week:
         """Reads `YYYY-Www`."""
         var parts = s.split("-W")
         if (

@@ -106,8 +106,8 @@ def test_the_floor_agrees_with_the_model() raises:
             continue
         var parts = line.split(" ")
         var kind = String(parts[0])
-        var got = String()
-        var expected = String()
+        var got: String
+        var expected: String
         if kind == "F":
             assert_equal(len(parts), 3)
             got = String(migration_floor(Int(String(parts[1]))))

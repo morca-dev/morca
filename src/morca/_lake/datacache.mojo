@@ -159,7 +159,7 @@ def _hex(v: UInt64) -> String:
 def cache_name(key: String) -> String:
     """The file a key is kept in: a hash of the whole key, then the end of
     its last segment, in characters any filesystem takes."""
-    var tail = String(key[byte = key.rfind("/") + 1 :])
+    var tail = String(key[byte = key.rfind("/").or_else(-1) + 1 :])
     var safe = List[UInt8]()
     for b in tail.as_bytes():
         var ok = (
@@ -199,7 +199,7 @@ struct DataCache(Movable):
 
     @staticmethod
     def from_env() -> DataCache:
-        var dir = String()
+        var dir: String
         var mb = 256.0
         var floor = -1.0
         try:

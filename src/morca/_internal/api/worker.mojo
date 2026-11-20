@@ -201,7 +201,7 @@ def answer(url: String, path: String, token: String, body: String) -> Page:
 def worker_response(url: String, req: Request) -> Response:
     """The response to a worker's `req`, which the UI's server and the
     worker listener both send."""
-    var q = req.url.find("?")
+    var q = req.url.find("?").or_else(-1)
     var path = String(req.url[byte=:q]) if q >= 0 else req.url
     var page = answer(
         url,

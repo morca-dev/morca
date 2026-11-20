@@ -30,7 +30,7 @@ comptime _MONTHS = "jan feb mar apr may jun jul aug sep oct nov dec"
 comptime _DAYS = "sun mon tue wed thu fri sat"
 
 
-def _number(s: StringSlice, names: StaticString, first: Int) raises -> Int:
+def _number(s: StringSpan, names: StaticString, first: Int) raises -> Int:
     """A field value: digits, or a three-letter name (`names` lists them in
     order, from `first`)."""
     if s.byte_length() == 0:
@@ -54,7 +54,7 @@ def _number(s: StringSlice, names: StaticString, first: Int) raises -> Int:
 
 
 def _field(
-    text: StringSlice, lo: Int, hi: Int, names: StaticString = ""
+    text: StringSpan, lo: Int, hi: Int, names: StaticString = ""
 ) raises -> UInt64:
     """The values a field allows, as bits `lo` to `hi`."""
     var bits = UInt64(0)
@@ -123,7 +123,7 @@ struct CronExpr(Copyable, Movable, Writable):
         self.any_weekday = True
 
     @staticmethod
-    def parse(text: StringSlice) raises -> CronExpr:
+    def parse(text: StringSpan) raises -> CronExpr:
         var s = String(text.strip())
         if s.startswith("@"):
             if s == "@yearly" or s == "@annually":

@@ -71,7 +71,7 @@ def _rows(n: Int) raises -> BatchBuilder:
 
 
 def test_a_batch_reads_back() raises:
-    var batch = _rows(3)^.build()
+    var batch = _rows(3).build()
     assert_equal(batch.num_rows, 3)
     assert_equal(batch.num_columns(), 10)
     var ns = ints_of(batch, "n")
@@ -100,8 +100,8 @@ def test_a_batch_writes_and_scans() raises:
     )
     var t = Table.load_local(String(root, "/db/t"))
     var batches = List[RecordBatch]()
-    batches.append(_rows(3)^.build())
-    batches.append(_rows(2)^.build())
+    batches.append(_rows(3).build())
+    batches.append(_rows(2).build())
     var one = concat_batches(batches)
     assert_equal(one.num_rows, 5)
     _ = t.append([one^])
@@ -164,8 +164,8 @@ def test_batch_reader() raises:
     assert_equal(t.scan().snapshot_id(), -1)
     var empty = t.scan().to_batch_reader()
     assert_true(not empty.next_batch())
-    _ = t.append([_rows(3)^.build()])
-    _ = t.append([_rows(2)^.build()])
+    _ = t.append([_rows(3).build()])
+    _ = t.append([_rows(2).build()])
     assert_equal(t.scan().snapshot_id(), t.metadata.current_snapshot_id)
     var reader = t.scan().select(["id"]).to_batch_reader()
     var n = 0
@@ -197,7 +197,7 @@ def test_batch_reader() raises:
 def test_partition_values() raises:
     var root = String("build/wh-lake-parts-", now_ms())
     var t = _partitioned(root)
-    _ = t.append([_rows(3)^.build()])
+    _ = t.append([_rows(3).build()])
     var days = List[Int64]()
     for task in t.scan().plan_files():
         ref p = task.data_file.partition
@@ -209,7 +209,7 @@ def test_partition_values() raises:
     assert_equal(days[0], 19000)
     assert_equal(days[2], 19002)
     # Written and not committed: the entries show them too.
-    var files = write_files(t, [_rows(2)^.build()]).files()
+    var files = write_files(t, [_rows(2).build()]).files()
     assert_equal(len(files), 2)
     assert_true(files[0].partition[0].valid)
     assert_equal(files[0].partition[0].i, 19000)
@@ -225,11 +225,11 @@ def test_row_groups_and_uncommitted_files() raises:
     w.options.num_workers = 2
     # Rows of days 19000-19002 twice: a row group of each day's file each
     # time, three files of two rows.
-    w.write_row_group(_rows(3)^.build())
-    w.write_row_group(_rows(3)^.build())
+    w.write_row_group(_rows(3).build())
+    w.write_row_group(_rows(3).build())
     # A batch alone, after the open files are ended: a file of its own.
     w.close_files()
-    w.write_row_group(_rows(1)^.build())
+    w.write_row_group(_rows(1).build())
     assert_equal(w.rows, 7)
     var entries = w^.finish()
     var files = entries.files()
@@ -263,7 +263,7 @@ def test_table_exists() raises:
         "db", "here", IcebergSchema.parse(SCHEMA)
     )
     var before = getenv("MORCA_WAREHOUSE")
-    setenv("MORCA_WAREHOUSE", root)
+    _ = setenv("MORCA_WAREHOUSE", root)
     assert_true(table_exists("db.here"))
     assert_true(not table_exists("db.gone"))
     assert_true(not table_exists("other.here"))

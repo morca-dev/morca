@@ -25,8 +25,8 @@
 #   files go through liblake (#474), and a -D MORCA_LAKE_SOURCE=1 build,
 #   with the library's code compiled in, runs the same.
 #
-# Run in the rust environment (pixi run -e rust test-rust-worker), which has
-# cargo and the data environment's tins.
+# Run in the data environment (pixi run -e data test-rust-worker); cargo
+# runs in the rust environment (scripts/cargo.sh).
 set -eu
 cd "$(dirname "$0")/.."
 mkdir -p build/rust-worker
@@ -39,9 +39,9 @@ fail() {
     exit 1
 }
 
-cargo test --quiet --manifest-path rust/morca-worker/Cargo.toml >> "$log" 2>&1 || fail "cargo test of morca-worker"
-cargo test --quiet --manifest-path examples/rust-worker/Cargo.toml >> "$log" 2>&1 || fail "cargo test of the example"
-cargo build --quiet --release --manifest-path examples/rust-worker/Cargo.toml >> "$log" 2>&1 || fail "cargo build"
+scripts/cargo.sh test --quiet --manifest-path rust/morca-worker/Cargo.toml >> "$log" 2>&1 || fail "cargo test of morca-worker"
+scripts/cargo.sh test --quiet --manifest-path examples/rust-worker/Cargo.toml >> "$log" 2>&1 || fail "cargo test of the example"
+scripts/cargo.sh build --quiet --release --manifest-path examples/rust-worker/Cargo.toml >> "$log" 2>&1 || fail "cargo build"
 echo "ok   cargo test, and the worker builds"
 
 case $(uname) in

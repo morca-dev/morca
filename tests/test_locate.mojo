@@ -31,14 +31,14 @@ def test_locate_examples() raises:
     assert_equal(m.object_count(), 3)
     var p = m["pipeline"].string_value()
     assert_true(p.startswith("examples/toy.mojo#L"))
-    var pl = Int(p[byte = p.find("#L") + 2 :])
+    var pl = Int(p[byte = p.find("#L").or_else(-1) + 2 :])
     assert_true(m["toy::days"].string_value().startswith("examples/toy.mojo#L"))
     assert_true(
         m["fanout::trips"].string_value().startswith("examples/fanout.mojo#L")
     )
     # The line is the def's.
     var at = m["toy::days"].string_value()
-    var line = Int(at[byte = at.find("#L") + 2 :])
+    var line = Int(at[byte = at.find("#L").or_else(-1) + 2 :])
     var text: String
     with open("examples/toy.mojo", "r") as f:
         text = f.read()

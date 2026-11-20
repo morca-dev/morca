@@ -494,7 +494,10 @@ def _start(
             stage = control_stage(
                 p.name, Int(id), starts[i]
             ) if kept else stage_of(log)
-            makedirs(String(stage[byte = : stage.rfind("/")]), exist_ok=True)
+            makedirs(
+                String(stage[byte = : stage.rfind("/").or_else(-1)]),
+                exist_ok=True,
+            )
         var argv: List[String] = [p.binary, "resume", String(id)]
         if new_code[i]:
             argv.append("--allow-new-code")
@@ -575,7 +578,10 @@ def _start_control(
         if self.logs:
             location = String(run_dir(p.name, id), "/driver.log")
             stage = control_stage(p.name, id, start)
-            makedirs(String(stage[byte = : stage.rfind("/")]), exist_ok=True)
+            makedirs(
+                String(stage[byte = : stage.rfind("/").or_else(-1)]),
+                exist_ok=True,
+            )
             with open(stage, "w") as f:
                 f.write("")
         var argv: List[String] = [p.binary, "resume", String(id)]

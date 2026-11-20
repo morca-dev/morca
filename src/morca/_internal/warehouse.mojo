@@ -40,7 +40,7 @@ struct Sensed(Copyable, Movable):
 
 def current_snapshot(warehouse: String, dataset: String) raises -> Sensed:
     """The dataset's current snapshot in the warehouse at `warehouse`."""
-    var dot = dataset.rfind(".")
+    var dot = dataset.rfind(".").or_else(-1)
     if dot <= 0 or dot == dataset.byte_length() - 1:
         raise Error("morca: a dataset is named namespace.table, not ", dataset)
     var dir = String(
@@ -311,7 +311,7 @@ def _string(b: Span[Byte, _], i: Int) raises -> Tuple[String, Int]:
     raise _bad(i)
 
 
-def _field(b: Span[Byte, _], obj: Int, key: StringSlice) raises -> Int:
+def _field(b: Span[Byte, _], obj: Int, key: StringSpan) raises -> Int:
     """Where the value of `key` in the object at `obj` starts, or -1."""
     if obj >= len(b) or b[obj] != UInt8(ord("{")):
         return -1

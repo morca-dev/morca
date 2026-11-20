@@ -28,7 +28,7 @@ def resume_cli(r: RunRow) -> String:
     )
 
 
-def shell_quote(s: StringSlice) -> String:
+def shell_quote(s: StringSpan) -> String:
     """`s` as one shell word: as it is if it's only letters, digits and
     `-_.,:/@=+%`, else in single quotes."""
     var plain = s.byte_length() > 0

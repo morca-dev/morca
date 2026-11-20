@@ -1,4 +1,4 @@
-"""liblake's root (#454): the library's C symbols, each forwarding to its
+"""`liblake`'s root (#454): the library's C symbols, each forwarding to its
 function in `morca._lake.lib`, or in `morca._lake.rust_sink` for a Rust
 step's `lake_sink_*`. `mojo build --emit shared-lib` exports only the root
 module's `@export` functions, and an `@export` function is compiled into

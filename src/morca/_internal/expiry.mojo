@@ -53,7 +53,7 @@ def maintain_binary() -> String:
     if set:
         return set
     var me = String(argv()[0])
-    var slash = me.rfind("/")
+    var slash = me.rfind("/").or_else(-1)
     if slash >= 0:
         var beside = String(me[byte = : slash + 1], MAINTAIN_BINARY)
         if exists(beside):

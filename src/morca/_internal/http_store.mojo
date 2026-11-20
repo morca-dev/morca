@@ -101,37 +101,37 @@ struct Body(Movable):
     def __init__(out self):
         self.out = String("{")
 
-    def _key(mut self, k: StringSlice):
+    def _key(mut self, k: StringSpan):
         if self.out.byte_length() > 1:
             self.out.write(", ")
         self.out.write(quote(k), ": ")
 
-    def text(var self, k: StringSlice, v: StringSlice) -> Self:
+    def text(var self, k: StringSpan, v: StringSpan) -> Self:
         self._key(k)
         self.out.write(quote(v))
         return self^
 
-    def int(var self, k: StringSlice, v: Int64) -> Self:
+    def int(var self, k: StringSpan, v: Int64) -> Self:
         self._key(k)
         self.out.write(v)
         return self^
 
-    def float(var self, k: StringSlice, v: Float64) -> Self:
+    def float(var self, k: StringSpan, v: Float64) -> Self:
         self._key(k)
         self.out.write(v)
         return self^
 
-    def bool(var self, k: StringSlice, v: Bool) -> Self:
+    def bool(var self, k: StringSpan, v: Bool) -> Self:
         self._key(k)
         self.out.write("true" if v else "false")
         return self^
 
-    def bytes(var self, k: StringSlice, v: Span[UInt8, _]) -> Self:
+    def bytes(var self, k: StringSpan, v: Span[UInt8, _]) -> Self:
         self._key(k)
         self.out.write('"', hex_of(v), '"')
         return self^
 
-    def raw(var self, k: StringSlice, json: StringSlice) -> Self:
+    def raw(var self, k: StringSpan, json: StringSpan) -> Self:
         """`json`, already JSON, as the value."""
         self._key(k)
         self.out.write(json)

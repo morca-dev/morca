@@ -135,7 +135,7 @@ def _flush(mut out: List[Token], plain: Int, at: Int):
         out.append(Token(PLAIN, plain, at))
 
 
-def tokens(src: StringSlice) -> List[Token]:
+def tokens(src: StringSpan) -> List[Token]:
     """`src` as runs of one kind each, in order, covering every byte."""
     var s = src.as_bytes()
     var n = len(s)
@@ -147,7 +147,7 @@ def tokens(src: StringSlice) -> List[Token]:
     while i < n:
         var b = Int(s[i])
         var start = i
-        var kind: StaticString = PLAIN
+        var kind: StaticString
         if b == ord("#"):
             while i < n and Int(s[i]) != ord("\n"):
                 i += 1
@@ -202,7 +202,7 @@ def tokens(src: StringSlice) -> List[Token]:
         elif _ident_start(b):
             while i < n and _ident(Int(s[i])):
                 i += 1
-            var word = String(StringSlice(unsafe_from_utf8=s[start:i]))
+            var word = String(StringSpan(unsafe_from_utf8=s[start:i]))
             if defining:
                 kind = NAME
                 defining = False
@@ -225,7 +225,7 @@ def tokens(src: StringSlice) -> List[Token]:
     return out^
 
 
-def highlight(src: StringSlice) -> List[String]:
+def highlight(src: StringSpan) -> List[String]:
     """`src` as HTML, a string per line (split at `\\n`, without it), each
     coloured run a `<span class="hl hl--<kind>">`, everything escaped."""
     var s = src.as_bytes()
@@ -238,7 +238,7 @@ def highlight(src: StringSlice) -> List[String]:
             while b < t.end and Int(s[b]) != ord("\n"):
                 b += 1
             if b > a:
-                var text = escape(StringSlice(unsafe_from_utf8=s[a:b]))
+                var text = escape(StringSpan(unsafe_from_utf8=s[a:b]))
                 if t.kind:
                     line.write(
                         '<span class="hl hl--', t.kind, '">', text, "</span>"

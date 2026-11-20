@@ -78,13 +78,14 @@ For a cycle of the last two days the step then defers half an hour
 
 ## Running it locally
 
-From the repository's root, in the `rust` pixi environment (the data
-environment plus cargo):
+From the repository's root, in the `data` pixi environment; cargo runs in
+the `rust` environment, which has the Rust toolchain and no Mojo
+(scripts/cargo.sh):
 
 ```sh
-pixi shell -e rust
+pixi shell -e data
 export CARGO_TARGET_DIR=$PWD/build/cargo
-cargo build --release --manifest-path examples/hindcast/Cargo.toml
+scripts/cargo.sh build --release --manifest-path examples/hindcast/Cargo.toml
 mkdir -p build/hindcast
 scripts/embed-json.sh examples/hindcast/schemas/t2m.json T2M_SCHEMA > build/hindcast/t2m_schema.mojo
 scripts/mojo-build.sh -I src -I build/hindcast -I examples/hindcast $DEP_INC \
@@ -140,7 +141,7 @@ fetches and scores days again, replacing what was there.
 
 ## Tests
 
-`pixi run -e rust test-hindcast` (tests/hindcast.sh, in CI's `rust-worker`
+`pixi run -e data test-hindcast` (tests/hindcast.sh, in CI's `rust-worker`
 job) runs offline, on fixtures/: the 2 m temperature messages of the
 2026-11-12 and 2026-11-13 cycles at f000 and f024, each about 74 KB, cut
 from NOAA's files, with `.idx` files of two lines whose offsets are those
