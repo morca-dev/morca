@@ -38,7 +38,7 @@ file and appended to the run's `driver.log`, masked, by `<binary> keep-log`
 once the process has ended, as on an EC2 head.
 """
 
-from std.os import getenv
+from std.os import getenv, remove
 
 from json import loads
 
@@ -193,6 +193,19 @@ def control_stage(pipeline: String, run: Int, start: Int) -> String:
     return String(
         root, "/control/", pipeline, "-", run, "-", start, "-driver.log"
     )
+
+
+def keep_log_ended(stage: String, code: Int) -> Bool:
+    """Once `keep-log` has ended with `code`: the staging file `stage` is
+    removed if it kept the output (exit 0), and kept, unmasked output and
+    all, if it didn't, so nothing is lost (#526). True if it was kept."""
+    if code != 0:
+        return False
+    try:
+        remove(stage)
+    except:
+        pass
+    return True
 
 
 def run_env(
