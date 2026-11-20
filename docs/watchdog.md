@@ -39,7 +39,11 @@ scheduler that overrides it.
 Pooled idle and draining workers don't count for `idle`. `idle` and `stuck`
 look back at most 30 minutes, because fleet samples are kept that long. The
 cost is an estimate from `morca._internal.fleet`'s on-demand price table, plus the
-control instance's own price when `MORCA_CONTROL_TYPE` names its type.
+control instance's own price when `MORCA_CONTROL_TYPE` names its type. On
+Kubernetes it adds each run's pods, running or ended in the last 24 hours,
+at `MORCA_KUBE_PRICE_VCPU_HOUR` and `MORCA_KUBE_PRICE_GB_HOUR`
+([Kubernetes prices](morca-toml.md#kubernetes-prices)); with neither set,
+pods cost nothing to the rule.
 
 **On the local runner** (`MORCA_RUNNER=local`, such as the
 [Hetzner server](hetzner.md)) nothing is launched, so there is nothing to

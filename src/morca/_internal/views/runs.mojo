@@ -905,6 +905,8 @@ struct RunView(Movable):
     var version: Optional[VersionRow]
     var cpu_millis: Int
     """What its pods asked for, on Kubernetes (0 elsewhere)."""
+    var pod_memory_mb: Int
+    """And their memory, MiB (0 elsewhere, or started before #564)."""
     var seconds: Int
     """How long it ran, or has run so far."""
     var sensed: List[SnapshotRef]
@@ -930,6 +932,7 @@ struct RunView(Movable):
         self.batch_runs = 0
         self.version = None
         self.cpu_millis = 0
+        self.pod_memory_mb = 0
         self.seconds = 0
         self.sensed = List[SnapshotRef]()
         self.steps = List[StepRow]()
@@ -963,6 +966,7 @@ def run_view(mut db: State, id: Int) raises -> Optional[RunView]:
         if len(vs) > 0:
             v.version = vs[0].copy()
     v.cpu_millis = row.cpu_millis
+    v.pod_memory_mb = row.pod_memory_mb
     v.seconds = row.seconds
     for x in run_db.sensed(db.conn, id):
         v.sensed.append(SnapshotRef(x[0], x[1]))

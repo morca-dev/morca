@@ -170,6 +170,41 @@ def fill_instances(
     return out^
 
 
+@fieldwise_init
+struct PodTime(Copyable, Movable):
+    """A Kubernetes run's pods: what they ask for in all, and its seconds."""
+
+    var cpu_millis: Int
+    var memory_mb: Int
+    var seconds: Float64
+
+
+def fill_pods(
+    mut tx: Transaction, pipeline: String, now: Int64, since: Int64
+) raises -> List[PodTime]:
+    """Each of `pipeline`'s fill runs on Kubernetes live between `since`
+    and `now` (Unix times), with its latest start's requests and seconds in
+    that time (a run running counts to `now`)."""
+    var out = List[PodTime]()
+    for r in tx.query(
+        (
+            "WITH k AS (SELECT coalesce(cpu_millis, 0) AS cpu,"
+            " coalesce(pod_memory_mb, 0) AS mem, started AS s, CASE WHEN status"
+            " = 'running' THEN to_timestamp($2) ELSE least(coalesce(ended,"
+            " started), to_timestamp($2)) END AS e FROM orca.runs WHERE"
+            " pipeline = $1 AND trigger = 'fill' AND placement = 'kubernetes'"
+            " AND started IS NOT NULL) SELECT cpu, mem, extract(epoch FROM e -"
+            " greatest(s, to_timestamp($3)))::float8 AS secs FROM k WHERE e >"
+            " to_timestamp($3) AND s < to_timestamp($2)"
+        ),
+        Params().text(pipeline).int64(now).int64(since),
+    ):
+        out.append(
+            PodTime(Int(r.int64("cpu")), Int(r.int64("mem")), r.float64("secs"))
+        )
+    return out^
+
+
 def fill_durations(
     mut tx: Transaction, pipeline: String, last: Int
 ) raises -> List[Int]:

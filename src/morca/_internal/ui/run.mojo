@@ -12,6 +12,7 @@ from morca._internal.views.cluster import cluster_rows
 from morca._internal.dag import DagStep, aggregate, dag_svg
 from morca._internal.html import Html, url_encode
 from morca._internal.db.lineage import SnapshotRef
+from morca._internal.kube_price import PRICE_HINT, cost_text, kube_price
 from morca._internal.logs import location_exists, read_location, run_dir
 from morca._internal.metrics import InstanceMetrics, metrics_svg, read_metrics
 from morca._internal.state import State
@@ -596,7 +597,8 @@ def _resources_card(mut h: Html, mut db: State, r: RunRow) raises:
     Kubernetes what its pods asked for."""
     var pods = run_db.run_pods(db.conn, r.id)
     var cpu = pods[0]
-    var secs = pods[1]
+    var mem = pods[1]
+    var secs = pods[2]
     card_open(
         h,
         "resources",
@@ -629,12 +631,34 @@ def _resources_card(mut h: Html, mut db: State, r: RunRow) raises:
             cpu // 1000,
             ".",
             String(cpu % 1000 + 1000)[byte=1:],
-            " vCPU for ",
+            " vCPU",
+            String(" and ", mem, " MiB") if mem else String(),
+            " for ",
             secs,
             " s, ",
             cpu * secs // 1000,
             " vCPU-seconds",
         )
+        h.raw("</dd>")
+    if cpu and r.placement == "kubernetes":
+        fact_item(
+            h,
+            "Cost",
+            "run-cost",
+            (
+                "An estimate: what its pods asked for, times how long it"
+                " ran, at the stack's MORCA_KUBE_PRICE_VCPU_HOUR and"
+                " MORCA_KUBE_PRICE_GB_HOUR."
+            ),
+            "runners",
+        )
+        var cost = kube_price().cost(cpu, mem, Float64(secs))
+        if cost >= 0:
+            h.text(cost_text(cost))
+        else:
+            h.raw('<span class="muted">')
+            h.text("unpriced: ", PRICE_HINT)
+            h.raw("</span>")
         h.raw("</dd>")
     h.raw("</dl></section>")
 

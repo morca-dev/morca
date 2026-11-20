@@ -910,6 +910,11 @@ def _migrations() -> List[List[String]]:
             "ALTER TABLE orca.runs ADD COLUMN waits_on bigint",
             "ALTER TABLE orca.runs ADD COLUMN key_wait_since timestamptz",
         ],
+        # The memory a Kubernetes run's pods asked for (#564,
+        # `morca._internal.kube_price`), beside `cpu_millis`, to price it.
+        # Additive: a nullable column an older binary neither reads nor
+        # writes.
+        ["ALTER TABLE orca.runs ADD COLUMN pod_memory_mb bigint"],
     ]
 
 
@@ -961,6 +966,9 @@ def _floor_raisers() -> List[Int]:
     before it neither read nor write. While one overlaps a newer one it
     starts nothing (only the leader starts runs, and the newer one leads);
     a run it started records no key and holds its pipeline's.
+    64 (`runs.pod_memory_mb`, #564) is additive: a nullable column the
+    binaries before it neither read nor write. A Kubernetes run one of them
+    starts records no memory, and is priced by its CPU alone.
     """
     return [1, 24]
 
