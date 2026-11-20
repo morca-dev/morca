@@ -22,7 +22,7 @@ says `OOMKilled`; one the kubelet evicted from a node short of memory says
 `Evicted`. Either fails the attempts of its run at that start, saying so
 (`killed_text`), and the scheduler removes that start's cluster, so the run
 starts again as one whose driver died does. A driver's or worker's kill
-raises the pipeline's memory (`orca.pipelines.memory_raised_mb`, as on
+(an eviction only for memory) raises the pipeline's memory (`orca.pipelines.memory_raised_mb`, as on
 cgroups, `morca._internal.cgroup`) to `MORCA_RUN_MEMORY_GROWTH` (1.5) times
 the limit it was killed at (an eviction: the request it had), at most
 `memory_gb`'s maximum: the retry's pods, and the pipeline's later runs',
@@ -272,8 +272,8 @@ def killed_text(
 ) -> String:
     """An attempt's error after its run's pod `pod` (its `role`) was killed
     for its memory at `at_mb` (an OOM kill's limit, an eviction's request),
-    and what its retry asks for (`next_mb`; 0 for the head, which the
-    pipeline's memory doesn't size)."""
+    and what its retry asks for (`next_mb`; 0 for none: the head, which the
+    pipeline's memory doesn't size, or an eviction for something else)."""
     var t = String()
     if k.reason == OOM_KILLED:
         t.write(
@@ -298,7 +298,8 @@ def killed_text(
         if k.message:
             t.write(" (", k.message, ")")
     if next_mb <= 0:
-        t.write("; the head's memory is MORCA_POD_MEMORY's")
+        if role == "head":
+            t.write("; the head's memory is MORCA_POD_MEMORY's")
     elif next_mb > at_mb:
         t.write("; its retry asks for ", _mb_text(next_mb))
     elif k.reason == OOM_KILLED:

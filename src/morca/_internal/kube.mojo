@@ -716,7 +716,11 @@ struct KubeRunner(Movable):
         var at = limit if k.reason == OOM_KILLED else request
         var next = 0
         var spent = False
-        if role != "head":
+        # The pipeline's memory sizes its driver and workers, not its head;
+        # an eviction for the node's disk says nothing of it.
+        if role != "head" and (
+            k.reason == OOM_KILLED or "memory" in k.message
+        ):
             var g = getenv("MORCA_RUN_MEMORY_GROWTH")
             var ceiling = Request.of(
                 "", kube_db.memory_gb(db.conn, pipeline)
