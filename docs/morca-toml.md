@@ -810,7 +810,7 @@ resumes with the steps already done skipped.
 
 With `fills = "all"` a pipeline fills its whole range by itself, within limits (#155, `src/morca/_internal/fill.mojo`). People change the limits; nobody has to drive a long backfill by hand.
 
-The default, `fills = "since_registration"`, is what morca did before. A schedule fills from the pipeline's registration on, and `morca backfill` fills the rest by hand.
+The default, `fills = "since_registration"`, is what morca did before. Only the schedule's fires run, from the pipeline's registration on, and `morca backfill` runs the rest by hand.
 
 ### What the scheduler does
 
