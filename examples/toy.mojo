@@ -12,11 +12,14 @@ A partition whose month is in MORCA_TOY_FAIL (e.g. `2024-02`) fails its
 `measure` step, to show the rest of the run carrying on; one in
 MORCA_TOY_CRASH aborts the process there, as a crash would (tests/crash.sh).
 MORCA_TOY_SLEEP makes
-every step take that many seconds, so a test has time to kill it.
+every step take that many seconds, so a test has time to kill it. A month in
+MORCA_TOY_GROW has its `days` step's first attempt hold MORCA_TOY_GROW_MB
+(200) MiB for a second, so a run under that memory limit is killed for it
+(tests/kind.sh) and its retry isn't.
 """
 
 from std.os import abort, getenv
-from std.time import sleep
+from std.time import perf_counter_ns, sleep
 
 from dista import Seq
 from morca import (
@@ -44,9 +47,25 @@ struct Measured(Copyable, Movable):
     var days: Int
 
 
+def _grow(ctx: Ctx, m: Month) raises:
+    if ctx.attempt != 1 or String(m) not in getenv("MORCA_TOY_GROW"):
+        return
+    var b = List[UInt8](
+        length=Int(getenv("MORCA_TOY_GROW_MB", "200")) * 1024 * 1024, fill=1
+    )
+    var t0 = Int(perf_counter_ns())
+    var x = 0
+    while Int(perf_counter_ns()) - t0 < 1_000_000_000:
+        for i in range(0, len(b), 4096):
+            x += Int(b[i])
+            b[i] = UInt8(x & 0xFF)
+    ctx.log(String("held ", len(b) // (1024 * 1024), " MiB (", x, ")"))
+
+
 def days(mut ctx: Ctx, m: Month) raises -> Measured:
     """The number of days in the month."""
     _nap()
+    _grow(ctx, m)
     var n = 31
     if m.month == 2:
         var leap = (m.year % 4 == 0 and m.year % 100 != 0) or m.year % 400 == 0

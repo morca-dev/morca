@@ -278,8 +278,10 @@ env = { DISTA_WORKER_SLOTS = "auto", GHARCHIVE_PARALLEL = "auto" }
   started as before: no check, no grant. Its runs aren't counted against
   the others' either, so on a shared host give every pipeline a request,
   or keep the reserve large enough for the ones without.
-- **Not on EC2 or Kubernetes**, whose runs get machines of their own: the
-  request is kept but not used there yet.
+- **Not on EC2**, whose runs get machines of their own: the request is
+  kept but not used there yet.
+- **On Kubernetes, each pod's size** ([below](#on-kubernetes)): no
+  admission or grant, but the pods that run the pipeline's code ask for it.
 - **The control placement's memory cap** (`MORCA_CONTROL_MEMORY_MB`, 1024)
   still kills a control-placed run over it, whatever its grant: set it at
   least as high as the largest `memory_gb` maximum you place there.
@@ -300,6 +302,36 @@ env = { DISTA_WORKER_SLOTS = "auto", GHARCHIVE_PARALLEL = "auto" }
   request is limited to `MORCA_RUN_MEMORY_MB` (default what the host can
   grant). Set the scheduler's and the worker's environment; the UI reads
   `MORCA_RUN_MEMORY_GROWTH` for workers' runs.
+
+### On Kubernetes
+
+A run's driver, and each of its dista workers, asks for the pipeline's
+request and is limited to it (`morca._internal.kube_size`), `auto` resolved
+as below:
+
+| | Pod requests | Pod limits |
+|---|---|---|
+| `cpus = "MIN..MAX"` | MIN CPUs | MAX CPUs |
+| no `cpus` | `MORCA_DRIVER_CPU` (500m) for the driver, `MORCA_WORKER_CPU` (1) for a worker | `MORCA_POD_CPU_LIMIT` (2; at least the request, 0 for none) |
+| `memory_gb = "MIN..MAX"` | MIN GB | MAX GB |
+| no `memory_gb` | `MORCA_POD_MEMORY` (512Mi) | the same |
+
+The head, dista's coordinator, asks for `MORCA_HEAD_CPU` (250m) and
+`MORCA_POD_MEMORY` whatever the pipeline's request. What the pods ask for in
+all is what `MORCA_VCPU_BUDGET` weighs and what the run is priced at
+([Kubernetes prices](#kubernetes-prices)).
+
+A pod past its memory limit is killed (`OOMKilled`), and one the kubelet
+evicts from a node short of memory is `Evicted`. Either fails its run's
+attempts with that as their error (`OOMKilled: pod morca-12-1-worker-0 (the
+worker) passed its memory limit, 512 MB, and Kubernetes killed it; its retry
+asks for 768 MB`), and the scheduler deletes that start's pods, its logs
+kept, so the run starts again on a new cluster. A driver's or worker's kill
+raises the pipeline's memory as a cgroup's does: to `MORCA_RUN_MEMORY_GROWTH`
+(1.5) times the limit (an eviction: the request), at most `memory_gb`'s
+maximum, for its retry's pods and its later runs', requests and limits,
+until 20 of its runs have succeeded since. Killed at that maximum already,
+the run fails, unretried.
 
 ### Learned requests
 
@@ -865,7 +897,7 @@ morca can't see what a cluster's nodes cost, so the stack sets a price for what 
 | `MORCA_KUBE_PRICE_VCPU_HOUR` | US dollars a vCPU of pod requests costs an hour |
 | `MORCA_KUBE_PRICE_GB_HOUR` | US dollars a GiB of pod memory requests costs an hour |
 
-A run's price an hour is its pods' CPU (`MORCA_DRIVER_CPU`, plus `MORCA_HEAD_CPU` and `workers` × `MORCA_WORKER_CPU` for a run with dista tasks) times the vCPU price, plus their memory (`MORCA_POD_MEMORY` for each of those pods) times the GiB price. Its cost is that for as long as it ran. Take the prices from a managed cluster's per-pod rates (GKE Autopilot, EKS Fargate), or spread a node's hourly price over the vCPUs and GiB it holds. With one of the two set, the other costs nothing; with neither, or one that isn't a number, Kubernetes runs have no price and a budgeted fill there starts nothing. The same prices feed the watchdog's `cost` rule and the run page's Cost. A run's memory is recorded as it starts (`orca.runs.pod_memory_mb`), so a run started before this was added is priced by its CPU alone.
+A run's price an hour is the CPU its pods ask for (its driver's, plus its head's and `workers` × a worker's for a run with dista tasks; [On Kubernetes](#on-kubernetes) says how big each is) times the vCPU price, plus their memory requests times the GiB price. Its cost is that for as long as it ran. Take the prices from a managed cluster's per-pod rates (GKE Autopilot, EKS Fargate), or spread a node's hourly price over the vCPUs and GiB it holds. With one of the two set, the other costs nothing; with neither, or one that isn't a number, Kubernetes runs have no price and a budgeted fill there starts nothing. The same prices feed the watchdog's `cost` rule and the run page's Cost. A run's memory is recorded as it starts (`orca.runs.pod_memory_mb`), so a run started before this was added is priced by its CPU alone.
 
 The budget is per pipeline, so a `fill_budget_per_day` in `[defaults]` gives each pipeline in the file that much. The estimate can't see a run that lasts longer than every earlier one until it has. The watchdog's `cost` rule (`MORCA_WATCHDOG_COST_DAY`, $25) is the stack-wide backstop: it pauses everything.
 

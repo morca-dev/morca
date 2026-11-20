@@ -87,7 +87,8 @@ from morca._internal.fill_requests import (
 from morca.civil import Civil
 from morca._internal.fleet import hourly_price
 from morca._internal.json import quote
-from morca._internal.kube_price import PRICE_HINT, kube_price, kube_requests
+from morca._internal.kube_price import PRICE_HINT, kube_price
+from morca._internal.kube_size import KubeRequests, kube_requests
 from morca._internal.db.live import (
     dead_sql,
     live_runs,
@@ -402,14 +403,19 @@ def range_keys(
 
 
 def run_hourly(
-    placed: String, head_type: String, worker_type: String, workers: Int
+    placed: String,
+    head_type: String,
+    worker_type: String,
+    workers: Int,
+    kube: Optional[KubeRequests] = None,
 ) -> Float64:
     """US dollars an hour of one of the pipeline's runs where it's `placed`:
     0 on the control host, as a local process or on a worker pool's
     machines (which run anyway), the head and its most
     workers at on-demand prices on EC2 (a type left empty is the runner's,
     `MORCA_EC2_HEAD_TYPE` / `MORCA_EC2_WORKER_TYPE`), its pods' requests at
-    the stack's prices on Kubernetes (`morca._internal.kube_price`), and -1
+    the stack's prices on Kubernetes (`morca._internal.kube_price`: `kube`,
+    else a pipeline's without `cpus` or `memory_gb`), and -1
     for a price that isn't known (a type not in `morca._internal.fleet`'s
     table, or Kubernetes with no price set).
     """
@@ -417,7 +423,7 @@ def run_hourly(
         return 0.0
     if placed == "kubernetes":
         try:
-            var q = kube_requests(workers)
+            var q = kube.value() if kube else kube_requests(workers)
             return kube_price().hourly(q.cpu_millis, q.memory_mb)
         except:
             return -1.0  # a request it can't read: unpriced
@@ -505,6 +511,10 @@ struct FillPipeline(Copyable, Movable):
     """On EC2, how long an instance idles in the warm pool after a run."""
     var keys_per_run: Int
     """How many partitions a fill run takes (#240): 1 by default."""
+    var kube: Optional[KubeRequests]
+    """On Kubernetes, what its runs' pods ask for in all
+    (`morca._internal.kube_size`); None: as a pipeline's without `cpus` or
+    `memory_gb`."""
 
 
 struct FillStatus(Copyable, Movable):
@@ -680,7 +690,9 @@ def fill_status(
         s.spent = -1.0
 
     # What the runs going and one more may cost.
-    s.hourly = run_hourly(p.placed, p.head_type, p.worker_type, p.workers)
+    s.hourly = run_hourly(
+        p.placed, p.head_type, p.worker_type, p.workers, p.kube
+    )
     var longest = 0
     for secs in fill_db.fill_durations(tx, p.name, _HISTORY):
         longest = max(longest, secs)

@@ -201,10 +201,8 @@ from morca._internal.system import (
     keep as keep_system,
     trim as trim_system,
 )
-from morca._internal.kube import (
-    KubeRunner,
-    cpu_millis,
-)
+from morca._internal.kube import KubeRunner
+from morca._internal.kube_size import cpu_millis
 from morca._internal.instances import (
     beat,
     drain_limit,

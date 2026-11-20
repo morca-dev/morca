@@ -33,7 +33,7 @@ from morca._internal.key_wait import key_room, started
 from morca._internal.kube import (
     RunSpec,
 )
-from morca._internal.kube_price import kube_requests
+from morca._internal.kube_size import KubeSizes
 from morca._internal.logs import (
     is_remote,
     run_dir,
@@ -67,6 +67,7 @@ from morca._internal.registered import (
     Registered,
     _ec2_spec,
     fill_pipeline,
+    kube_sizes_of,
     recorded_cpus,
     recorded_memory_gb,
     run_request,
@@ -172,6 +173,9 @@ def _start(
             self.db, p, self.room.cpus, self.room.memory_mb, "this host's most"
         )
         say_capped(self.db, p, sized)
+    elif placed == "kubernetes":
+        # Each pod's size, from the same request (morca._internal.kube_size).
+        sized = run_request(self.db, p)
     var tx = self.db.conn.begin()
     starting_db.lock_pipeline(tx, p.name)
     starting_db.lock_runs(tx, p.name)
@@ -224,12 +228,15 @@ def _start(
             free = min(free, k.room)
     var need = 0
     var pod_memory = 0
+    var pod_sizes = KubeSizes.none()
     if control:
         need = 0  # no instance: nothing of the budget
     elif self.runner:
-        need = self.runner.value().cpu_of(p.workers)
+        pod_sizes = kube_sizes_of(p, sized)
+        var asks = pod_sizes.requests(p.workers)
+        need = asks.cpu_millis
         # Its pods' memory, to price it (morca._internal.kube_price).
-        pod_memory = kube_requests(p.workers).memory_mb
+        pod_memory = asks.memory_mb
     elif self.ec2:
         need = self.ec2.value().cpu_of(
             p.workers > 0, p.head_type, p.worker_type, p.workers
@@ -439,6 +446,7 @@ def _start(
                         new_code[i],
                         p.env.copy(),
                         secrets^,
+                        pod_sizes,
                     )
                 )
                 print("started", p.name, "run", id, "on its cluster")
