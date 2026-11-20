@@ -24,8 +24,8 @@ Monthly month from the 1st of the next plus the lag.
 Until then the partition is outside the range, for the fill and for the
 coverage alike (`range_keys`), so it isn't counted as missing; the
 pipeline page's Fill line says when it fills (`FillStatus.lag_key`). The default,
-`since_registration`, is what morca did before: a schedule fills from the
-pipeline's registration on, and `morca backfill` the rest by hand.
+`since_registration`, is what morca did before: only the schedule's fires
+run, from the pipeline's registration on, and `morca backfill` the rest by hand.
 
 **What a fill takes.** A partition is left alone when it's done in a run of
 any code of the pipeline (every mapped step succeeded for it; with no
@@ -102,7 +102,8 @@ from morca.tz import Zone
 
 comptime ALL = "all"
 comptime SINCE_REGISTRATION = "since_registration"
-"""The default of `fills`: a schedule fills from registration on."""
+"""The default of `fills`: only the schedule's fires run, from registration
+on."""
 comptime FILL_TRIGGER = "fill"
 """`orca.runs.trigger` of a fill's runs."""
 comptime COST_MARGIN = 1.2

@@ -85,7 +85,7 @@ def load(mut ctx: Ctx, raw: RawFile) raises -> Loaded:
 | `taxi run --partitions 2024-01..2024-12` | Starts a run, prints its ID, runs it to the end |
 | `taxi resume <run>` | Continues a run at its unfinished steps |
 | `taxi status [<run>]` | Runs, or one run's steps and attempts |
-| `taxi fires [<count>] [--after <time>]` | From phase 2: the schedule's next fires, each with the partition it fills |
+| `taxi fires [<count>] [--after <time>]` | From phase 2: the schedule's next fires, each with the partition it runs |
 
 Without `MORCA_DATABASE_URL`, `run` records its run in memory (`MemoryStore`, run 0) on the same code path as a recorded one, and nothing outlives the process. Exit codes: 0 for a run that succeeded, 1 for one with a step that didn't, 2 for a usage error, 3 for anything else (the database, a run that can't be resumed).
 
@@ -232,10 +232,10 @@ What PR 6 needs from the tins, checked at PR 2, and what it turned out to need:
 
 ## Phase 2: schedules and partitions
 
-Gate: a schedule fills each month's partition as it falls due, and a backfill over 2011–2024 runs with a bounded number at once.
+Gate: a schedule runs each month's partition as it falls due, and a backfill over 2011–2024 runs with a bounded number at once.
 
 - **Partition definitions** on the pipeline: `partitions=Monthly["2011-01"]`, `Weekly["2026-W40"]`, `Daily["2024-01-01"]` or `Hourly["2026-11-11T00"]`, so the scheduler knows the set of keys and which are due.
-- **Cron**: five-field expressions with ranges, steps and lists, and a time zone. Time zones are read from the system's TZif files (`/usr/share/zoneinfo`), which is a small, documented format. A schedule says which partition a fire fills, e.g. "at 03:00 on the 2nd, the previous month".
+- **Cron**: five-field expressions with ranges, steps and lists, and a time zone. Time zones are read from the system's TZif files (`/usr/share/zoneinfo`), which is a small, documented format. A schedule says which partition a fire runs, e.g. "at 03:00 on the 2nd, the previous month".
 - **The `morca` scheduler binary**: registers pipelines from their `describe`, ticks once a second, creates runs that are due, starts them as subprocesses, retries failed runs with exponential backoff and jitter, and enforces `max_runs` per pipeline by counting `running` rows in the same transaction that starts one.
 - **Backfills**: one run per partition over a range, queued, started `max_runs` at a time. This is also how partitions run in parallel, in place of phase 1's `max_parallel`.
 - **Missed fires** after the scheduler was down are caught up once each, not dropped and not fired many times; a pipeline can say `catchup=False`.
@@ -262,7 +262,7 @@ Gate: a schedule fills each month's partition as it falls due, and a backfill ov
 | 1 | **Partition keys and sets.** The `Key` trait, `Day`, `Monthly`, `Daily`, `partitions=` on `Pipeline`, the first step's input checked against the key, `describe` with partitions, the command line parsing keys of the pipeline's type. | A daily toy pipeline runs over a range of days; a pipeline whose first step takes a `Month` under `Daily` doesn't compile; phase 1's tests pass unchanged. | ~600 |
 | 2 | **Cron and time zones.** Cron parsing and next-fire computation in a time zone; a TZif reader with POSIX `TZ` rules; `schedule=`, `fire=` and `catchup=` on `Pipeline`, in `describe`. | Next fires match a table of known ones, including both daylight-saving transitions in `America/New_York` and `Europe/London`; the cron parser and the `TZ` string parser are fuzzed. | ~1,000 |
 | 3 | **The scheduler.** The `morca` binary: `register`, `tick`, `scheduler` (tick once a second), `backfill`; `fires`, queued runs, starting runs as subprocesses, `max_runs`, run retries with backoff, missed fires and `catchup`. | With `MORCA_NOW` stepped month by month, the toy pipeline's partitions are filled once each, as they fall due; a scheduler killed mid-tick and restarted fires nothing twice; a backfill of 24 months never has more than `max_runs` running. | ~1,200 |
-| 4 | **The taxi backfill.** The taxi pipeline gets `partitions=Monthly["2011-01"]` and a monthly schedule; the load handles the 2011–2022 files' schemas. | Phase 2's gate, by hand: `morca backfill taxi 2011-01..2024-12` with `max_runs=4` loads every month once, and the schedule then fills the next month when it falls due (with `MORCA_NOW`). | ~300 |
+| 4 | **The taxi backfill.** The taxi pipeline gets `partitions=Monthly["2011-01"]` and a monthly schedule; the load handles the 2011–2022 files' schemas. | Phase 2's gate, by hand: `morca backfill taxi 2011-01..2024-12` with `max_runs=4` loads every month once, and the schedule then runs the next month when it falls due (with `MORCA_NOW`). | ~300 |
 
 ### How the gate went
 

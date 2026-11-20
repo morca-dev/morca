@@ -166,8 +166,6 @@ def _header(label: String) -> StaticString:
         return "Why it failed, as the step or morca said."
     if label == "Expires":
         return "When the token stops working."
-    if label == "Fills":
-        return "The partition that run fills."
     if label == "First seen":
         return "When a run first ran this version."
     if label == "From":
@@ -377,6 +375,8 @@ def _context_header(key: String) -> StaticString:
             "which table), a flag of morca register, or the scheduler's "
             "environment. A link opens the line that sets it."
         )
+    if key == "fires:Partition":
+        return "The partition that fire runs, as fire= picks it."
     if key == "audit:From":
         return "ui: this site. cli: the morca command, with a token."
     if key == "alerts:Kind":
@@ -607,8 +607,8 @@ def _value(key: String) -> StaticString:
         )
     if key == "fills:since_registration":
         return (
-            "A schedule fills from registration on; earlier partitions need "
-            "a backfill."
+            "Only the schedule's fires run it, from registration on; earlier "
+            "partitions need a backfill."
         )
     if key == "fill_order:oldest":
         return "Fill runs go from the oldest partition forward."

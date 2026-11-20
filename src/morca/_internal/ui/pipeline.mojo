@@ -783,10 +783,8 @@ def pipeline_html(
                 "<h2>Next runs",
                 docs_link("partitions"),
                 '</h2><div class="scroll"><table><thead><tr>',
-                (
-                    "<th>UTC</th><th>Wall"
-                    " clock</th><th>Fills</th></tr></thead><tbody>"
-                ),
+                "<th>UTC</th><th>Wall clock</th>",
+                '<th data-help="fires">Partition</th></tr></thead><tbody>',
             )
             for f in v.fires:
                 h.raw("<tr>")
