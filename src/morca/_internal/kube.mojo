@@ -810,7 +810,7 @@ struct KubeRunner(Movable):
         """Has the start `key` (`<run>-<start>`) say `why` it waits, and
         alerts once (`pod-stuck`) if it started longer ago than the start
         grace."""
-        var dash = key.find("-")
+        var dash = key.find("-").or_else(-1)
         var run = Int(key[byte=:dash])
         var start = String(key[byte = dash + 1 :])
         var got = kube_db.hold_stuck(db.conn, run, start, why)

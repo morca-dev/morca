@@ -32,7 +32,7 @@ struct Toleration(Copyable, Movable):
     def parse(s: String) raises -> Toleration:
         var rest = String(s.strip())
         var effect = String()
-        var colon = rest.rfind(":")
+        var colon = rest.rfind(":").or_else(-1)
         if colon >= 0:
             effect = String(rest[byte = colon + 1 :])
             var head = String(rest[byte=:colon])
@@ -53,7 +53,7 @@ struct Toleration(Copyable, Movable):
                     ")",
                 )
         var value = String()
-        var eq = rest.find("=")
+        var eq = rest.find("=").or_else(-1)
         if eq >= 0:
             value = String(rest[byte = eq + 1 :])
             var key = String(rest[byte=:eq])
@@ -86,7 +86,7 @@ def node_selector(s: String) raises -> List[Tuple[String, String]]:
     """`key=value,key2=value2` as pairs."""
     var out = List[Tuple[String, String]]()
     for item in _items(s):
-        var eq = item.find("=")
+        var eq = item.find("=").or_else(-1)
         if eq <= 0:
             raise Error("a node selector is key=value pairs, not ", quote(s))
         out.append(
