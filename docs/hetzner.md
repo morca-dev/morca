@@ -1154,7 +1154,8 @@ config apps`, the [overlay](#a-stacks-overlay) laid on it) and write the
 app's env file, `/etc/orca/app-<name>.env` (mode 600), from it: its `env`,
 the lake with `lake = true` (`AWS_REGION`, `AWS_ENDPOINT_URL_S3`,
 `MORCA_WAREHOUSE`, `MORCA_PUBLIC_WAREHOUSE` and `s3.env`; never morca's
-database), each secret's value from `/etc/orca/secrets/<id>`, and `PORT`.
+database), each secret's value from `/etc/orca/secrets/<id>`, `PORT`, and
+`MORCA_IMAGE_BYTES` (below).
 A secret is a key `secrets/orca/<id>` in `SECRETS_FILE`, sent as the
 others are; one the server hasn't stops the deploy at the plan, before
 anything is paused. Values are never printed, and a change to one replaces
@@ -1166,6 +1167,16 @@ refused. An app the image's `morca.toml` doesn't declare, or an image
 whose morca has no `config apps` (before 0.25), gets the fixed env of
 before (the lake, and `MORCA_POSTHOG_KEY` as `POSTHOG_KEY`), and the plan
 says so.
+
+**The image's size.** Every container the stack starts (the scheduler, the
+UI, the sampler and each app) gets `MORCA_IMAGE_BYTES`, the size in bytes
+of the image it runs (`docker image inspect -f '{{.Size}}'`), so an app
+can show its own (census #124). The scheduler's and the UI's is in
+`morca.env`, an app's in its `app-<name>.env`, the sampler's an `-e`. It
+is the image's, so it changes only with the image, which replaces the
+container anyway: an apply of the same images still leaves everything
+running. If `docker image inspect` can't say, the variable is left out,
+never set empty.
 
 ## Analytics (PostHog)
 
