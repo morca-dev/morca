@@ -88,6 +88,7 @@ pull_logs() {
 }
 
 docker build -f deploy/Dockerfile -t morca:dev .
+docker build -f deploy/k8s/minio.Dockerfile -t morca-minio:dev deploy/k8s
 # lake's image: the data environment, liblake and examples/lake.mojo.
 docker build -f deploy/Dockerfile.data --build-arg PIPELINES=examples/lake.mojo -t morca:data .
 if ! kind get clusters 2> /dev/null | grep -qx "$cluster"; then
@@ -96,7 +97,7 @@ if ! kind get clusters 2> /dev/null | grep -qx "$cluster"; then
 else
     kind get kubeconfig --name "$cluster" > "$KUBECONFIG"
 fi
-kind load docker-image morca:dev morca:data --name "$cluster"
+kind load docker-image morca:dev morca:data morca-minio:dev --name "$cluster"
 
 kubectl delete namespace morca morca-runs --ignore-not-found --wait
 kubectl apply -f deploy/k8s/morca.yaml -f deploy/k8s/runs.yaml

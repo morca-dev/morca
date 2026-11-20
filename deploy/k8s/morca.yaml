@@ -11,6 +11,8 @@
 # the bucket's settings, and its S3 keys by reference to the Secret morca-s3
 # in morca-runs (runs.yaml), never as values.
 #
+#     docker build -f deploy/k8s/minio.Dockerfile -t morca-minio:dev deploy/k8s
+#     kind load docker-image morca-minio:dev   # or push it where the cluster pulls
 #     kubectl apply -f deploy/k8s/morca.yaml -f deploy/k8s/runs.yaml
 #     kubectl -n morca port-forward svc/morca-ui 8270:8270
 #
@@ -102,7 +104,8 @@ spec:
   ports: [{port: 9000}]
 ---
 # One MinIO server, on a volume of its own, with the bucket `morca` made at
-# start. MinIO's community edition is archived; this is its last image.
+# start. MinIO publishes no images any more: morca-minio:dev is
+# deploy/k8s/minio.Dockerfile's, built and loaded into the cluster as it says.
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -119,16 +122,18 @@ spec:
     spec:
       containers:
         - name: minio
-          image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+          image: morca-minio:dev
+          imagePullPolicy: IfNotPresent
           command:
             - /bin/sh
             - -c
             - >-
               minio server /data --address :9000 & m=$!;
               trap 'kill $m' TERM INT;
-              until mc alias set local http://127.0.0.1:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" > /dev/null 2>&1;
-              do sleep 1; done;
-              mc mb -p local/morca && echo ok > /tmp/ready; wait $m
+              until c=$(curl -s -o /dev/null -w '%{http_code}' --aws-sigv4 aws:amz:us-east-1:s3
+              --user "$MINIO_ROOT_USER:$MINIO_ROOT_PASSWORD" -X PUT http://127.0.0.1:9000/morca);
+              [ "$c" = 200 ] || [ "$c" = 409 ]; do sleep 1; done;
+              echo ok > /tmp/ready; wait $m
           env:
             - name: MINIO_ROOT_USER
               valueFrom: {secretKeyRef: {name: morca-s3, key: AWS_ACCESS_KEY_ID}}
