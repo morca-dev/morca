@@ -27,10 +27,9 @@ from morca._internal.fill import (
     run_hourly,
     unknown_type,
 )
-from morca._internal.kube_price import (
-    KubePrice,
-    cost_text,
-    kube_price,
+from morca._internal.kube_price import KubePrice, cost_text, kube_price
+from morca._internal.kube_size import (
+    KubeRequests,
     kube_requests,
     memory_mb,
     pods,
@@ -286,6 +285,7 @@ def _unset_kube():
         "MORCA_HEAD_CPU",
         "MORCA_WORKER_CPU",
         "MORCA_POD_MEMORY",
+        "MORCA_POD_CPU_LIMIT",
     ]:
         _ = unsetenv(n)
 
@@ -327,6 +327,11 @@ def test_kube_cost() raises:
     _ = setenv("MORCA_POD_MEMORY", "1Gi", True)
     _ = setenv("MORCA_DRIVER_CPU", "2", True)
     _near(run_hourly("kubernetes", "", "", 0), 2 * 0.04 + 0.005)
+    # A pipeline's own sizes (#560), as its fill prices them.
+    _near(
+        run_hourly("kubernetes", "", "", 3, KubeRequests(4000, 2048)),
+        4 * 0.04 + 2 * 0.005,
+    )
     # A price that isn't a number fails closed.
     _ = setenv("MORCA_KUBE_PRICE_VCPU_HOUR", "four cents", True)
     _ = unsetenv("MORCA_KUBE_PRICE_GB_HOUR")

@@ -1,0 +1,1 @@
+- **Kubernetes pods sized per pipeline:** a run's driver and workers ask for its `cpus` and `memory_gb` (minimum as requests, maximum as limits; the old variables are the defaults, and every pod now has limits), and a pod `OOMKilled` or `Evicted` fails its attempts saying so, its retry asking 1.5 times the memory. (#PR)

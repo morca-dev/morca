@@ -16,15 +16,14 @@ have no price, and a fill with `fill_budget_per_day` starts no run there
 (`morca._internal.fill`), as before. The fill, the watchdog's `cost` rule
 (`morca._internal.watchdog`) and the run page all price runs this way.
 
-The requests are the Kubernetes runner's (`morca._internal.kube`):
-`MORCA_DRIVER_CPU`, `MORCA_HEAD_CPU`, `MORCA_WORKER_CPU` and
-`MORCA_POD_MEMORY` for each pod, a driver alone for a run without dista
-tasks and a driver, a head and its workers for one with them.
+The requests are the Kubernetes runner's (`morca._internal.kube_size`):
+each pod's, from the pipeline's `cpus` and `memory_gb` or the runner's
+defaults, a driver alone for a run without dista tasks and a driver, a head
+and its workers for one with them.
 """
 
 from std.os import getenv
 
-from morca._internal.kube import cpu_millis
 
 comptime VCPU_HOUR = "MORCA_KUBE_PRICE_VCPU_HOUR"
 comptime GB_HOUR = "MORCA_KUBE_PRICE_GB_HOUR"
@@ -79,58 +78,6 @@ def _price(name: StaticString) -> Float64:
 def kube_price() -> KubePrice:
     """The stack's prices, from the environment."""
     return KubePrice(_price(VCPU_HOUR), _price(GB_HOUR))
-
-
-def memory_mb(q: String) raises -> Int:
-    """A Kubernetes memory quantity, `512Mi`, `2Gi`, `1G` or bytes, in MiB,
-    rounded up."""
-    var units: List[Tuple[String, Float64]] = [
-        ("Ki", 1024.0),
-        ("Mi", 1048576.0),
-        ("Gi", 1073741824.0),
-        ("Ti", 1099511627776.0),
-        ("k", 1e3),
-        ("M", 1e6),
-        ("G", 1e9),
-        ("T", 1e12),
-    ]
-    var bytes = -1.0
-    for u in units:
-        if q.endswith(u[0]):
-            var n = String(q[byte = : q.byte_length() - u[0].byte_length()])
-            bytes = Float64(n) * u[1]
-            break
-    if bytes < 0:
-        bytes = Float64(q)
-    var mb = bytes / 1048576.0
-    var whole = Int(mb)
-    return whole + 1 if Float64(whole) < mb else whole
-
-
-def pods(workers: Int) -> Int:
-    """A run's pods: its driver, and its head and workers if it has tasks."""
-    return 1 if workers == 0 else 2 + workers
-
-
-@fieldwise_init
-struct KubeRequests(ImplicitlyCopyable, Movable):
-    """What a run's pods ask for in all."""
-
-    var cpu_millis: Int
-    var memory_mb: Int
-
-
-def kube_requests(workers: Int) raises -> KubeRequests:
-    """What a run with `workers` dista workers asks for on the Kubernetes
-    runner, from its variables (the defaults are `KubeRunner`'s)."""
-    var driver = cpu_millis(getenv("MORCA_DRIVER_CPU", "500m"))
-    var cpu = driver
-    if workers > 0:
-        cpu += cpu_millis(getenv("MORCA_HEAD_CPU", "250m")) + workers * (
-            cpu_millis(getenv("MORCA_WORKER_CPU", "1"))
-        )
-    var mem = pods(workers) * memory_mb(getenv("MORCA_POD_MEMORY", "512Mi"))
-    return KubeRequests(cpu, mem)
 
 
 def cost_text(dollars: Float64) -> String:

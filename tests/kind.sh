@@ -27,6 +27,11 @@
 #   driver's, head's and workers' logs and their samples; and the S3 keys
 #   reach the pods only by reference to the Secret morca-s3, so no Job or Pod
 #   in the cluster holds the secret key;
+# - pods are sized from their pipeline's memory_gb, with limits: fanout's
+#   (0.25) and lake's (0.375) are bigger than the toy's (none: 128Mi), and
+#   fanout's head keeps the default;
+# - a toy run that holds more than its pod's limit is OOMKilled, its attempt
+#   says so, and its retry's pods ask for 1.5 times the memory and succeed;
 # - a pod and a Secret a killed scheduler left behind are deleted when it
 #   starts again, and the logs, in the bucket, are all still there and on
 #   the UI.
@@ -114,14 +119,14 @@ done
 # small pods, room for one fanout cluster (100m driver and head, 3 × 100m
 # workers) and no more; a run whose heartbeat stops is restarted soon. A
 # secret's value is printf's, from its ID, and fanout prints and logs the
-# one it's given.
+# one it's given. A toy run of 2024-05 holds 200 MiB, over its 128Mi.
 value=kind-s3cr3t-orca/kind-token
 kubectl -n morca set env deployment/morca-scheduler -c scheduler \
     MORCA_NOW=2024-02-02T03:00Z MORCA_STALE_SECONDS=10 \
     MORCA_DRIVER_CPU=100m MORCA_HEAD_CPU=100m MORCA_WORKER_CPU=100m MORCA_POD_MEMORY=128Mi \
     MORCA_VCPU_BUDGET=550m MORCA_FANOUT_SHOW_HOST=1 MORCA_FANOUT_SLEEP=1 \
-    MORCA_SECRET_FETCH="printf kind-s3cr3t-%s" MORCA_FANOUT_SECRET=GITHUB_TOKEN \
-    MORCA_RUN_ENV=MORCA_FANOUT_SHOW_HOST,MORCA_FANOUT_SLEEP,MORCA_FANOUT_SECRET
+    MORCA_SECRET_FETCH="printf kind-s3cr3t-%s" MORCA_FANOUT_SECRET=GITHUB_TOKEN MORCA_TOY_GROW=2024-05 \
+    MORCA_RUN_ENV=MORCA_FANOUT_SHOW_HOST,MORCA_FANOUT_SLEEP,MORCA_FANOUT_SECRET,MORCA_TOY_GROW
 kubectl -n morca rollout status deployment/morca-scheduler --timeout=180s || fail "the scheduler"
 morca_cli env MORCA_NOW=2024-02-01T00:00Z morca register --image morca:dev /opt/morca/pipelines/toy \
     || fail "register the toy"
@@ -139,6 +144,7 @@ toy=$(json '/runs?pipeline=toy' | jq -r '.runs[0].id')
 [ "$(json "/runs/$toy" | jq -r '.run | "\(.trigger) \(.partitions)"')" = "schedule 2024-01" ] \
     || fail "run $toy: $(json "/runs/$toy")"
 [ "$(json "/runs/$toy" | jq .cpu_millis)" = 100 ] || fail "the toy's CPU: $(json "/runs/$toy" | jq .cpu_millis)"
+[ "$(q "SELECT pod_memory_mb FROM orca.runs WHERE id = $toy")" = 128 ] || fail "the toy's pod memory"
 gone "orca.run=$toy"
 curl -fsS "$base/runs/$toy/driver.log" | grep -qx "run succeeded" || fail "the toy's driver log"
 # Its driver pod's samples (morca.sample), kept beside the driver log and
@@ -153,7 +159,7 @@ python3 tests/metrics_ok.py build/kind-toy-metrics.jsonl > /dev/null || fail "th
 echo "ok   the toy ran as a driver Job, its driver log and metrics were kept, and nothing of it is left"
 
 # Two fanout runs, one at a time, and a toy run beside them.
-morca_cli morca register --image morca:dev --secret GITHUB_TOKEN=orca/kind-token /opt/morca/pipelines/fanout > /dev/null \
+morca_cli morca register --image morca:dev --memory-gb 0.25 --secret GITHUB_TOKEN=orca/kind-token /opt/morca/pipelines/fanout > /dev/null \
     || fail "register fanout"
 morca_cli morca backfill fanout 2024-01..2024-02 > /dev/null || fail "backfill fanout"
 morca_cli morca backfill toy 2024-03 > /dev/null || fail "backfill the toy"
@@ -165,6 +171,14 @@ f2=$(q "SELECT max(id) FROM orca.runs WHERE pipeline = 'fanout'")
 until_true "SELECT status = 'running' AND heartbeat IS NOT NULL FROM orca.runs WHERE id = $f1" 180
 [ "$(runs "orca.run=$f1,orca.role=worker" | grep -c '^pod/')" -eq 3 ] || fail "3 workers for run $f1"
 [ "$(runs "orca.run=$f1,orca.role=head" | wc -l | tr -d ' ')" -eq 2 ] || fail "a head pod and service for run $f1"
+# Its pods' sizes: memory_gb 0.25 for the driver and workers, requests and
+# limits, and the default for the head; a CPU limit on each.
+size() { kubectl -n morca-runs get pods -l "orca.run=$f1,orca.role=$1" -o jsonpath='{range .items[*]}{.spec.containers[0].resources.requests.memory}/{.spec.containers[0].resources.limits.memory}/{.spec.containers[0].resources.limits.cpu} {end}'; }
+case "$(size worker)" in ("256Mi/256Mi/2 256Mi/256Mi/2 256Mi/256Mi/2 ") ;; (*) fail "run $f1's workers: $(size worker)" ;; esac
+case "$(size driver)" in ("256Mi/256Mi/2 ") ;; (*) fail "run $f1's driver: $(size driver)" ;; esac
+case "$(size head)" in ("128Mi/128Mi/2 ") ;; (*) fail "run $f1's head: $(size head)" ;; esac
+[ "$(q "SELECT pod_memory_mb FROM orca.runs WHERE id = $f1")" = $((4 * 256 + 128)) ] || fail "run $f1's pod memory"
+echo "ok   fanout's pods are sized from its memory_gb, with limits"
 # Its secret: in its own Secret, and only there.
 [ "$(kubectl -n morca-runs get secret "morca-$f1-1-secrets" -o jsonpath='{.data.GITHUB_TOKEN}' | base64 -d)" = "$value" ] \
     || fail "run $f1's Secret"
@@ -245,7 +259,7 @@ echo "ok   the budget kept the toy waiting"
 # and read in the warehouse on MinIO.
 kubectl -n morca run lake-register --image=morca:data --image-pull-policy=IfNotPresent --restart=Never \
     --env=MORCA_DATABASE_URL=postgresql://orca:morca-local@postgres.morca.svc:5432/orca \
-    --command -- morca register --image morca:data /opt/morca/pipelines/lake > /dev/null
+    --command -- morca register --image morca:data --memory-gb 0.375 /opt/morca/pipelines/lake > /dev/null
 kubectl -n morca wait --for=jsonpath='{.status.phase}'=Succeeded pod/lake-register --timeout=180s > /dev/null \
     || { kubectl -n morca logs lake-register || true; fail "register lake"; }
 kubectl -n morca delete pod lake-register --wait=false > /dev/null
@@ -270,7 +284,30 @@ pull_logs
 grep -q "wrote 3 rows" "build/kind-logs/lake/$lake/write/2024-01/1.log" \
     || fail "lake's write log: $(find build/kind-logs/lake | tr '\n' ' ')"
 grep -q "ROWS 3" "build/kind-logs/lake/$lake/count/_run/1.log" || fail "lake's count didn't read 3 rows"
+[ "$(q "SELECT pod_memory_mb FROM orca.runs WHERE id = $lake")" = 384 ] || fail "lake's pod memory"
 echo "ok   lake wrote and read an Iceberg table on MinIO, its attempt logs in the bucket"
+
+# A toy run over its pod's memory limit: OOMKilled, and its retry's pods ask
+# for 1.5 times as much (the toy holds the memory on its first attempt only).
+morca_cli morca backfill toy 2024-05 > /dev/null || fail "backfill the toy's 2024-05"
+oom=$(q "SELECT max(id) FROM orca.runs WHERE pipeline = 'toy' AND partitions = '2024-05'")
+until_true "SELECT count(*) > 0 FROM orca.attempts a JOIN orca.steps s ON s.id = a.step WHERE s.run = $oom AND a.error LIKE 'OOMKilled: %'" 240
+why=$(q "SELECT a.error FROM orca.attempts a JOIN orca.steps s ON s.id = a.step WHERE s.run = $oom AND a.error LIKE 'OOMKilled: %'")
+echo "$why" | grep -q "(the driver) passed its memory limit, 128 MB, and Kubernetes killed it; its retry asks for 192 MB" \
+    || fail "run $oom's attempt: $why"
+# Its second start's Job, while it's there.
+res=
+i=0
+while [ -z "$res" ]; do
+    res=$(kubectl -n morca-runs get job "morca-$oom-2" -o jsonpath='{.spec.template.spec.containers[0].resources.requests.memory}/{.spec.template.spec.containers[0].resources.limits.memory}' 2> /dev/null || true)
+    i=$((i + 1)); [ "$i" -lt 240 ] || fail "no second start for run $oom"; sleep 0.5
+done
+[ "$res" = 192Mi/192Mi ] || fail "run $oom's retry asks for $res"
+until_true "SELECT status = 'succeeded' FROM orca.runs WHERE id = $oom" 240
+[ "$(q "SELECT starts || ' ' || pod_memory_mb FROM orca.runs WHERE id = $oom")" = "2 192" ] \
+    || fail "run $oom: $(q "SELECT starts || ' ' || pod_memory_mb FROM orca.runs WHERE id = $oom")"
+gone "orca.run=$oom"
+echo "ok   a toy run over its memory limit was OOMKilled, and its retry asked for 1.5 times as much and succeeded"
 
 # What a killed scheduler left behind.
 kill "$fwd"; fwd=

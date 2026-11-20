@@ -59,10 +59,19 @@ of `driver.log`. A run ends when its driver says so, before its pods
 have, so the Job of a run that ended in the last `MORCA_KUBE_SETTLE_SECONDS`
 (30) is kept until it finishes: its pods' last lines and samples are in
 their logs by then, even a run shorter than its sampler's start. A pod deleted before its Job finishes takes its samples
-with it, as it does its log. Pods ask for `MORCA_DRIVER_CPU`, `MORCA_HEAD_CPU` and
-`MORCA_WORKER_CPU` (default 500m, 250m and 1) and `MORCA_POD_MEMORY` (512Mi)
-each; `cpu_millis` is a run's total, which the scheduler checks against
-`MORCA_VCPU_BUDGET` before making a cluster.
+with it, as it does its log.
+
+**Sizes.** Each pod asks for, and is limited to, what
+`morca._internal.kube_size` sizes it at: the driver and workers from the
+pipeline's `cpus` and `memory_gb`, the head and what a pipeline doesn't ask
+for from `MORCA_DRIVER_CPU`, `MORCA_HEAD_CPU`, `MORCA_WORKER_CPU`,
+`MORCA_POD_CPU_LIMIT` and `MORCA_POD_MEMORY`. The CPU they ask for in all is
+the run's `cpu_millis`, which the scheduler checks against
+`MORCA_VCPU_BUDGET` before making a cluster. Every tick, `sweep` looks for a
+pod of a running start that was `OOMKilled` or `Evicted` (`killed`): its
+attempts fail saying so, the pipeline asks for more memory from then on,
+and the start's objects go, its logs kept, so the run starts again on a new
+cluster.
 """
 
 from std.os import getenv
@@ -72,9 +81,23 @@ from std.base64 import b64decode
 
 from k8s import JOBS, PODS, SERVICES, Client, Config, Resource
 import morca._internal.db.kube as kube_db
+import morca._internal.db.scheduler as scheduler_db
+
+from morca._internal.cgroup import growth_pct_of
 
 from morca._internal.crash import crash_summary
 from morca._internal.json import quote
+from morca._internal.kube_size import (
+    OOM_KILLED,
+    KubeDefaults,
+    Killed,
+    KubeSizes,
+    PodSize,
+    killed_text,
+    next_memory_mb,
+    pod_killed,
+    pod_memory,
+)
 from morca._internal.logs import (
     is_remote,
     location_exists,
@@ -84,6 +107,7 @@ from morca._internal.logs import (
     write_location,
 )
 from morca._internal.sample import PREFIX, metrics_location, sample_seconds
+from morca._internal.resources import Request
 from morca._internal.state import State
 
 comptime DISTA_PORT = 6390
@@ -155,13 +179,6 @@ def split_samples(text: String) -> Tuple[String, String]:
     return (own^, samples^)
 
 
-def cpu_millis(s: String) raises -> Int:
-    """A CPU quantity, `500m` or `2` or `1.5`, in thousandths."""
-    if s.endswith("m"):
-        return Int(s[byte = : s.byte_length() - 1])
-    return Int(Float64(s) * 1000.0 + 0.5)
-
-
 @fieldwise_init
 struct RunSpec(Copyable, Movable):
     """What one start of a run needs made."""
@@ -180,6 +197,8 @@ struct RunSpec(Copyable, Movable):
     var secrets: List[Tuple[String, String]]
     """The run's secrets, (NAME, value): in the run's Secret, which every
     pod's NAME refers to, over the variables above of that name."""
+    var sizes: KubeSizes
+    """Its pods' requests and limits (`morca._internal.kube_size`)."""
 
 
 def secret_name(run: Int, start: Int) -> String:
@@ -341,10 +360,6 @@ struct KubeRunner(Movable):
     var k: Client
     var namespace: String
     var secret: String
-    var driver_cpu: Int
-    var head_cpu: Int
-    var worker_cpu: Int
-    var memory: String
     var deadline: Int
     var env: List[String]
     """Names of the scheduler's variables copied to every pod."""
@@ -358,23 +373,14 @@ struct KubeRunner(Movable):
         cfg.namespace = self.namespace
         self.k = Client(cfg^)
         self.secret = getenv("MORCA_RUN_SECRET", "morca-db")
-        self.driver_cpu = cpu_millis(getenv("MORCA_DRIVER_CPU", "500m"))
-        self.head_cpu = cpu_millis(getenv("MORCA_HEAD_CPU", "250m"))
-        self.worker_cpu = cpu_millis(getenv("MORCA_WORKER_CPU", "1"))
-        self.memory = getenv("MORCA_POD_MEMORY", "512Mi")
+        # Read now, so a bad size stops the scheduler as it starts.
+        _ = KubeDefaults.from_env()
         self.deadline = Int(getenv("MORCA_RUN_DEADLINE", "86400"))
         self.s3_secret = getenv("MORCA_RUN_S3_SECRET", "morca-s3")
         self.env = List[String]()
         for n in getenv("MORCA_RUN_ENV").split(","):
             if n.strip():
                 self.env.append(String(n.strip()))
-
-    def cpu_of(self, workers: Int) -> Int:
-        """The CPU a run asks for, in thousandths: its driver, and its head
-        and workers if it has any."""
-        if workers == 0:
-            return self.driver_cpu
-        return self.driver_cpu + self.head_cpu + workers * self.worker_cpu
 
     def _name(self, r: RunSpec) -> String:
         return String("morca-", r.run, "-", r.start)
@@ -411,15 +417,6 @@ struct KubeRunner(Movable):
             taken,
         )
 
-    def _resources(self, cpu: Int) -> String:
-        return String(
-            '{"requests": {"cpu": "',
-            cpu,
-            'm", "memory": ',
-            quote(self.memory),
-            "}}",
-        )
-
     def _pod(
         self,
         r: RunSpec,
@@ -428,7 +425,7 @@ struct KubeRunner(Movable):
         owner: String,
         command: String,
         env: String,
-        cpu: Int,
+        size: PodSize,
     ) -> String:
         return String(
             '{"apiVersion": "v1", "kind": "Pod", "metadata": {"name": ',
@@ -445,7 +442,7 @@ struct KubeRunner(Movable):
             ', "env": ',
             self._env(r, env),
             ', "resources": ',
-            self._resources(cpu),
+            size.resources(),
             "}]}}",
         )
 
@@ -518,7 +515,7 @@ struct KubeRunner(Movable):
             ', "env": ',
             self._env(r, driver_env),
             ', "resources": ',
-            self._resources(self.driver_cpu),
+            r.sizes.driver.resources(),
             "}]}}}}",
         )
         var made: Value
@@ -555,7 +552,7 @@ struct KubeRunner(Movable):
                     DISTA_PORT,
                     '"}',
                 ),
-                self.head_cpu,
+                r.sizes.head,
             ),
         )
         _ = self.k.create(
@@ -592,7 +589,7 @@ struct KubeRunner(Movable):
                         '"}, {"name": "DISTA_ADVERTISE", "valueFrom":',
                         ' {"fieldRef": {"fieldPath": "status.podIP"}}}',
                     ),
-                    self.worker_cpu,
+                    r.sizes.worker,
                 ),
             )
 
@@ -678,6 +675,73 @@ struct KubeRunner(Movable):
             print("morca: can't read run", run, "'s secrets to mask:", e)
         return out^
 
+    def _killed(self, mut db: State, live: Dict[String, Bool]) raises -> Int:
+        """Ends each running start a pod of which was killed for its memory
+        (`OOMKilled`, `Evicted`: `morca._internal.kube_size`), and returns
+        how many objects went."""
+        var done = Dict[String, Bool]()
+        var n = 0
+        for pod in self.k.list(PODS, "orca.run").items:
+            var key = _key(pod)
+            if (
+                key not in live
+                or key in done
+                or pod.try_at("/metadata/deletionTimestamp")
+            ):
+                continue
+            var k = pod_killed(pod)
+            if not k.reason:
+                continue
+            done[key] = True
+            try:
+                n += self._end_killed(db, pod, k)
+            except e:
+                print("morca: can't end run", key, "killed for its memory:", e)
+        return n
+
+    def _end_killed(self, mut db: State, pod: Value, k: Killed) raises -> Int:
+        """Fails the attempts of `pod`'s run, saying it was killed as `k`
+        says; for a driver or worker, has the pipeline ask for
+        `MORCA_RUN_MEMORY_GROWTH` (1.5) times as much memory from now on,
+        at most `memory_gb`'s maximum, and fails the run unretried if it
+        was killed there already; and deletes the start's objects, its
+        logs kept, so the run starts again on a new cluster as one whose
+        driver died does. Returns how many objects went."""
+        var run = Int(pod.at("/metadata/labels/orca.run").string_value())
+        var start = pod.at("/metadata/labels/orca.start").string_value()
+        var pipeline = pod.at("/metadata/labels/orca.pipeline").string_value()
+        var role = pod.at("/metadata/labels/orca.role").string_value()
+        var request = pod_memory(pod, "requests")
+        var limit = pod_memory(pod, "limits")
+        var at = limit if k.reason == OOM_KILLED else request
+        var next = 0
+        var spent = False
+        if role != "head":
+            var g = getenv("MORCA_RUN_MEMORY_GROWTH")
+            var ceiling = Request.of(
+                "", kube_db.memory_gb(db.conn, pipeline)
+            ).memory_max_mb
+            next = next_memory_mb(
+                k, request, limit, growth_pct_of(g) if g else 150, ceiling
+            )
+            spent = k.reason == OOM_KILLED and next <= limit
+        var why = killed_text(k, _name_of(pod), role, at, next)
+        print("run", run, "of", pipeline, why)
+        _ = db.interrupt(run, why)
+        if next > at:
+            scheduler_db.raise_memory(db.conn, pipeline, next, run)
+        if spent:
+            # A retry would be killed at the same limit.
+            kube_db.fail_killed(db.conn, run, start, why)
+        var job = self.k.get(JOBS, String("morca-", run, "-", start))
+        if job:
+            self._keep_logs(db, job.value())
+        var sel = String("orca.run=", run, ",orca.start=", start)
+        var n = self.k.delete_all(JOBS, sel)
+        n += self.k.delete_all(SERVICES, sel)
+        n += self.k.delete_all(PODS, sel)
+        return n
+
     def remove(self, run: Int) raises:
         """Deletes everything labelled with the run, whatever its start."""
         var sel = String("orca.run=", run)
@@ -701,7 +765,7 @@ struct KubeRunner(Movable):
             db.conn, Float64(getenv("MORCA_KUBE_SETTLE_SECONDS", "30"))
         ):
             settling[k] = True
-        var n = 0
+        var n = self._killed(db, live)
         for o in self.k.list(JOBS, "orca.run").items:
             var finished = (
                 _count(o, "/status/succeeded") > 0
