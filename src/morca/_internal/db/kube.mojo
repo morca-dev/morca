@@ -1,5 +1,5 @@
 """The Kubernetes runner's queries (`morca._internal.kube`): which runs' objects to
-keep."""
+keep, and the `held` of a run whose pods can't start."""
 
 from postgres import Connection, Params
 
@@ -75,4 +75,52 @@ def fail_killed(
             " AND starts::text = $2"
         ),
         Params().int64(Int64(run)).text(start).text(why),
+    )
+
+
+def hold_stuck(
+    mut conn: Connection, run: Int, start: String, why: String
+) raises -> Optional[Tuple[String, Float64]]:
+    """Has `run`, if it's running at start `start` on Kubernetes, say `why`
+    as its `held`: a pod of it can't start. Returns its pipeline and how
+    many seconds ago it started, or None if it isn't running there."""
+    var rows = conn.query(
+        (
+            "UPDATE orca.runs SET held = $3 WHERE id = $1 AND status ="
+            " 'running' AND starts::text = $2 AND placement = 'kubernetes'"
+            " RETURNING pipeline, coalesce(extract(epoch FROM now() -"
+            " started), 0)::float8 AS age"
+        ),
+        Params().int64(Int64(run)).text(start).text(why),
+    )
+    if len(rows) == 0:
+        return None
+    var r = rows.row(0)
+    return (r.text("pipeline"), r.float64("age"))
+
+
+def held_running(mut conn: Connection) raises -> List[Tuple[String, Bool]]:
+    """`<run>-<start>` of every running Kubernetes run with a `held` (its
+    pods were stuck), and whether it has a heartbeat."""
+    var out = List[Tuple[String, Bool]]()
+    for r in conn.query(
+        (
+            "SELECT id || '-' || starts AS k, heartbeat IS NOT NULL AS beat"
+            " FROM orca.runs WHERE status = 'running' AND placement ="
+            " 'kubernetes' AND held IS NOT NULL"
+        ),
+        Params(),
+    ):
+        out.append((r.text("k"), r.bool("beat")))
+    return out^
+
+
+def clear_held(mut conn: Connection, key: String) raises:
+    """Clears the `held` of the running run `<run>-<start>` `key`."""
+    _ = conn.execute(
+        (
+            "UPDATE orca.runs SET held = NULL WHERE status = 'running' AND"
+            " id || '-' || starts = $1 AND held IS NOT NULL"
+        ),
+        Params().text(key),
     )

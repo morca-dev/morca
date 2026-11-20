@@ -349,7 +349,7 @@ def _status_card(mut h: Html, r: RunRow, defs: List[StepDef]):
         )
         h.text("until ", r.waiting_until, ", when a step asked to run again")
         h.raw("</dd>")
-    if r.held and r.status == "queued":
+    if r.held and (r.status == "queued" or r.status == "running"):
         fact_term(
             h,
             "Held",
@@ -357,7 +357,8 @@ def _status_card(mut h: Html, r: RunRow, defs: List[StepDef]):
             (
                 "Why it is queued and not started: its placement is full or"
                 " the host is short of memory or disk. It starts once that"
-                " clears."
+                " clears. On Kubernetes, why a running run's pods can't"
+                " start: it goes on once they can."
             ),
             "placement",
         )

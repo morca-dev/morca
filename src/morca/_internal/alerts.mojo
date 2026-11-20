@@ -8,6 +8,7 @@ where the data is and sent through `morca._internal.notify.alert`:
 | `fill-stalled` | the pipeline | high | `fill`: no fill run finished in `MORCA_NOTIFY_FILL_STALL_HOURS` (2) while the pipeline is unpaused, inside its window and not done; resolved when one finishes |
 | `disk` | the mount | high | `disk`: the control host's fullest disk is over `MORCA_NOTIFY_DISK_PERCENT` (85); resolved when it isn't |
 | `worker-lost` | worker and last seen | default | `lost_workers`: a worker that last said it was running runs, quiet for `MORCA_NOTIFY_WORKER_SECONDS` (300), once per loss |
+| `pod-stuck` | run and start | high | a Kubernetes run's pod can't start, past the start grace (sent from `morca._internal.kube`), once per run and start |
 | `backup-failed` | `nightly` | high | `morca notify --kind backup-failed ...`, from morca-stack's backup |
 
 The text is plain and short: names, numbers and the first line of an error,

@@ -24,6 +24,7 @@ this for you: see [hetzner.md](hetzner.md#alerts-on-your-phone-ntfy).
 | `fill-stalled` | a [fill](morca-toml.md#fills) has had no fill run finish in `MORCA_NOTIFY_FILL_STALL_HOURS` (2) | high; "moving again" once it is |
 | `disk` | the control host's fullest disk is over `MORCA_NOTIFY_DISK_PERCENT` (85) | high; "fine again" once it is under |
 | `worker-lost` | a [remote worker](workers.md) holding runs has been quiet for `MORCA_NOTIFY_WORKER_SECONDS` (300) | default |
+| `pod-stuck` | a [Kubernetes](morca-toml.md#stuck-pods) run's pod has been unable to start (no node it may go on, or an image it can't pull) since before the start grace, `MORCA_START_SECONDS` (300); once per run and start | high |
 | `memory-pressure` | the scheduler's host, or a worker's, has held new runs for [memory pressure](morca-toml.md#memory-pressure) for `MORCA_ADMIT_PRESSURE_GRACE_SECONDS` (600) with none of morca's runs going there; runs then start one at a time | high; "has eased" once it doesn't hold |
 | anything | a script ran `morca notify --kind <kind> ...` | as given |
 

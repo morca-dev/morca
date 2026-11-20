@@ -2,7 +2,9 @@
 its Secret, never by value, and `MORCA_SECRETS` naming them; the bucket's
 settings, with the S3 keys from the stack's Secret, never as values; and
 their sizes, from the pipeline's request, with limits, and what a pod killed
-for its memory says (morca._internal.kube_size).
+for its memory says (morca._internal.kube_size); where they go, pull secrets,
+node selectors, tolerations, anti-affinity and a priority class
+(morca._internal.kube_place), and why a pod can't start.
 tests/kind.sh runs it on a cluster.
 """
 
@@ -23,7 +25,10 @@ from morca._internal.kube_size import (
     next_memory_mb,
     pod_killed,
     pod_memory,
+    pod_stuck,
+    stuck_text,
 )
+from morca._internal.kube_place import KubePlacement, Toleration
 from morca._internal.logs import mask_values
 from morca._internal.resources import Request
 
@@ -269,6 +274,209 @@ def test_killed_retry_asks_for_more() raises:
     assert_true(t.startswith("Evicted: pod p") and "(low on memory)" in t, t)
     t = killed_text(oom, "p", "head", 128, 0)
     assert_true("MORCA_POD_MEMORY" in t, t)
+
+
+def _unset_place() raises:
+    for n in [
+        "MORCA_KUBE_PULL_SECRET",
+        "MORCA_KUBE_DRIVER_NODE_SELECTOR",
+        "MORCA_KUBE_HEAD_NODE_SELECTOR",
+        "MORCA_KUBE_WORKER_NODE_SELECTOR",
+        "MORCA_KUBE_DRIVER_TOLERATIONS",
+        "MORCA_KUBE_HEAD_TOLERATIONS",
+        "MORCA_KUBE_WORKER_TOLERATIONS",
+        "MORCA_KUBE_WORKER_ANTI_AFFINITY",
+        "MORCA_KUBE_PRIORITY_CLASS",
+    ]:
+        _ = unsetenv(n)
+
+
+def _spec(p: KubePlacement, role: StaticString) raises -> Value:
+    return loads(String('{"restartPolicy": "Never"', p.spec(role, 7, 2), "}"))
+
+
+def test_placement_unset_adds_nothing() raises:
+    """A stack with none of the variables gets pod specs as before."""
+    _unset_place()
+    var p = KubePlacement.from_env()
+    assert_equal(p.spec("driver", 7, 2), "")
+    assert_equal(p.spec("head", 7, 2), "")
+    assert_equal(p.spec("worker", 7, 2), "")
+    assert_equal(KubePlacement.none().spec("worker", 7, 2), "")
+
+
+def test_placement_per_role() raises:
+    """Pull secrets and the priority class on every pod; each role its own
+    node selector and tolerations; the workers their anti-affinity."""
+    _unset_place()
+    _ = setenv("MORCA_KUBE_PULL_SECRET", "ghcr-pull, other")
+    _ = setenv(
+        "MORCA_KUBE_DRIVER_NODE_SELECTOR",
+        "karpenter.sh/capacity-type=on-demand",
+    )
+    _ = setenv(
+        "MORCA_KUBE_WORKER_NODE_SELECTOR",
+        "karpenter.sh/capacity-type=spot,pool=runs",
+    )
+    _ = setenv("MORCA_KUBE_WORKER_TOLERATIONS", "spot=true:NoSchedule,gpu")
+    _ = setenv("MORCA_KUBE_WORKER_ANTI_AFFINITY", "preferred")
+    _ = setenv("MORCA_KUBE_PRIORITY_CLASS", "morca-runs")
+    var p = KubePlacement.from_env()
+    var driver = _spec(p, "driver")
+    assert_equal(
+        driver.at("/imagePullSecrets/0/name").string_value(), "ghcr-pull"
+    )
+    assert_equal(driver.at("/imagePullSecrets/1/name").string_value(), "other")
+    assert_equal(
+        driver.at("/nodeSelector/karpenter.sh~1capacity-type").string_value(),
+        "on-demand",
+    )
+    assert_false(driver.try_at("/tolerations"))
+    assert_false(driver.try_at("/affinity"))
+    assert_equal(driver.at("/priorityClassName").string_value(), "morca-runs")
+    var head = _spec(p, "head")
+    assert_false(head.try_at("/nodeSelector"))
+    assert_equal(
+        head.at("/imagePullSecrets/0/name").string_value(), "ghcr-pull"
+    )
+    var worker = _spec(p, "worker")
+    assert_equal(
+        worker.at("/nodeSelector/karpenter.sh~1capacity-type").string_value(),
+        "spot",
+    )
+    assert_equal(worker.at("/nodeSelector/pool").string_value(), "runs")
+    assert_equal(worker.at("/tolerations/0/key").string_value(), "spot")
+    assert_equal(worker.at("/tolerations/0/operator").string_value(), "Equal")
+    assert_equal(worker.at("/tolerations/0/value").string_value(), "true")
+    assert_equal(
+        worker.at("/tolerations/0/effect").string_value(), "NoSchedule"
+    )
+    assert_equal(worker.at("/tolerations/1/key").string_value(), "gpu")
+    assert_equal(worker.at("/tolerations/1/operator").string_value(), "Exists")
+    assert_false(worker.try_at("/tolerations/1/effect"))
+    var term = worker.at(
+        "/affinity/podAntiAffinity/preferredDuringSchedulingIgnoredDuringExecution/0"
+    )
+    assert_equal(term.at("/weight").int_value(), 100)
+    assert_equal(
+        term.at("/podAffinityTerm/topologyKey").string_value(),
+        "kubernetes.io/hostname",
+    )
+    var labels = term.at("/podAffinityTerm/labelSelector/matchLabels")
+    assert_equal(labels.at("/orca.run").string_value(), "7")
+    assert_equal(labels.at("/orca.start").string_value(), "2")
+    assert_equal(labels.at("/orca.role").string_value(), "worker")
+    _ = setenv("MORCA_KUBE_WORKER_ANTI_AFFINITY", "required")
+    worker = _spec(KubePlacement.from_env(), "worker")
+    assert_equal(
+        worker.at(
+            "/affinity/podAntiAffinity/requiredDuringSchedulingIgnoredDuringExecution/0/topologyKey"
+        ).string_value(),
+        "kubernetes.io/hostname",
+    )
+    _unset_place()
+
+
+def test_placement_refuses_bad_values() raises:
+    _unset_place()
+    for kv in [
+        ("MORCA_KUBE_WORKER_NODE_SELECTOR", "spot"),
+        ("MORCA_KUBE_WORKER_TOLERATIONS", "spot=true:Never"),
+        ("MORCA_KUBE_HEAD_TOLERATIONS", "=x:NoSchedule"),
+        ("MORCA_KUBE_WORKER_ANTI_AFFINITY", "always"),
+    ]:
+        _ = setenv(kv[0], kv[1])
+        var refused = False
+        try:
+            _ = KubePlacement.from_env()
+        except e:
+            refused = True
+            assert_true(kv[0] in String(e), String(e))
+        assert_true(refused, kv[0])
+        _ = unsetenv(kv[0])
+    var t = Toleration.parse("dedicated:NoExecute")
+    assert_equal(t.key, "dedicated")
+    assert_equal(t.value, "")
+    assert_equal(t.effect, "NoExecute")
+
+
+def test_pod_stuck() raises:
+    """Unschedulable from the PodScheduled condition, an image pull from a
+    container's waiting state; nothing for a pod that's starting or ran."""
+    var unsched = _pod(
+        '{"phase": "Pending", "conditions": [{"type": "PodScheduled",'
+        ' "status": "False", "reason": "Unschedulable", "message": "0/1 nodes'
+        " are available: 1 node(s) didn't match Pod's node affinity/selector."
+        '"}]}'
+    )
+    var s = pod_stuck(unsched)
+    assert_equal(s.reason, "Unschedulable")
+    var t = stuck_text(s, "morca-7-1", "driver")
+    assert_true(
+        t.startswith(
+            "held: pod morca-7-1 (the driver) can't be scheduled"
+            " (Unschedulable): 0/1 nodes are available"
+        ),
+        t,
+    )
+    for reason in ["ImagePullBackOff", "ErrImagePull"]:
+        var pull = _pod(
+            String(
+                '{"phase": "Pending", "conditions": [{"type": "PodScheduled",',
+                ' "status": "True"}], "containerStatuses": [{"name": "main",',
+                ' "state": {"waiting": {"reason": "',
+                reason,
+                (
+                    '", "message": "Back-off pulling image'
+                    ' \\"morca:missing\\""}}}]}'
+                ),
+            )
+        )
+        s = pod_stuck(pull)
+        assert_equal(s.reason, reason)
+        t = stuck_text(s, "morca-7-1-worker-0", "worker")
+        assert_true(
+            t.startswith(
+                String(
+                    "held: pod morca-7-1-worker-0 (the worker) can't pull its",
+                    " image (",
+                    reason,
+                    '): Back-off pulling image "morca:missing"',
+                )
+            ),
+            t,
+        )
+    # Pulling, or waiting for a node the autoscaler hasn't said no to yet.
+    var creating = _pod(
+        '{"phase": "Pending", "containerStatuses": [{"name": "main",'
+        ' "state": {"waiting": {"reason": "ContainerCreating"}}}]}'
+    )
+    assert_equal(pod_stuck(creating).reason, "")
+    assert_equal(pod_stuck(_pod('{"phase": "Pending"}')).reason, "")
+    var running = _pod(
+        '{"phase": "Running", "conditions": [{"type": "PodScheduled",'
+        ' "status": "False", "reason": "Unschedulable"}]}'
+    )
+    assert_equal(pod_stuck(running).reason, "")
+    var long = String()
+    for _ in range(100):
+        long.write("abcdef")
+    t = stuck_text(
+        pod_stuck(
+            _pod(
+                String(
+                    '{"phase": "Pending", "containerStatuses": [{"state":',
+                    ' {"waiting": {"reason": "ErrImagePull", "message": "',
+                    long,
+                    '"}}}]}',
+                )
+            )
+        ),
+        "p",
+        "driver",
+    )
+    assert_true(t.endswith("..."), t)
+    assert_true(t.byte_length() < 400, t)
 
 
 def main() raises:

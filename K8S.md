@@ -49,7 +49,7 @@ Orphaned clusters are the main cost risk, so cleanup doesn't depend on any one p
 
 ### Nodes
 
-morca never creates EC2 instances. Pods ask for CPU and memory; the cluster's node autoscaler (Karpenter, built into EKS Auto Mode) starts nodes for pods that are waiting and removes nodes once they're empty.
+morca never creates EC2 instances. Pods ask for CPU and memory; the cluster's node autoscaler (Karpenter, built into EKS Auto Mode) starts nodes for pods that are waiting and removes nodes once they're empty. A pod no node will take, or whose image can't be pulled, holds its run, which says why on its page and alerts once, rather than starting again ([stuck pods](docs/morca-toml.md#stuck-pods)). Private images are pulled with the stack's `MORCA_KUBE_PULL_SECRET`.
 
 ## What it needs on AWS
 
@@ -78,7 +78,7 @@ Limits stack from morca down to AWS, and each layer catches what the one above m
 | **morca** | `max_runs` per pipeline; a total vCPU budget across all runs, checked before a cluster is created; a maximum cluster size per pipeline; a deadline per run. morca records pods × size × duration per run in Postgres, and with `MORCA_KUBE_PRICE_VCPU_HOUR` and `MORCA_KUBE_PRICE_GB_HOUR` set the run page shows an estimated cost per run, fills keep to `fill_budget_per_day`, and the watchdog's `cost` rule counts the pods ([Kubernetes prices](docs/morca-toml.md#kubernetes-prices)). |
 | **Kubernetes** | A **ResourceQuota** on `morca-runs`: a hard cap on the CPU and memory all run pods can request. If morca has a bug, extra pods just wait. |
 | **Karpenter** | **NodePool limits**, such as `cpu: 64`: the most EC2 that can run at once, whatever asks for it. |
-| **Spot** | Workers on Spot, typically 60–90% cheaper. A reclaimed worker means retried dista tasks, a lost driver means `morca resume`, both of which phase 1 already handles. The head and driver stay on on-demand. |
+| **Spot** | Workers on Spot, typically 60–90% cheaper. A reclaimed worker means retried dista tasks, a lost driver means `morca resume`, both of which phase 1 already handles. The head and driver stay on on-demand: each role's node selector and tolerations are the stack's `MORCA_KUBE_<ROLE>_NODE_SELECTOR` and `_TOLERATIONS` ([where the pods go](docs/morca-toml.md#where-the-pods-go)). |
 | **AWS** | **Budgets** alerts in the Billing and Cost Management console. A **spend limit** in AWS Settings > Billing, which pauses the *whole project* when it's reached; only the project owner can set it. Tags `morca.pipeline` and `orca.run` on what runs create, for cost allocation. |
 
 ## A Kubernetes client in Mojo
