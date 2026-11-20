@@ -417,6 +417,11 @@ def _start(
             continue
         if self.runner:
             try:
+                # Its secrets, read now, go into a Secret of its own
+                # (morca._internal.kube).
+                var secrets = List[Tuple[String, String]]()
+                for s in p.secrets:
+                    secrets.append((s[0], fetch_secret(s[1])))
                 self.runner.value().start(
                     RunSpec(
                         Int(id),
@@ -427,6 +432,7 @@ def _start(
                         p.workers,
                         new_code[i],
                         p.env.copy(),
+                        secrets^,
                     )
                 )
                 print("started", p.name, "run", id, "on its cluster")

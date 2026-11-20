@@ -13,6 +13,7 @@ How morca will create the pods a run needs, what that takes on AWS, how its cost
 | A Pod and a Service for the dista head | The Service gives the head a DNS name, which becomes `DISTA_HEAD` |
 | N worker Pods, sized for the pipeline | dista's workers: the pipeline's image with `DISTA_ROLE=worker` |
 | A Job for the driver | The pipeline binary: `taxi run ...`, or `taxi resume <run>` |
+| A Secret, for a run with secrets | The values of its `secrets`, which its pods refer to by name |
 
 The scheduler watches the Job, and deletes everything labelled with the run when it ends.
 
@@ -31,7 +32,7 @@ Driver-side autoscaling, a run asking for more workers while it runs as Ray's au
 The Kubernetes API is HTTPS with JSON. Creating a pod is `POST /api/v1/namespaces/morca-runs/pods` with the pod's spec as the body.
 
 - **Authentication.** The scheduler runs under a **ServiceAccount**. Kubernetes mounts a token and the cluster's CA certificate into its pod (`/var/run/secrets/kubernetes.io/serviceaccount/`), and the scheduler sends the token as a bearer header.
-- **Authorization.** A **Role** in the `morca-runs` namespace grants create, get, list, watch and delete on pods, jobs and services there, and nothing else.
+- **Authorization.** A **Role** in the `morca-runs` namespace grants create, get, list, watch and delete on pods, jobs and services there, and create, get, list and delete on secrets (a run's own, `morca._internal.kube`), and nothing else.
 - **Watching.** `GET ...?watch=true&labelSelector=morca.run%3D<id>` is a long-lived response with one JSON event per line.
 
 ### Cleanup, in layers
