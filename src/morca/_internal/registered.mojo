@@ -25,6 +25,12 @@ from morca._internal.ec2 import Ec2Spec
 from morca.month import Month
 from morca.schedule import Schedule
 from morca._internal.secrets import parse_secrets
+from morca._internal.kube_size import (
+    KubeDefaults,
+    KubeRequests,
+    KubeSizes,
+    kube_sizes,
+)
 from morca._internal.resources import Request
 from morca._internal.recommend import (
     Recommendation,
@@ -369,4 +375,27 @@ def fill_pipeline(
         p.workers,
         pool,
         p.keys_per_run,
+        _kube_requests(p),
     )
+
+
+def kube_sizes_of(p: Registered, sized: RunRequest) raises -> KubeSizes:
+    """The pods of a start of `p` on Kubernetes (`morca._internal.kube_size`),
+    whose request is `sized`, with what an out-of-memory kill raised its
+    memory to."""
+    return kube_sizes(
+        sized.request,
+        p.request().memory_max_mb,
+        p.memory_raised_mb,
+        KubeDefaults.from_env(),
+    )
+
+
+def _kube_requests(p: Registered) -> Optional[KubeRequests]:
+    """What a run of `p` asks for on Kubernetes in all, `auto` as last
+    learned; None if that can't be read."""
+    try:
+        var sized = resolve_request(p.request(), p.learned, p.learn)
+        return kube_sizes_of(p, sized).requests(p.workers)
+    except:
+        return None

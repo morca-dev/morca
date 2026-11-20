@@ -1,16 +1,31 @@
 """What morca._internal.kube gives a run's pods: its secrets by reference to
 its Secret, never by value, and `MORCA_SECRETS` naming them; the bucket's
-settings, with the S3 keys from the stack's Secret, never as values.
+settings, with the S3 keys from the stack's Secret, never as values; and
+their sizes, from the pipeline's request, with limits, and what a pod killed
+for its memory says (morca._internal.kube_size).
 tests/kind.sh runs it on a cluster.
 """
 
 from std.os import setenv, unsetenv
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
-from json import loads
+from json import Value, loads
 
 from morca._internal.kube import pod_env, s3_key_env, secret_env, secret_name
+from morca._internal.kube_size import (
+    EVICTED,
+    OOM_KILLED,
+    KubeDefaults,
+    Killed,
+    PodSize,
+    killed_text,
+    kube_sizes,
+    next_memory_mb,
+    pod_killed,
+    pod_memory,
+)
 from morca._internal.logs import mask_values
+from morca._internal.resources import Request
 
 
 def test_secret_env_refers_to_the_secret() raises:
@@ -133,6 +148,127 @@ def test_mask_values() raises:
     )
     # Values under 4 bytes are left, as mask leaves them.
     assert_equal(String(unsafe_from_utf8=got), "a ***, abc, ***s\n")
+
+
+def _same(
+    got: PodSize, cpu: Int, cpu_limit: Int, mb: Int, mb_limit: Int
+) raises:
+    assert_equal(got.cpu_request, cpu)
+    assert_equal(got.cpu_limit, cpu_limit)
+    assert_equal(got.memory_request_mb, mb)
+    assert_equal(got.memory_limit_mb, mb_limit)
+
+
+def test_pod_sizes_from_the_request() raises:
+    """Driver and workers from `cpus` and `memory_gb`, MIN the request and
+    MAX the limit; the head and what isn't asked for from the defaults."""
+    var d = KubeDefaults(500, 250, 1000, 2000, 512)
+    var none = kube_sizes(Request(0, 0, 0, 0), 0, 0, d)
+    _same(none.driver, 500, 2000, 512, 512)
+    _same(none.head, 250, 2000, 512, 512)
+    _same(none.worker, 1000, 2000, 512, 512)
+    var r = Request.of("2..4", "1..3")
+    var s = kube_sizes(r, r.memory_max_mb, 0, d)
+    _same(s.driver, 2000, 4000, 1024, 3072)
+    _same(s.worker, 2000, 4000, 1024, 3072)
+    _same(s.head, 250, 2000, 512, 512)
+    # Two pipelines with different memory_gb: different pods.
+    var big = kube_sizes(Request.of("", "4"), 4096, 0, d)
+    _same(big.worker, 1000, 2000, 4096, 4096)
+    assert_true(big.worker.memory_limit_mb != s.worker.memory_limit_mb)
+    # What the run asks for in all: the driver alone, or with its head and
+    # workers.
+    assert_equal(s.requests(0).cpu_millis, 2000)
+    assert_equal(s.requests(0).memory_mb, 1024)
+    assert_equal(s.requests(3).cpu_millis, 2000 + 250 + 3 * 2000)
+    assert_equal(s.requests(3).memory_mb, 1024 + 512 + 3 * 1024)
+    # A CPU limit under the request is the request; 0 is none.
+    var under = KubeDefaults(500, 250, 3000, 1000, 512)
+    var w = kube_sizes(Request(0, 0, 0, 0), 0, 0, under).worker
+    _same(w, 3000, 3000, 512, 512)
+    var unlimited = KubeDefaults(500, 250, 1000, 0, 512)
+    var free = kube_sizes(Request(0, 0, 0, 0), 0, 0, unlimited)
+    assert_equal(free.driver.cpu_limit, 0)
+    var res = loads(free.driver.resources())
+    assert_false(res.try_at("/limits/cpu"))
+    assert_equal(res.at("/limits/memory").string_value(), "512Mi")
+    res = loads(s.worker.resources())
+    assert_equal(res.at("/requests/cpu").string_value(), "2000m")
+    assert_equal(res.at("/limits/cpu").string_value(), "4000m")
+    assert_equal(res.at("/requests/memory").string_value(), "1024Mi")
+    assert_equal(res.at("/limits/memory").string_value(), "3072Mi")
+
+
+def test_pod_sizes_after_an_oom_kill() raises:
+    """The raised memory is the least a pod asks for and is limited to, up
+    to memory_gb's maximum; the head keeps the default."""
+    var d = KubeDefaults(500, 250, 1000, 2000, 128)
+    var s = kube_sizes(Request(0, 0, 0, 0), 0, 192, d)
+    _same(s.driver, 500, 2000, 192, 192)
+    _same(s.head, 250, 2000, 128, 128)
+    var r = Request.of("", "1..3")
+    _same(kube_sizes(r, 3072, 2048, d).worker, 1000, 2000, 2048, 3072)
+    _same(kube_sizes(r, 3072, 5000, d).worker, 1000, 2000, 3072, 3072)
+    # A raise under the request changes nothing.
+    _same(kube_sizes(r, 3072, 512, d).worker, 1000, 2000, 1024, 3072)
+
+
+def _pod(status: String) raises -> Value:
+    return loads(
+        String(
+            '{"metadata": {"name": "morca-7-1-worker-0"}, "spec":',
+            ' {"containers": [{"name": "main", "resources": {"requests":',
+            ' {"cpu": "100m", "memory": "128Mi"}, "limits": {"memory":',
+            ' "256Mi"}}}]}, "status": ',
+            status,
+            "}",
+        )
+    )
+
+
+def test_pod_killed() raises:
+    """OOMKilled from a container's state, Evicted from the pod's."""
+    var oom = _pod(
+        '{"phase": "Failed", "containerStatuses": [{"name": "main", "state":'
+        ' {"terminated": {"exitCode": 137, "reason": "OOMKilled"}}}]}'
+    )
+    assert_equal(pod_killed(oom).reason, OOM_KILLED)
+    assert_equal(pod_memory(oom, "requests"), 128)
+    assert_equal(pod_memory(oom, "limits"), 256)
+    var evicted = _pod(
+        '{"phase": "Failed", "reason": "Evicted", "message": "The node was'
+        ' low on resource: memory."}'
+    )
+    assert_equal(pod_killed(evicted).reason, EVICTED)
+    assert_equal(
+        pod_killed(evicted).message, "The node was low on resource: memory."
+    )
+    var done = _pod(
+        '{"phase": "Succeeded", "containerStatuses": [{"name": "main",'
+        ' "state": {"terminated": {"exitCode": 0, "reason": "Completed"}}}]}'
+    )
+    assert_equal(pod_killed(done).reason, "")
+    assert_equal(pod_killed(_pod('{"phase": "Pending"}')).reason, "")
+
+
+def test_killed_retry_asks_for_more() raises:
+    """An OOM kill asks for 1.5 times the limit, an eviction 1.5 times the
+    request, at most memory_gb's maximum."""
+    var oom = Killed(String(OOM_KILLED), String())
+    var ev = Killed(String(EVICTED), String("low on memory"))
+    assert_equal(next_memory_mb(oom, 128, 128, 150, 0), 192)
+    assert_equal(next_memory_mb(ev, 128, 256, 150, 0), 192)
+    assert_equal(next_memory_mb(oom, 1024, 3072, 150, 4096), 4096)
+    assert_equal(next_memory_mb(oom, 1024, 3072, 150, 3072), 3072)
+    var t = killed_text(oom, "morca-7-1-x", "driver", 128, 192)
+    assert_true(t.startswith("OOMKilled: pod morca-7-1-x (the driver)"), t)
+    assert_true("128 MB" in t and "its retry asks for 192 MB" in t, t)
+    t = killed_text(oom, "p", "worker", 3072, 3072)
+    assert_true("the most it may ask for" in t, t)
+    t = killed_text(ev, "p", "worker", 128, 192)
+    assert_true(t.startswith("Evicted: pod p") and "(low on memory)" in t, t)
+    t = killed_text(oom, "p", "head", 128, 0)
+    assert_true("MORCA_POD_MEMORY" in t, t)
 
 
 def main() raises:
