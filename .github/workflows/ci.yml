@@ -635,10 +635,10 @@ jobs:
   # examples/rust-worker, a worker and its proxy pipeline over a local
   # warehouse (tests/rust_worker.sh), then examples/hindcast over its
   # committed GRIB2 fixtures, offline (tests/hindcast.sh), then morca-sdk's
-  # whole pipelines in Rust (tests/rust_sdk.sh). In the rust
-  # environment: the data environment's tins plus conda-forge's rust (cargo
-  # fetches crates; nothing fetches NOAA data). Where `changes` says, as
-  # the test legs are. No secrets, and the token can only read.
+  # whole pipelines in Rust (tests/rust_sdk.sh). In the data environment,
+  # with cargo in the rust one, conda-forge's rust and no Mojo
+  # (scripts/cargo.sh; cargo fetches crates, nothing fetches NOAA data).
+  # Where `changes` says, as the test legs are. No secrets, and the token can only read.
   rust-worker:
     needs: [changes, release]
     if: ${{ !cancelled() && github.event_name != 'schedule' && needs.changes.outputs.code != 'false' && needs.release.outputs.release_only != 'true' }}
@@ -705,18 +705,20 @@ jobs:
       - uses: prefix-dev/setup-pixi@v0.10.2
         with:
           pixi-version: v0.78.0
-          environments: rust
+          # The tests run in data; cargo in rust (scripts/cargo.sh), the Rust
+          # toolchain without Mojo.
+          environments: data rust
           manifest-path: morca/pixi.toml
           # No caches: a cached environment (~1.3 GB) and Mojo's and cargo's
           # build caches (~0.4 GB) saved a minute of this job's ~6 (#446).
           cache: false
           pixi-bin-path: ${{ runner.temp }}/pixi/bin/pixi
       - name: Rust workers
-        run: pixi run -e rust test-rust-worker
+        run: pixi run -e data test-rust-worker
       - name: Hindcast (examples/hindcast, on fixtures)
-        run: pixi run -e rust test-hindcast
+        run: pixi run -e data test-hindcast
       - name: Pipelines in Rust (morca-sdk, conformance on SQLite and Postgres, beside the Mojo toy)
-        run: pixi run -e rust test-rust-sdk
+        run: pixi run -e data test-rust-sdk
 
   # The tests that apply on macOS, on the Mac mini runner (m4-mini, an isolated
   # `ci` user; no Docker, no sudo), for the repo's own code only: a fork's

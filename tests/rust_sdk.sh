@@ -19,28 +19,15 @@
 #   and the UI's pages list both, and the control run's driver log was kept
 #   by the Rust binary's `keep-log`.
 #
-# Run in the rust environment, which has cargo and Mojo (for the scheduler
-# and the Mojo toy), with a throwaway Postgres:
-#   pixi run -e rust test-rust-sdk
+# Run in the data environment, which has Mojo (for the scheduler and the
+# Mojo toy), with a throwaway Postgres; cargo runs in the rust environment
+# (scripts/cargo.sh, which also picks the C compiler a crate builds with):
+#   pixi run -e data test-rust-sdk
 set -eu
 cd "$(dirname "$0")/.."
 . "$PWD/tests/port.sh"
 mkdir -p build/rust-sdk
 export CARGO_TARGET_DIR=$PWD/build/cargo
-# On Linux, cargo links with conda-forge's compiler, against its older
-# glibc. C code a crate builds (aws-lc-sys, under the tables feature) must
-# use that compiler too: the system's gcc compiles against the system's
-# glibc headers and leaves symbols (__isoc23_sscanf) the link can't find.
-if [ "$(uname)" = Linux ] && [ -z "${CC:-}" ]; then
-    for c in "${CONDA_TOOLCHAIN_HOST:-none}-cc" x86_64-conda-linux-gnu-cc aarch64-conda-linux-gnu-cc; do
-        if command -v "$c" > /dev/null 2>&1; then
-            CC=$c
-            CXX=${c%-cc}-c++
-            export CC CXX
-            break
-        fi
-    done
-fi
 log=build/rust-sdk/test.log
 : > "$log"
 ui=
@@ -66,12 +53,12 @@ mojo_toy=$!
 scripts/mojo-build.sh -I src $DEP_INC tests/sensors/rows_by.mojo -o build/sn-rows_by >> "$log" 2>&1 &
 mojo_rows=$!
 
-cargo test --manifest-path rust/morca-sdk/Cargo.toml >> "$log" 2>&1 || fail "cargo test"
-cargo test --manifest-path rust/morca-sdk/Cargo.toml --features tables >> "$log" 2>&1 \
+scripts/cargo.sh test --manifest-path rust/morca-sdk/Cargo.toml >> "$log" 2>&1 || fail "cargo test"
+scripts/cargo.sh test --manifest-path rust/morca-sdk/Cargo.toml --features tables >> "$log" 2>&1 \
     || fail "cargo test --features tables"
 echo "ok   the crate's tests, with and without tables"
-cargo build --release --manifest-path examples/toy-rust/Cargo.toml >> "$log" 2>&1 || fail "build the Rust toy"
-cargo build --release --features tables --examples --manifest-path rust/morca-sdk/Cargo.toml >> "$log" 2>&1 \
+scripts/cargo.sh build --release --manifest-path examples/toy-rust/Cargo.toml >> "$log" 2>&1 || fail "build the Rust toy"
+scripts/cargo.sh build --release --features tables --examples --manifest-path rust/morca-sdk/Cargo.toml >> "$log" 2>&1 \
     || fail "build the table examples"
 rtoy=$CARGO_TARGET_DIR/release/toy_rust
 case "$(uname)" in

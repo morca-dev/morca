@@ -88,9 +88,9 @@ pixi run -e data test-keyed    # partitions named by a dataset's column, not dat
 pixi run -e data test-keyed-backfills   # 20,000 keys backfilled a hundred to a run, and new ones sensed
 pixi run -e data test-keyed-sensor   # a keyed sensor over the keys a daily pipeline writes
 pixi run -e data test-keyed-names   # keys such as owner/repo, in logs and the UI
-pixi run -e rust test-rust-worker   # a step in Rust (docs/rust-workers.md): examples/rust-worker
-pixi run -e rust test-rust-sdk      # a whole pipeline in Rust (docs/rust-pipelines.md): examples/toy-rust
-pixi run -e rust test-hindcast   # examples/hindcast: GFS forecasts fetched by a Rust worker and scored in Mojo, on fixtures
+pixi run -e data test-rust-worker   # a step in Rust (docs/rust-workers.md): examples/rust-worker
+pixi run -e data test-rust-sdk      # a whole pipeline in Rust (docs/rust-pipelines.md): examples/toy-rust
+pixi run -e data test-hindcast   # examples/hindcast: GFS forecasts fetched by a Rust worker and scored in Mojo, on fixtures
 pixi run toy && ./build/toy run --partitions 2024-01..2024-03
 pixi run fanout && ./build/fanout run --partitions 2024-01   # steps calling dista
 pixi run daily && ./build/daily run --partitions 2024-02-27..2024-03-02   # by day

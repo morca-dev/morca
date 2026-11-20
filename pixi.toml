@@ -454,11 +454,10 @@ taxi = { cmd = "scripts/mojo-build.sh -I src -I examples/taxi $DEP_INC examples/
 # Rust workers (docs/rust-workers.md): the morca-worker crate's tests, and
 # examples/rust-worker, a worker and its proxy pipeline, over a local
 # warehouse. Cargo is only needed to build a worker; a run loads the built
-# library, so the runtime image doesn't carry it.
-[feature.rust.dependencies]
-rust = ">=1.85"
-
-[feature.rust.tasks]
+# library, so the runtime image doesn't carry it. These run in the data
+# environment, and cargo in the rust environment (scripts/cargo.sh): no
+# environment holds both `rust` and `mojo-compiler`, whose libLLVM.dylib
+# rust's overwrites on osx-arm64.
 test-rust-worker = { cmd = "tests/rust_worker.sh", depends-on = ["build-liblake"] }
 test-hindcast = { cmd = "tests/hindcast.sh", depends-on = ["build-liblake"] }
 # morca-sdk (#521): whole pipelines in Rust, with no Mojo toolchain; the
@@ -466,6 +465,10 @@ test-hindcast = { cmd = "tests/hindcast.sh", depends-on = ["build-liblake"] }
 # Mojo toy and the Rust toy side by side under one scheduler. liblake is for
 # the Mojo reader of the table a Rust step replaces.
 test-rust-sdk = { cmd = "scripts/with-postgres.sh tests/rust_sdk.sh", depends-on = ["build-liblake"] }
+
+# The Rust toolchain, on its own (see the Rust tests above).
+[feature.rust.dependencies]
+rust = ">=1.85"
 
 # MinIO for the tests over object storage (scripts/with-minio.sh). conda-forge
 # builds it for these two platforms only.
@@ -514,4 +517,4 @@ fuzz = { depends-on = ["fuzz-months", "fuzz-days", "fuzz-cron", "fuzz-tz", "fuzz
 fuzz = ["fuzz"]
 fmt = { features = ["fmt"], no-default-feature = true }
 data = { features = ["data"], no-default-feature = true }
-rust = { features = ["data", "rust"], no-default-feature = true }
+rust = { features = ["rust"], no-default-feature = true }
