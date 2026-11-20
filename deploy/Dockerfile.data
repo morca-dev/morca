@@ -1,10 +1,14 @@
 # The image with morca's pipelines over Iceberg tables (the `data` pixi
 # environment): the taxi pipeline, beside the toy and fanout, and the `morca`
 # binary. Its dependencies compile from source, at the revisions CI's data
-# job pins (deploy/clone-data-deps.sh reads them from the workflow). Build it
-# from the repository root:
+# job pins (deploy/clone-data-deps.sh reads them from the workflow), and
+# liblake, which morca.tables loads (#454), is built into /opt/morca/lib.
+# Build it from the repository root:
 #
 #     docker build -f deploy/Dockerfile.data -t morca:data .
+#
+# tests/kind.sh builds it with PIPELINES=examples/lake.mojo, the pipeline
+# whose runs write and read an Iceberg table on the cluster.
 FROM ghcr.io/prefix-dev/pixi:0.78.0-bookworm AS build
 ARG PIPELINES="examples/toy.mojo examples/fanout.mojo examples/taxi/taxi.mojo"
 RUN apt-get update && apt-get install -y --no-install-recommends gcc libc6-dev git ca-certificates \
@@ -20,16 +24,18 @@ COPY bin bin
 COPY examples examples
 RUN mkdir -p /out/bin /out/pipelines \
     && pixi run -e data sh -c 'mojo build -I src $DEP_INC bin/scheduler.mojo -o /out/bin/morca \
+        && mojo build --emit shared-lib -g1 -I src $DEP_INC src/morca/_lake/liblake.mojo -o /out/liblake.so \
         && for p in '"${PIPELINES}"'; do n=$(basename "$p" .mojo); \
             mojo build -I src -I "$(dirname "$p")" $DEP_INC "$p" -o "/out/pipelines/$n" || exit 1; done'
 # What the binaries link, and what they and their tins dlopen from
 # $CONDA_PREFIX/lib (libpq, flare's and objectstore's shims, the codecs,
 # sqlite), with what those link: only the pixi environment's libraries.
-RUN env=/src/morca/.pixi/envs/data && mkdir -p /out/lib \
+# And liblake, with what it links.
+RUN env=/src/morca/.pixi/envs/data && mkdir -p /out/lib && mv /out/liblake.so /out/lib/ \
     && loaded=$(ls $env/lib/libpq.so* $env/lib/libflare_*.so $env/lib/libobjectstoremojo.so \
         $env/lib/libzstd.so* $env/lib/liblz4.so* $env/lib/libbrotli*.so* $env/lib/libsnappy.so* \
         $env/lib/libdeflate.so* $env/lib/libz.so* $env/lib/libsqlite3.so* $env/lib/libcurl.so* 2>/dev/null || true) \
-    && ldd /out/bin/morca /out/pipelines/* $loaded | awk -v e="$env" '$3 ~ "^"e {print $3}' \
+    && ldd /out/bin/morca /out/pipelines/* /out/lib/liblake.so $loaded | awk -v e="$env" '$3 ~ "^"e {print $3}' \
         | sort -u | xargs -r cp -L -t /out/lib \
     && cp -L -t /out/lib $loaded
 

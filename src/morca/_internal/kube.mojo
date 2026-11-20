@@ -21,6 +21,20 @@ retries runs itself. The driver reaches Postgres through the Secret
 head through `DISTA_HEAD`; the scheduler's variables named in
 `MORCA_RUN_ENV` are copied to every pod.
 
+**Object storage.** Every pod gets the scheduler's bucket settings as it
+has them (`AWS_REGION`, `AWS_DEFAULT_REGION`, `AWS_ENDPOINT_URL`,
+`AWS_ENDPOINT_URL_S3`, `AWS_S3_FORCE_PATH_STYLE`), and `MORCA_WAREHOUSE`,
+`MORCA_PUBLIC_WAREHOUSE` and `MORCA_LOGS` when they're in object storage (a
+directory on the scheduler's host means nothing in a pod), so its steps
+reach the warehouse and its attempts' logs and timeline go to the bucket.
+The S3 keys come from the stack's Secret `MORCA_RUN_S3_SECRET` (default
+`morca-s3`; empty for none) in that namespace, keys `AWS_ACCESS_KEY_ID`
+and `AWS_SECRET_ACCESS_KEY`, by `secretKeyRef` (optional, so a stack
+without it runs as before): `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` and
+`AWS_SESSION_TOKEN` are never copied as values, from `MORCA_RUN_ENV` or the
+pipeline's own `env`, so no Job or Pod object holds them. A run's own secret
+of one of those names wins over the stack's.
+
 A run's secrets (`secrets` in morca.toml), read by the scheduler as it
 starts the run (`morca._internal.control.fetch_secret`), go into a Secret of
 the run's own, `morca-<run>-<start>-secrets`, which every pod's variables of
@@ -33,7 +47,9 @@ objects in `sweep`.
 
 Every tick, `sweep` deletes the objects of a run that isn't running at that
 start any more, and those of a Job that has finished, first appending its
-driver pod's log to the run's `driver.log` under `MORCA_LOGS`: what's left after a
+driver pod's log to the run's `driver.log` under `MORCA_LOGS`, and its
+head's and workers' to `head.log` and `worker-<i>.log` beside it, each
+start's under a `--- start <n>` line: what's left after a
 run ends, a run restarted on a new cluster, and what a scheduler that was
 killed left behind. Each pod's command runs with the sampler beside it
 (`morca._internal.sample`, unless `MORCA_SAMPLE_SECONDS=0`), whose lines go to the
@@ -60,6 +76,7 @@ import morca._internal.db.kube as kube_db
 from morca._internal.crash import crash_summary
 from morca._internal.json import quote
 from morca._internal.logs import (
+    is_remote,
     location_exists,
     mask_values,
     read_location,
@@ -196,6 +213,72 @@ def secret_env(
     return got^
 
 
+def s3_keys() -> List[String]:
+    """The keys of the stack's S3 Secret (`MORCA_RUN_S3_SECRET`), each the
+    name of the variable it becomes in every pod."""
+    return ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"]
+
+
+def is_key(name: String) -> Bool:
+    """Whether `name` is a variable that holds an S3 credential, which goes
+    into a pod only by reference to a Secret, never as a value."""
+    return (
+        name == "AWS_ACCESS_KEY_ID"
+        or name == "AWS_SECRET_ACCESS_KEY"
+        or name == "AWS_SESSION_TOKEN"
+    )
+
+
+def bucket_vars() -> List[String]:
+    """The scheduler's variables every pod gets, if set: where the bucket
+    is, and the warehouse and logs in it (`_remote_only`'s)."""
+    return [
+        "AWS_REGION",
+        "AWS_DEFAULT_REGION",
+        "AWS_ENDPOINT_URL",
+        "AWS_ENDPOINT_URL_S3",
+        "AWS_S3_FORCE_PATH_STYLE",
+        "MORCA_WAREHOUSE",
+        "MORCA_PUBLIC_WAREHOUSE",
+        "MORCA_LOGS",
+    ]
+
+
+def _remote_only(name: String) -> Bool:
+    """A location copied to pods only when it's in object storage."""
+    return (
+        name == "MORCA_WAREHOUSE"
+        or name == "MORCA_PUBLIC_WAREHOUSE"
+        or name == "MORCA_LOGS"
+    )
+
+
+def s3_key_env(
+    secret: String, skip: List[String], extra: String = ""
+) -> String:
+    """JSON `env` entries for the S3 keys, each from its key of the stack's
+    Secret `secret` (optional: a pod starts without it), after `extra`;
+    none named in `skip` (the run's own secrets), and none without
+    `secret`."""
+    var got = String(extra)
+    if not secret:
+        return got^
+    for n in s3_keys():
+        if n in skip:
+            continue
+        got.write(
+            ", " if got else "",
+            '{"name": ',
+            quote(n),
+            ', "valueFrom": {"secretKeyRef": {"name": ',
+            quote(secret),
+            ', "key": ',
+            quote(n),
+            ', "optional": true}}}',
+        )
+    return got^
+
+
 def pod_env(
     copied: List[String],
     own: List[Tuple[String, String]],
@@ -205,20 +288,27 @@ def pod_env(
     """A container's `env`: the scheduler's variables named in `copied`
     (`MORCA_RUN_ENV`) but those the pipeline sets itself, the pipeline's own
     (`own`), then `extra`, JSON entries; none of the first two named in
-    `taken` (the run's secrets and `MORCA_SECRETS`, which `extra` sets)."""
+    `taken` (the run's secrets and `MORCA_SECRETS`, which `extra` sets).
+    The bucket's variables (`bucket_vars`) are copied as if named in
+    `copied`, and no S3 key (`is_key`) is ever written as a value."""
     var out = String("[")
     var first = True
     var names = copied.copy()
-    # The sampler's interval, as the scheduler has it.
-    if "MORCA_SAMPLE_SECONDS" not in names:
-        names.append("MORCA_SAMPLE_SECONDS")
+    # The sampler's interval, as the scheduler has it, and the bucket.
+    var always = bucket_vars()
+    always.append("MORCA_SAMPLE_SECONDS")
+    for n in always:
+        if n not in names:
+            names.append(n)
     for n in names:
-        var mine = n in taken
+        var mine = n in taken or is_key(n)
         for kv in own:
             if kv[0] == n:
                 mine = True
         var v = getenv(n)
         if not v or mine:
+            continue
+        if _remote_only(n) and not is_remote(v):
             continue
         out.write(
             "" if first else ", ",
@@ -230,7 +320,7 @@ def pod_env(
         )
         first = False
     for kv in own:
-        if kv[0] in taken:
+        if kv[0] in taken or is_key(kv[0]):
             continue
         out.write(
             "" if first else ", ",
@@ -258,6 +348,9 @@ struct KubeRunner(Movable):
     var deadline: Int
     var env: List[String]
     """Names of the scheduler's variables copied to every pod."""
+    var s3_secret: String
+    """The stack's Secret of S3 keys, which every pod refers to; "" for
+    none."""
 
     def __init__(out self) raises:
         self.namespace = getenv("MORCA_RUNS_NAMESPACE", "morca-runs")
@@ -270,6 +363,7 @@ struct KubeRunner(Movable):
         self.worker_cpu = cpu_millis(getenv("MORCA_WORKER_CPU", "1"))
         self.memory = getenv("MORCA_POD_MEMORY", "512Mi")
         self.deadline = Int(getenv("MORCA_RUN_DEADLINE", "86400"))
+        self.s3_secret = getenv("MORCA_RUN_S3_SECRET", "morca-s3")
         self.env = List[String]()
         for n in getenv("MORCA_RUN_ENV").split(","):
             if n.strip():
@@ -300,18 +394,20 @@ struct KubeRunner(Movable):
 
     def _env(self, r: RunSpec, extra: String) -> String:
         """A container's `env`: the copied variables, the pipeline's own,
-        then `extra` and the run's secrets, from its Secret."""
+        then `extra`, the S3 keys from the stack's Secret, and the run's
+        secrets, from its Secret."""
         var names = List[String]()
         for kv in r.secrets:
             names.append(kv[0])
+        var with_keys = s3_key_env(self.s3_secret, names, extra)
         if len(names) == 0:
-            return pod_env(self.env, r.env, extra)
+            return pod_env(self.env, r.env, with_keys)
         var taken = names.copy()
         taken.append("MORCA_SECRETS")
         return pod_env(
             self.env,
             r.env,
-            secret_env(names, secret_name(r.run, r.start), extra),
+            secret_env(names, secret_name(r.run, r.start), with_keys),
             taken,
         )
 
@@ -502,7 +598,8 @@ struct KubeRunner(Movable):
 
     def _keep_logs(self, mut db: State, job: Value):
         """Appends the log of the Job's driver pod to the run's `driver.log`
-        under `MORCA_LOGS`, and keeps each of its pods' samples in the run's
+        under `MORCA_LOGS`, its head's and workers' to `head.log` and
+        `worker-<i>.log` beside it (`_append_log`), and keeps each of its pods' samples in the run's
         `metrics/<pod>.jsonl`, as the pods are about to go. A driver that
         crashed has the attempts it left running failed with the crash's
         first frames (`morca._internal.crash`), if the run is still at that start.
@@ -513,10 +610,11 @@ struct KubeRunner(Movable):
                 "/metadata/labels/orca.pipeline"
             ).string_value()
             var start = job.at("/metadata/labels/orca.start").string_value()
-            var at = run_dir(pipeline, run)
-            if not at:
+            var dir = run_dir(pipeline, run)
+            if not dir:
                 return
-            at.write("/driver.log")
+            var at = String(dir, "/driver.log")
+            var prefix = String("morca-", run, "-", start, "-")
             # The run's secrets, which its pods masked already: in case
             # something got past.
             var values = self._secret_values(run, Int(start))
@@ -541,13 +639,21 @@ struct KubeRunner(Movable):
                 var role = pod.try_at("/metadata/labels/orca.role")
                 if role and role.value().string_value() == "driver":
                     text.write(got[0])
+                elif name.startswith(prefix):
+                    # The head's and workers' own: head.log, worker-<i>.log.
+                    _append_log(
+                        String(
+                            dir,
+                            "/",
+                            name[byte = prefix.byte_length() :],
+                            ".log",
+                        ),
+                        start,
+                        got[0],
+                    )
             if not text:
                 return
-            var before = String()
-            if location_exists(at):
-                before = String(from_utf8_lossy=Span(read_location(at)))
-            var all = String(before, "--- start ", start, "\n", text)
-            write_location(at, all.as_bytes())
+            _append_log(at, start, text)
             var why = crash_summary(text)
             if why and kube_db.running_at(db.conn, run, start):
                 var n = db.interrupt(run, why)
@@ -629,6 +735,15 @@ struct KubeRunner(Movable):
                 if self.k.delete(SECRETS, _name_of(o)):
                     n += 1
         return n
+
+
+def _append_log(at: String, start: String, text: String) raises:
+    """Appends `text` to the log at `at`, under a `--- start <start>` line."""
+    var before = String()
+    if location_exists(at):
+        before = String(from_utf8_lossy=Span(read_location(at)))
+    var all = String(before, "--- start ", start, "\n", text)
+    write_location(at, all.as_bytes())
 
 
 def _name_of(o: Value) raises -> String:
