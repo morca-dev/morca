@@ -1,0 +1,1 @@
+- **Kubernetes runs have a price:** set `MORCA_KUBE_PRICE_VCPU_HOUR` and `MORCA_KUBE_PRICE_GB_HOUR` for the scheduler and `morca ui`, and fills with `fill_budget_per_day` run on Kubernetes, the watchdog's `cost` rule counts the pods, and the run page shows a cost; unset, budgeted fills there still start nothing. (#564)

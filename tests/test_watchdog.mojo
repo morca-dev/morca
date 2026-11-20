@@ -61,6 +61,22 @@ def test_cost_rate_and_spend() raises:
     assert_equal(Int(cost_spent(leases, 3600.0, 0.0) * 100 + 0.5), 87)
 
 
+def test_cost_counts_kubernetes_pods() raises:
+    """A Kubernetes run's pods count at their own price (#564): $2/h up
+    for 20 minutes, beside an instance, trips the $3/h rate."""
+    var c = default_config()
+    var leases: List[Lease] = [
+        Lease("c7g.4xlarge", 1200.0, -1.0),
+        Lease("kubernetes", 1200.0, -1.0, 2.0),
+        Lease("kubernetes", 7200.0, 3600.0, 2.0),  # an hour, ended
+    ]
+    assert_equal(Int(cost_rate(leases, 0.0, 0.0) * 1000), 2580)
+    assert_equal(Int(cost_spent(leases, 86400.0, 0.0) * 100 + 0.5), 286)
+    leases.append(Lease("kubernetes", 1200.0, -1.0, 1.0))
+    var r = eval_cost(c, leases, _all())
+    assert_true(r.tripped, r.detail)
+
+
 def test_cost_sustained_and_day() raises:
     var c = default_config()
     # 6 x $0.58 = $3.48/h, up for 20 minutes: sustained over 15 minutes.

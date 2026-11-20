@@ -71,7 +71,7 @@ Limits stack from morca down to AWS, and each layer catches what the one above m
 
 | Layer | Control |
 |---|---|
-| **morca** | `max_runs` per pipeline; a total vCPU budget across all runs, checked before a cluster is created; a maximum cluster size per pipeline; a deadline per run. morca records pods × size × duration per run in Postgres, so the UI can show an estimated cost per run. |
+| **morca** | `max_runs` per pipeline; a total vCPU budget across all runs, checked before a cluster is created; a maximum cluster size per pipeline; a deadline per run. morca records pods × size × duration per run in Postgres, and with `MORCA_KUBE_PRICE_VCPU_HOUR` and `MORCA_KUBE_PRICE_GB_HOUR` set the run page shows an estimated cost per run, fills keep to `fill_budget_per_day`, and the watchdog's `cost` rule counts the pods ([Kubernetes prices](docs/morca-toml.md#kubernetes-prices)). |
 | **Kubernetes** | A **ResourceQuota** on `morca-runs`: a hard cap on the CPU and memory all run pods can request. If morca has a bug, extra pods just wait. |
 | **Karpenter** | **NodePool limits**, such as `cpu: 64`: the most EC2 that can run at once, whatever asks for it. |
 | **Spot** | Workers on Spot, typically 60–90% cheaper. A reclaimed worker means retried dista tasks, a lost driver means `morca resume`, both of which phase 1 already handles. The head and driver stay on on-demand. |

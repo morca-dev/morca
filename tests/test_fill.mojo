@@ -1,6 +1,7 @@
 """Fills (`morca._internal.fill`): what the keys take, the window, the range a fill
 covers, the price of a run, and which pipelines can't fill."""
 
+from std.os import setenv, unsetenv
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
 from morca.civil import parse_time
@@ -8,6 +9,8 @@ from morca._internal.fill import (
     Fill,
     eta_text,
     FillStatus,
+    COST_MARGIN,
+    budget_slots,
     fill_refusal,
     lag_note,
     lag_text,
@@ -23,6 +26,14 @@ from morca._internal.fill import (
     range_keys,
     run_hourly,
     unknown_type,
+)
+from morca._internal.kube_price import (
+    KubePrice,
+    cost_text,
+    kube_price,
+    kube_requests,
+    memory_mb,
+    pods,
 )
 
 
@@ -243,6 +254,7 @@ def test_prices() raises:
     assert_equal(run_hourly("local", "", "", 4), 0.0)
     # A worker pool's machines run anyway.
     assert_equal(run_hourly("worker:gharchive", "x9g.huge", "", 4), 0.0)
+    _unset_kube()
     assert_true(run_hourly("kubernetes", "", "", 0) < 0)
     # A head and its most workers.
     var p = run_hourly("ec2", "t4g.medium", "c7g.xlarge", 4)
@@ -260,6 +272,100 @@ def test_prices() raises:
     assert_equal(eta_text(30), "1m")
     assert_equal(eta_text(7260), "2h 1m")
     assert_equal(eta_text(3 * 86400 + 7200), "3d 2h")
+
+
+def _near(got: Float64, want: Float64) raises:
+    assert_true(abs(got - want) < 1e-9, String(got, " is not ", want))
+
+
+def _unset_kube():
+    for n in [
+        "MORCA_KUBE_PRICE_VCPU_HOUR",
+        "MORCA_KUBE_PRICE_GB_HOUR",
+        "MORCA_DRIVER_CPU",
+        "MORCA_HEAD_CPU",
+        "MORCA_WORKER_CPU",
+        "MORCA_POD_MEMORY",
+    ]:
+        _ = unsetenv(n)
+
+
+def test_kube_cost() raises:
+    """A Kubernetes run's cost: its pods' requests and how long it ran, at
+    the stack's prices (#564)."""
+    assert_equal(memory_mb("512Mi"), 512)
+    assert_equal(memory_mb("2Gi"), 2048)
+    assert_equal(memory_mb("1G"), 954)  # 10^9 bytes, rounded up
+    assert_equal(memory_mb("1048576"), 1)
+    assert_equal(pods(0), 1)
+    assert_equal(pods(3), 5)
+    # A vCPU at 4 cents and a GiB at half a cent an hour.
+    var p = KubePrice(0.04, 0.005)
+    _near(p.hourly(2000, 4096), 0.08 + 0.02)
+    _near(p.cost(2000, 4096, 1800.0), 0.05)
+    # One price set: the other counts nothing.
+    _near(KubePrice(0.04, -1.0).cost(1000, 1024, 3600.0), 0.04)
+    # Neither: unpriced.
+    assert_true(KubePrice(-1.0, -1.0).cost(1000, 1024, 3600.0) < 0)
+    assert_equal(cost_text(0.05), "$0.0500")
+    assert_equal(cost_text(12.345), "$12.35")
+    _unset_kube()
+    assert_false(kube_price().priced())
+    # Unset, Kubernetes runs have no price, as before.
+    assert_true(run_hourly("kubernetes", "", "", 3) < 0)
+    _ = setenv("MORCA_KUBE_PRICE_VCPU_HOUR", "0.04", True)
+    _ = setenv("MORCA_KUBE_PRICE_GB_HOUR", "0.005", True)
+    # The runner's defaults: a driver of 500m and 512Mi alone, or with a
+    # head (250m) and 3 workers (1 each), 5 pods of 512Mi.
+    var q = kube_requests(0)
+    assert_equal(q.cpu_millis, 500)
+    assert_equal(q.memory_mb, 512)
+    q = kube_requests(3)
+    assert_equal(q.cpu_millis, 3750)
+    assert_equal(q.memory_mb, 2560)
+    _near(run_hourly("kubernetes", "", "", 3), 3.75 * 0.04 + 2.5 * 0.005)
+    _ = setenv("MORCA_POD_MEMORY", "1Gi", True)
+    _ = setenv("MORCA_DRIVER_CPU", "2", True)
+    _near(run_hourly("kubernetes", "", "", 0), 2 * 0.04 + 0.005)
+    # A price that isn't a number fails closed.
+    _ = setenv("MORCA_KUBE_PRICE_VCPU_HOUR", "four cents", True)
+    _ = unsetenv("MORCA_KUBE_PRICE_GB_HOUR")
+    assert_true(run_hourly("kubernetes", "", "", 0) < 0)
+    _unset_kube()
+
+
+def test_kube_fill_on_budget() raises:
+    """With a price set, a budgeted fill on Kubernetes starts, and stops
+    once its runs have spent the day's budget."""
+    _unset_kube()
+    _ = setenv("MORCA_KUBE_PRICE_VCPU_HOUR", "0.04", True)
+    _ = setenv("MORCA_KUBE_PRICE_GB_HOUR", "0.005", True)
+    var hourly = run_hourly("kubernetes", "", "", 3)  # $0.1625
+    assert_true(hourly > 0)
+    var q = kube_requests(3)
+    var price = kube_price()
+    var budget = 0.5
+    var expected = 3600
+    var spent = 0.0
+    var started = 0
+    # Each pass: a run of an hour may start if one more fits; once it has
+    # run, its pods' hour is spent.
+    while True:
+        var next_cost = COST_MARGIN * hourly * Float64(expected) / 3600.0
+        var slots = budget_slots(1, budget, spent, next_cost, hourly, expected)
+        if slots == 0:
+            break
+        started += 1
+        spent += COST_MARGIN * price.cost(
+            q.cpu_millis, q.memory_mb, Float64(expected)
+        )
+        assert_true(started < 10, "never stopped")
+    # $0.195 a run with the margin: two fit in $0.50, a third doesn't.
+    assert_equal(started, 2)
+    assert_true(spent <= budget, String(spent))
+    # The slots a budget holds: room for two more after none spent.
+    assert_equal(budget_slots(4, budget, 0.0, 0.195, hourly, expected), 2)
+    _unset_kube()
 
 
 def test_who_fills() raises:

@@ -33,6 +33,7 @@ from morca._internal.key_wait import key_room, started
 from morca._internal.kube import (
     RunSpec,
 )
+from morca._internal.kube_price import kube_requests
 from morca._internal.logs import (
     is_remote,
     run_dir,
@@ -222,10 +223,13 @@ def _start(
         else:
             free = min(free, k.room)
     var need = 0
+    var pod_memory = 0
     if control:
         need = 0  # no instance: nothing of the budget
     elif self.runner:
         need = self.runner.value().cpu_of(p.workers)
+        # Its pods' memory, to price it (morca._internal.kube_price).
+        pod_memory = kube_requests(p.workers).memory_mb
     elif self.ec2:
         need = self.ec2.value().cpu_of(
             p.workers > 0, p.head_type, p.worker_type, p.workers
@@ -383,6 +387,8 @@ def _start(
                     sized.runs,
                 )
             )
+            if pod_memory > 0:
+                starting_db.set_pod_memory(tx, id, pod_memory)
             started(tx, id, p.concurrency_key)
     tx.commit()
     for l in lost:

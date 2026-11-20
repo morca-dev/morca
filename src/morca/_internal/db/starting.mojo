@@ -326,6 +326,15 @@ def mark_started(
     )
 
 
+def set_pod_memory(mut tx: Transaction, run: Int64, memory_mb: Int) raises:
+    """Records what `run`'s pods ask for in memory, on Kubernetes, so it can
+    be priced (`morca._internal.kube_price`)."""
+    _ = tx.execute(
+        "UPDATE orca.runs SET pod_memory_mb = $2 WHERE id = $1",
+        Params().int64(run).int64(Int64(memory_mb)),
+    )
+
+
 def fail_start(mut conn: Connection, run: Int64, why: String) raises:
     """Fails `run`, which couldn't start, with `why`, if it is still
     running without a heartbeat."""
