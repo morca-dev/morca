@@ -1,14 +1,25 @@
-# morca on Kubernetes, in the `morca` namespace: Postgres, and the scheduler
-# with morca ui beside it in one pod. Each run gets a cluster of its own in
-# the morca-runs namespace (runs.yaml, morca.kube): a driver Job, and a dista
-# head and workers for a pipeline with tasks. Until logs go to object
-# storage, a run's logs are its pods' (kubectl -n morca-runs logs).
+# morca on Kubernetes, in the `morca` namespace: Postgres, MinIO as the
+# object store, and the scheduler with morca ui beside it in one pod. Each
+# run gets a cluster of its own in the morca-runs namespace (runs.yaml,
+# morca.kube): a driver Job, and a dista head and workers for a pipeline with
+# tasks.
 #
+# The bucket `morca` holds the warehouse (MORCA_WAREHOUSE) and the logs
+# (MORCA_LOGS): the attempts' logs and the timelines the run pods write, and
+# the driver's, head's and workers' logs and samples the scheduler keeps, so
+# they outlive the pods and the scheduler. The scheduler gives every run pod
+# the bucket's settings, and its S3 keys by reference to the Secret morca-s3
+# in morca-runs (runs.yaml), never as values.
+#
+#     docker build -f deploy/k8s/minio.Dockerfile -t morca-minio:dev deploy/k8s
+#     kind load docker-image morca-minio:dev   # or push it where the cluster pulls
 #     kubectl apply -f deploy/k8s/morca.yaml -f deploy/k8s/runs.yaml
 #     kubectl -n morca port-forward svc/morca-ui 8270:8270
 #
-# The password in morca-db is for a local cluster; anywhere else, make the
-# Secret yourself and leave it out of this file.
+# The passwords in morca-db and morca-s3 are for a local cluster; anywhere
+# else, make the Secrets yourself and leave them out of this file. With a
+# bucket of your own, drop MinIO and set AWS_ENDPOINT_URL_S3 (or leave it out
+# on AWS), AWS_REGION and the two locations to it.
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -22,6 +33,17 @@ metadata:
 stringData:
   password: morca-local
   url: postgresql://orca:morca-local@postgres.morca.svc:5432/orca
+---
+# The S3 keys, for MinIO, the scheduler and the UI here, and as morca-s3 in
+# morca-runs (runs.yaml) for the run pods.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: morca-s3
+  namespace: morca
+stringData:
+  AWS_ACCESS_KEY_ID: morca-local
+  AWS_SECRET_ACCESS_KEY: morca-local-s3-secret
 ---
 apiVersion: v1
 kind: Service
@@ -73,6 +95,65 @@ spec:
           requests: {storage: 2Gi}
 ---
 apiVersion: v1
+kind: Service
+metadata:
+  name: minio
+  namespace: morca
+spec:
+  selector: {app: minio}
+  ports: [{port: 9000}]
+---
+# One MinIO server, on a volume of its own, with the bucket `morca` made at
+# start. MinIO publishes no images any more: morca-minio:dev is
+# deploy/k8s/minio.Dockerfile's, built and loaded into the cluster as it says.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: minio
+  namespace: morca
+spec:
+  serviceName: minio
+  replicas: 1
+  selector:
+    matchLabels: {app: minio}
+  template:
+    metadata:
+      labels: {app: minio}
+    spec:
+      containers:
+        - name: minio
+          image: morca-minio:dev
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - -c
+            - >-
+              minio server /data --address :9000 & m=$!;
+              trap 'kill $m' TERM INT;
+              until c=$(curl -s -o /dev/null -w '%{http_code}' --aws-sigv4 aws:amz:us-east-1:s3
+              --user "$MINIO_ROOT_USER:$MINIO_ROOT_PASSWORD" -X PUT http://127.0.0.1:9000/morca);
+              [ "$c" = 200 ] || [ "$c" = 409 ]; do sleep 1; done;
+              echo ok > /tmp/ready; wait $m
+          env:
+            - name: MINIO_ROOT_USER
+              valueFrom: {secretKeyRef: {name: morca-s3, key: AWS_ACCESS_KEY_ID}}
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom: {secretKeyRef: {name: morca-s3, key: AWS_SECRET_ACCESS_KEY}}
+          ports: [{containerPort: 9000}]
+          readinessProbe:
+            exec: {command: [cat, /tmp/ready]}
+            periodSeconds: 2
+          volumeMounts: [{name: data, mountPath: /data}]
+          resources:
+            requests: {cpu: 100m, memory: 256Mi}
+  volumeClaimTemplates:
+    - metadata: {name: data}
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests: {storage: 2Gi}
+---
+apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: morca-scheduler
@@ -110,11 +191,20 @@ spec:
           env:
             - name: MORCA_DATABASE_URL
               valueFrom: {secretKeyRef: {name: morca-db, key: url}}
-            - {name: MORCA_LOGS, value: /var/orca/logs}
+            # The bucket (MinIO here), which the scheduler copies to every
+            # run pod, keys and all, by reference (morca.kube).
+            - {name: MORCA_LOGS, value: "s3://morca/logs"}
+            - {name: MORCA_WAREHOUSE, value: "s3://morca/warehouse"}
+            - {name: AWS_ENDPOINT_URL_S3, value: "http://minio.morca.svc:9000"}
+            - {name: AWS_REGION, value: us-east-1}
+            - {name: AWS_S3_FORCE_PATH_STYLE, value: "true"}
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom: {secretKeyRef: {name: morca-s3, key: AWS_ACCESS_KEY_ID}}
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom: {secretKeyRef: {name: morca-s3, key: AWS_SECRET_ACCESS_KEY}}
             - {name: MORCA_REGISTER, value: ""}
             - {name: MORCA_IMAGE, value: "morca:dev"}
             - {name: MORCA_RUNNER, value: kubernetes}
-          volumeMounts: &logs [{name: logs, mountPath: /var/orca/logs}]
           resources:
             requests: {cpu: 500m, memory: 512Mi}
         - name: ui
@@ -124,7 +214,15 @@ spec:
           env:
             - name: MORCA_DATABASE_URL
               valueFrom: {secretKeyRef: {name: morca-db, key: url}}
-            - {name: MORCA_LOGS, value: /var/orca/logs}
+            - {name: MORCA_LOGS, value: "s3://morca/logs"}
+            - {name: MORCA_WAREHOUSE, value: "s3://morca/warehouse"}
+            - {name: AWS_ENDPOINT_URL_S3, value: "http://minio.morca.svc:9000"}
+            - {name: AWS_REGION, value: us-east-1}
+            - {name: AWS_S3_FORCE_PATH_STYLE, value: "true"}
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom: {secretKeyRef: {name: morca-s3, key: AWS_ACCESS_KEY_ID}}
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom: {secretKeyRef: {name: morca-s3, key: AWS_SECRET_ACCESS_KEY}}
             # Actions need a user (morca user add, in the scheduler's
             # container); reading doesn't, so nothing should expose the
             # Service outside the cluster but through a proxy that asks for
@@ -136,12 +234,8 @@ spec:
           readinessProbe:
             httpGet: {path: /, port: 8270}
             periodSeconds: 2
-          volumeMounts: *logs
           resources:
             requests: {cpu: 50m, memory: 64Mi}
-      volumes:
-        - name: logs
-          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service

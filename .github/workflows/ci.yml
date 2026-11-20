@@ -342,8 +342,9 @@ jobs:
             morca/build/.mojo-build
           key: ${{ steps.mojo-cache.outputs.cache-primary-key }}
 
-  # morca on a kind cluster (deploy/): the image, built with pixi inside
-  # docker, the manifests, and the toy pipeline run by the scheduler's pod.
+  # morca on a kind cluster (deploy/): the image and the data image, built
+  # with pixi inside docker, the manifests with MinIO as the warehouse and
+  # MORCA_LOGS, and the toy, fanout and lake pipelines run by the scheduler.
   kind:
     needs: [changes, release]
     if: ${{ !cancelled() && github.event_name != 'schedule' && needs.changes.outputs.code != 'false' && needs.release.outputs.release_only != 'true' }}
