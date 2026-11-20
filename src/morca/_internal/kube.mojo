@@ -21,6 +21,16 @@ retries runs itself. The driver reaches Postgres through the Secret
 head through `DISTA_HEAD`; the scheduler's variables named in
 `MORCA_RUN_ENV` are copied to every pod.
 
+A run's secrets (`secrets` in morca.toml), read by the scheduler as it
+starts the run (`morca._internal.control.fetch_secret`), go into a Secret of
+the run's own, `morca-<run>-<start>-secrets`, which every pod's variables of
+those names refer to (`secretKeyRef`), so the Job and Pod objects hold only
+its name. `MORCA_SECRETS` names them, and each container's output goes
+through its binary's `mask` (`morca._internal.logs.mask_main`), so the pods'
+logs hold `***` instead of the values; the scheduler masks the driver log it
+keeps with the Secret's values too. The Secret goes with the run's other
+objects in `sweep`.
+
 Every tick, `sweep` deletes the objects of a run that isn't running at that
 start any more, and those of a Job that has finished, first appending its
 driver pod's log to the run's `driver.log` under `MORCA_LOGS`: what's left after a
@@ -42,13 +52,16 @@ each; `cpu_millis` is a run's total, which the scheduler checks against
 from std.os import getenv
 
 from json import Value
-from k8s import JOBS, PODS, SERVICES, Client, Config
+from std.base64 import b64decode
+
+from k8s import JOBS, PODS, SERVICES, Client, Config, Resource
 import morca._internal.db.kube as kube_db
 
 from morca._internal.crash import crash_summary
 from morca._internal.json import quote
 from morca._internal.logs import (
     location_exists,
+    mask_values,
     read_location,
     run_dir,
     write_location,
@@ -57,6 +70,8 @@ from morca._internal.sample import PREFIX, metrics_location, sample_seconds
 from morca._internal.state import State
 
 comptime DISTA_PORT = 6390
+
+comptime SECRETS = Resource("/api/v1", "secrets")
 
 comptime _SAMPLED = (
     '"$0" "$@" & m=$!; trap \'kill -TERM $m 2>/dev/null\' TERM INT; (unset'
@@ -67,13 +82,43 @@ comptime _SAMPLED = (
 signals go to the command, and the container exits with its code once the
 sampler has written its last line."""
 
+comptime _MASKED_SAMPLED = (
+    'f=/tmp/morca-out.$$; mkfifo "$f" || exit 1; (unset DISTA_ROLE; exec'
+    ' "$0" mask) < "$f" & k=$!; exec > "$f" 2>&1; rm -f "$f"; "$0" "$@" &'
+    " m=$!; trap 'kill -TERM $m 2>/dev/null' TERM INT; (unset DISTA_ROLE;"
+    ' exec "$0" sample --out - --pid $m) & s=$!; while :; do wait $m; c=$?;'
+    " kill -0 $m 2>/dev/null || break; done; wait $s; exec > /dev/null"
+    " 2>&1; wait $k; exit $c"
+)
+"""`_SAMPLED` with the container's output, the command's and the sampler's,
+going through `$0 mask` (`morca._internal.logs.mask_main`) on its way to the
+pod's log, for a run with secrets: the container exits once that has written
+the last line."""
 
-def _command(var argv: List[String]) -> String:
+comptime _MASKED = (
+    'f=/tmp/morca-out.$$; mkfifo "$f" || exit 1; (unset DISTA_ROLE; exec'
+    ' "$0" mask) < "$f" & k=$!; exec > "$f" 2>&1; rm -f "$f"; "$0" "$@" &'
+    " m=$!; trap 'kill -TERM $m 2>/dev/null' TERM INT; while :; do wait $m;"
+    " c=$?; kill -0 $m 2>/dev/null || break; done; exec > /dev/null 2>&1;"
+    " wait $k; exit $c"
+)
+"""`_MASKED_SAMPLED` without the sampler."""
+
+
+def _command(var argv: List[String], masked: Bool = False) -> String:
     """A container's `command`: `argv`, with the sampler (`morca._internal.sample`)
     beside it unless `MORCA_SAMPLE_SECONDS=0`. Its lines go to the pod's
-    log, prefixed, and the scheduler moves them to the run's metrics."""
+    log, prefixed, and the scheduler moves them to the run's metrics. With
+    `masked`, for a run with secrets, the output goes through `$0 mask`."""
     var out = String("[")
-    if sample_seconds() > 0:
+    var sampled = sample_seconds() > 0
+    if masked:
+        out.write(
+            '"/bin/sh", "-c", ',
+            quote(_MASKED_SAMPLED if sampled else _MASKED),
+            ", ",
+        )
+    elif sampled:
         out.write('"/bin/sh", "-c", ', quote(_SAMPLED), ", ")
     for i in range(len(argv)):
         out.write(", " if i else "", quote(argv[i]))
@@ -115,14 +160,52 @@ struct RunSpec(Copyable, Movable):
     var env: List[Tuple[String, String]]
     """The pipeline's own variables (morca.toml's `env`), given to every pod
     over those `MORCA_RUN_ENV` names."""
+    var secrets: List[Tuple[String, String]]
+    """The run's secrets, (NAME, value): in the run's Secret, which every
+    pod's NAME refers to, over the variables above of that name."""
+
+
+def secret_name(run: Int, start: Int) -> String:
+    """The run's Secret, for a run with secrets."""
+    return String("morca-", run, "-", start, "-secrets")
+
+
+def secret_env(
+    names: List[String], secret: String, extra: String = ""
+) -> String:
+    """JSON `env` entries for the variables `names`, each from key NAME of
+    the Secret `secret`, and `MORCA_SECRETS` naming them, after `extra`;
+    `extra` alone for no names."""
+    if len(names) == 0:
+        return extra
+    var got = String(extra)
+    var listed = String()
+    for n in names:
+        got.write(
+            ", " if got else "",
+            '{"name": ',
+            quote(n),
+            ', "valueFrom": {"secretKeyRef": {"name": ',
+            quote(secret),
+            ', "key": ',
+            quote(n),
+            "}}}",
+        )
+        listed.write("," if listed else "", n)
+    got.write(', {"name": "MORCA_SECRETS", "value": ', quote(listed), "}")
+    return got^
 
 
 def pod_env(
-    copied: List[String], own: List[Tuple[String, String]], extra: String
+    copied: List[String],
+    own: List[Tuple[String, String]],
+    extra: String,
+    taken: List[String] = [],
 ) -> String:
     """A container's `env`: the scheduler's variables named in `copied`
     (`MORCA_RUN_ENV`) but those the pipeline sets itself, the pipeline's own
-    (`own`), then `extra`, JSON entries."""
+    (`own`), then `extra`, JSON entries; none of the first two named in
+    `taken` (the run's secrets and `MORCA_SECRETS`, which `extra` sets)."""
     var out = String("[")
     var first = True
     var names = copied.copy()
@@ -130,7 +213,7 @@ def pod_env(
     if "MORCA_SAMPLE_SECONDS" not in names:
         names.append("MORCA_SAMPLE_SECONDS")
     for n in names:
-        var mine = False
+        var mine = n in taken
         for kv in own:
             if kv[0] == n:
                 mine = True
@@ -147,6 +230,8 @@ def pod_env(
         )
         first = False
     for kv in own:
+        if kv[0] in taken:
+            continue
         out.write(
             "" if first else ", ",
             '{"name": ',
@@ -215,8 +300,20 @@ struct KubeRunner(Movable):
 
     def _env(self, r: RunSpec, extra: String) -> String:
         """A container's `env`: the copied variables, the pipeline's own,
-        then `extra`."""
-        return pod_env(self.env, r.env, extra)
+        then `extra` and the run's secrets, from its Secret."""
+        var names = List[String]()
+        for kv in r.secrets:
+            names.append(kv[0])
+        if len(names) == 0:
+            return pod_env(self.env, r.env, extra)
+        var taken = names.copy()
+        taken.append("MORCA_SECRETS")
+        return pod_env(
+            self.env,
+            r.env,
+            secret_env(names, secret_name(r.run, r.start), extra),
+            taken,
+        )
 
     def _resources(self, cpu: Int) -> String:
         return String(
@@ -257,14 +354,38 @@ struct KubeRunner(Movable):
         )
 
     def start(self, r: RunSpec) raises:
-        """Makes the run's driver Job, and its head, Service and workers if
-        it has tasks."""
+        """Makes the run's Secret if it has secrets, its driver Job, and its
+        head, Service and workers if it has tasks."""
         var name = self._name(r)
         var head = String(name, "-head")
+        var masked = len(r.secrets) > 0
+        if masked:
+            var data = String("{")
+            for kv in r.secrets:
+                data.write(
+                    "" if data == "{" else ", ",
+                    quote(kv[0]),
+                    ": ",
+                    quote(kv[1]),
+                )
+            data.write("}")
+            _ = self.k.create(
+                SECRETS,
+                String(
+                    '{"apiVersion": "v1", "kind": "Secret", "metadata":',
+                    ' {"name": ',
+                    quote(secret_name(r.run, r.start)),
+                    ', "labels": ',
+                    self._labels(r, "secrets"),
+                    '}, "type": "Opaque", "stringData": ',
+                    data,
+                    "}",
+                ),
+            )
         var args: List[String] = [r.binary, "resume", String(r.run)]
         if r.allow_new_code:
             args.append("--allow-new-code")
-        var argv = _command(args^)
+        var argv = _command(args^, masked)
         var driver_env = String(
             '{"name": "MORCA_DATABASE_URL", "valueFrom": {"secretKeyRef":',
             ' {"name": ',
@@ -304,7 +425,16 @@ struct KubeRunner(Movable):
             self._resources(self.driver_cpu),
             "}]}}}}",
         )
-        var made = self.k.create(JOBS, job)
+        var made: Value
+        try:
+            made = self.k.create(JOBS, job)
+        except e:
+            if masked:
+                try:
+                    _ = self.k.delete(SECRETS, secret_name(r.run, r.start))
+                except:
+                    pass  # sweep's, then
+            raise e^
         if r.workers == 0:
             return
         var owner = String(
@@ -314,7 +444,7 @@ struct KubeRunner(Movable):
             quote(made.at("/metadata/uid").string_value()),
             "}",
         )
-        var bin = _command([r.binary])
+        var bin = _command([r.binary], masked)
         _ = self.k.create(
             PODS,
             self._pod(
@@ -387,12 +517,22 @@ struct KubeRunner(Movable):
             if not at:
                 return
             at.write("/driver.log")
+            # The run's secrets, which its pods masked already: in case
+            # something got past.
+            var values = self._secret_values(run, Int(start))
             var text = String()
             for pod in self.k.list(
                 PODS, String("orca.run=", run, ",orca.start=", start)
             ).items:
                 var name = _name_of(pod)
-                var got = split_samples(self.k.logs(name))
+                var log = self.k.logs(name)
+                if len(values) > 0:
+                    log = String(
+                        from_utf8_lossy=Span(
+                            mask_values(log.as_bytes(), values)
+                        )
+                    )
+                var got = split_samples(log)
                 if got[1]:
                     write_location(
                         metrics_location(pipeline, run, name),
@@ -415,12 +555,30 @@ struct KubeRunner(Movable):
         except e:
             print("morca: can't keep a run's pod logs:", e)
 
+    def _secret_values(self, run: Int, start: Int) -> List[String]:
+        """The values in the run's Secret at `start`; none if it has none."""
+        var out = List[String]()
+        try:
+            var got = self.k.get(SECRETS, secret_name(run, start))
+            if not got:
+                return out^
+            var data = got.value().try_at("/data")
+            if not data:
+                return out^
+            for kv in data.value().object_items():
+                var bytes = b64decode(kv[1].string_value())
+                out.append(String(from_utf8_lossy=Span(bytes)))
+        except e:
+            print("morca: can't read run", run, "'s secrets to mask:", e)
+        return out^
+
     def remove(self, run: Int) raises:
         """Deletes everything labelled with the run, whatever its start."""
         var sel = String("orca.run=", run)
         _ = self.k.delete_all(JOBS, sel)
         _ = self.k.delete_all(SERVICES, sel)
         _ = self.k.delete_all(PODS, sel)
+        _ = self.k.delete_all(SECRETS, sel)
 
     def sweep(self, mut db: State) raises -> Int:
         """Deletes the objects of runs that aren't running at their start,
@@ -463,6 +621,12 @@ struct KubeRunner(Movable):
                 and not o.try_at("/metadata/deletionTimestamp")
             ):
                 if self.k.delete(PODS, _name_of(o)):
+                    n += 1
+        # A run's Secret outlives its pods by a tick at most: after the
+        # loop above has kept their logs, masked with it.
+        for o in self.k.list(SECRETS, "orca.run").items:
+            if _key(o) not in live and _key(o) not in settling:
+                if self.k.delete(SECRETS, _name_of(o)):
                     n += 1
         return n
 
