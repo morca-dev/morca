@@ -111,13 +111,47 @@ struct SqliteBeat(Beater):
         if not self._db:
             self._db = _open(self.path)
         sql.beat(self._db.value(), self.run, self.owner)
-        # The watchdog (morca.heartbeat): an attempt past its step's
-        # timeout stops the process. There's no cancel to time out here:
-        # `morca cancel` is the scheduler's, on Postgres.
-        var why = self._timed_out()
+        var why = self.stop()
         if why:
             print("run", self.run, why, flush=True)
             external_call["_exit", NoneType](Int32(1))
+
+    def stop(mut self) raises -> String:
+        """The watchdog (`morca._internal.heartbeat`), as `PgBeat`'s: ends
+        the run as it should end now and says why, a cancel whose
+        `cancel_at` has passed or an attempt past its step's timeout, or
+        returns empty; `beat` then exits the process."""
+        if not self._db:
+            self._db = _open(self.path)
+        var why = self._cancelled()
+        if why:
+            return why^
+        return self._timed_out()
+
+    def _cancelled(mut self) raises -> String:
+        """Fails the run's running attempts and steps and ends it
+        `cancelled`, in one transaction, if it was asked to cancel and its
+        `cancel_at` has passed (#527); says why, empty if not."""
+        ref db = self._db.value()
+        if not sql.cancel_due(db, self.run, self.owner):
+            return ""
+        var why = String(
+            "cancelled: its step hadn't finished when the cancel's",
+            " MORCA_CANCEL_KILL_SECONDS ran out, so its process was stopped",
+        )
+        db.execute("BEGIN IMMEDIATE")
+        try:
+            if not sql.cancel_due(db, self.run, self.owner):
+                _rollback(db)
+                return ""  # it ended as we looked
+            _ = sql.fail_running_attempts(db, self.run, why)
+            sql.fail_running_steps(db, self.run, why)
+            sql.cancel(db, self.run, self.owner)
+            db.execute("COMMIT")
+            return why^
+        except e:
+            _rollback(db)
+            raise e^
 
     def _timed_out(mut self) raises -> String:
         """Fails the attempt past its step's timeout, its step and the run,

@@ -329,6 +329,38 @@ def cancel_requested(db: Database, run: Int) raises -> Bool:
     return st.step().value().int_val(0) != 0
 
 
+def cancel_due(db: Database, run: Int, owner: String) raises -> Bool:
+    """Whether `owner` holds the run running and it was asked to cancel
+    with a `cancel_at` that has passed: the watchdog then stops it."""
+    var st = db.prepare(
+        String(
+            "SELECT 1 FROM runs WHERE id = ?1 AND owner = ?2 AND status =",
+            " 'running' AND cancel_requested <> 0 AND cancel_at <= ",
+            NOW,
+        )
+    )
+    st.bind_int(1, run)
+    st.bind_text(2, owner)
+    if st.step():
+        return True
+    return False
+
+
+def cancel(db: Database, run: Int, owner: String) raises:
+    """Ends the run `cancelled`, in the caller's transaction, if `owner`
+    holds it."""
+    var st = db.prepare(
+        String(
+            "UPDATE runs SET status = 'cancelled', ended = ",
+            NOW,
+            ", heartbeat = NULL WHERE id = ?1 AND owner = ?2",
+        )
+    )
+    st.bind_int(1, run)
+    st.bind_text(2, owner)
+    _ = st.step()
+
+
 def token(db: Database, run: Int) raises -> String:
     """The run's token, empty for none or no run."""
     var st = db.prepare("SELECT coalesce(token, '') FROM runs WHERE id = ?1")

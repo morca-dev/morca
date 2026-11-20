@@ -7,6 +7,7 @@
 # - a cancel of a running run whose step is still going after
 #   MORCA_CANCEL_KILL_SECONDS ends the run `cancelled` and its process;
 # - both leave an orca.audit row saying so;
+# - on SQLite, both stop the run the same way (no audit there);
 # - a local process the scheduler started whose heartbeat went stale (here
 #   stopped with SIGSTOP) is killed by the scheduler, not left beside its
 #   run's next start, and its run is failed only once it's gone.
@@ -108,4 +109,26 @@ MORCA_DATABASE_URL="sqlite:$db" STOP_SLOW=60 ./build/stop run --partitions 2024-
     = "failed|step slow 2024-01 timed out after 2 s (timeout_seconds), so its process was stopped" ] \
     || fail "the SQLite run: $(sqlite3 "$db" "SELECT status, error FROM runs")"
 [ "$(sqlite3 "$db" "SELECT status FROM attempts")" = failed ] || fail "the SQLite attempt"
+
+# A cancel on SQLite (#527), asked in the file as there's no `morca cancel`
+# for one: the heartbeat stops the run once cancel_at has passed.
+rm -f "$db" "$db-wal" "$db-shm"
+sq() { sqlite3 -cmd '.timeout 5000' "$db" "$1"; }
+MORCA_DATABASE_URL="sqlite:$db" STOP_WAIT=60 ./build/stop run --partitions 2024-02 >> "$log" 2>&1 &
+pid=$!
+i=0
+until [ "$(sq "SELECT count(*) FROM attempts a JOIN steps s ON s.id = a.step WHERE s.step = 'wait' AND a.status = 'running'" 2> /dev/null)" = 1 ]; do
+    i=$((i + 1)); [ "$i" -lt 300 ] || fail "the SQLite run's wait never started"; sleep 0.1
+done
+sq "UPDATE runs SET cancel_requested = 1, cancel_at = (julianday('now') - 2440587.5) * 86400.0 + 1"
+start=$(date +%s)
+code=0
+wait "$pid" || code=$?
+pid=
+took=$(($(date +%s) - start))
+[ "$code" -eq 1 ] || fail "the cancelled SQLite run exited $code"
+[ "$took" -lt 20 ] || fail "the cancelled SQLite run took $took s"
+[ "$(sq "SELECT status FROM runs")" = cancelled ] || fail "the SQLite run is $(sq "SELECT status FROM runs")"
+[ "$(sq "SELECT a.status FROM attempts a JOIN steps s ON s.id = a.step WHERE s.step = 'wait'")" = failed ] \
+    || fail "the SQLite run's wait wasn't ended"
 echo "ok   stop"

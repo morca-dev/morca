@@ -12,6 +12,7 @@ from morca import (
     parse_months,
     sqlite_path,
 )
+from morca._internal.sqlite_store import SqliteBeat
 from store_suite import (
     Retrying,
     check_a_store_that_lost_its_run_stops,
@@ -193,6 +194,31 @@ def test_sqlite_fences_commits() raises:
     b.claim(run, "b:2", -1.0)
     with assert_raises(contains="held by b:2, not this process (a:1)"):
         a.fence()
+
+
+def test_sqlite_heartbeat_honours_cancel_at() raises:
+    # A cancel whose cancel_at has passed stops the run from its heartbeat,
+    # as on Postgres (#527), not only between attempts.
+    var s = _file("cancel")
+    var run = new_run(s, "a:1")
+    _ = s.start_attempt("month_no", "2024-01", 0, List[UInt8]())
+    var beat = SqliteBeat(s.path, run, "a:1")
+    assert_equal(beat.stop(), "")
+    # Asked to cancel, with a minute left before it's stopped.
+    s.db.execute(
+        String(
+            "UPDATE runs SET cancel_requested = 1, cancel_at = ",
+            "((julianday('now') - 2440587.5) * 86400.0) + 60 WHERE id = ",
+            run,
+        )
+    )
+    assert_equal(beat.stop(), "")
+    s.db.execute(
+        String("UPDATE runs SET cancel_at = cancel_at - 120 WHERE id = ", run)
+    )
+    assert_true(beat.stop().startswith("cancelled: its step hadn't finished"))
+    assert_equal(s.run_info(run).status, "cancelled")
+    assert_equal(s.steps(run)[0].status, "failed")
 
 
 def test_sqlite_urls() raises:
