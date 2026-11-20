@@ -43,7 +43,7 @@ def _dtype_name(d: String) -> String:
     return String(String(d[byte=0]).upper(), d[byte=1:])
 
 
-def short_type(name: StringSlice) -> String:
+def short_type(name: StringSpan) -> String:
     """A type's name as its code writes it: modules dropped (`morca.month.
     Month` -> `Month`, `dista.seq.Seq[toy.Measured]` -> `Seq[Measured]`,
     a `::` path too), and a scalar `SIMD[DType.int, 1]` -> `Int`."""
@@ -69,11 +69,11 @@ def short_type(name: StringSlice) -> String:
         i = j
     # Scalars, as `Int` and `Float64` are.
     while True:
-        var at = out.find("SIMD[DType.")
+        var at = out.find("SIMD[DType.").or_else(-1)
         if at < 0:
             break
         var head = at + 11
-        var comma = out.find(", 1]", head)
+        var comma = out.find(", 1]", head).or_else(-1)
         if comma < 0:
             break
         var next = String(
@@ -85,19 +85,19 @@ def short_type(name: StringSlice) -> String:
     return out^
 
 
-def function_name(function: StringSlice) -> String:
+def function_name(function: StringSpan) -> String:
     """`toy::days(morca::ctx::Ctx,...)` -> `days`."""
     var f = String(function)
-    var paren = f.find("(")
+    var paren = f.find("(").or_else(-1)
     if paren >= 0:
         var head = String(f[byte=:paren])
         f = head^
-    var at = f.rfind("::")
+    var at = f.rfind("::").or_else(-1)
     return String(f[byte = at + 2 :]) if at >= 0 else f
 
 
 def signature(
-    function: StringSlice, input: StringSlice, output: StringSlice
+    function: StringSpan, input: StringSpan, output: StringSpan
 ) -> String:
     """The step function's signature from what `describe` records:
     `def days(mut ctx: Ctx, input: Month) raises -> Measured`. Its
@@ -112,7 +112,7 @@ def signature(
     )
 
 
-def signature_html(sig: StringSlice) -> String:
+def signature_html(sig: StringSpan) -> String:
     """`sig`, coloured (`morca._internal.highlight`)."""
     var lines = highlight(sig)
     var out = String()
@@ -135,11 +135,11 @@ comptime _SIG_LINES = 12
 """The most lines a signature is taken to have."""
 
 
-def _strip(s: StringSlice) -> String:
+def _strip(s: StringSpan) -> String:
     return String(String(s).strip())
 
 
-def def_summary(text: StringSlice, line: Int) -> DefSummary:
+def def_summary(text: StringSpan, line: Int) -> DefSummary:
     """The signature of the `def` at `line` of `text` (through the line
     that closes its brackets and ends with `:`) and its docstring's first
     paragraph, joined onto one line; the start 0 if `line` isn't a `def`."""
@@ -161,7 +161,7 @@ def def_summary(text: StringSlice, line: Int) -> DefSummary:
             elif b == UInt8(ord(")")) or b == UInt8(ord("]")):
                 depth -= 1
         var t = _strip(lines[i])
-        var hash = t.find("  #")
+        var hash = t.find("  #").or_else(-1)
         if hash >= 0:
             var code = _strip(t[byte=:hash])
             t = code^
@@ -187,7 +187,7 @@ def def_summary(text: StringSlice, line: Int) -> DefSummary:
     var doc = String()
     var rest = String(open[byte=3:])
     while True:
-        var close = rest.find(q)
+        var close = rest.find(q).or_else(-1)
         var part = _strip(rest[byte=:close]) if close >= 0 else _strip(rest)
         if not part and doc:
             break  # a blank line ends the first paragraph
@@ -202,10 +202,10 @@ def def_summary(text: StringSlice, line: Int) -> DefSummary:
     return DefSummary(line, end, doc^)
 
 
-def first_line(s: StringSlice) -> String:
+def first_line(s: StringSpan) -> String:
     """`s` up to its first line break, trimmed."""
     var t = _strip(s)
-    var nl = t.find("\n")
+    var nl = t.find("\n").or_else(-1)
     return _strip(t[byte=:nl]) if nl >= 0 else t^
 
 
@@ -353,7 +353,7 @@ def cards_script(steps: List[StepCard], attempts: List[AttemptCard]) -> String:
     )
 
 
-def def_json(text: StringSlice, line: Int) -> String:
+def def_json(text: StringSpan, line: Int) -> String:
     """`/code?u=&at=`'s answer: the signature at `line` of `text`, its
     lines coloured, and its docstring's first paragraph:
     `{"line": 26, "sig": ["<span ...>def</span> ..."], "doc": "..."}`;

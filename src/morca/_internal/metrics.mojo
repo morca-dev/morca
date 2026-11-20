@@ -281,7 +281,7 @@ def read_metrics(pipeline: String, run: Int) -> List[InstanceMetrics]:
     for f in files:
         if not f.endswith(".jsonl"):
             continue
-        var base = String(f[byte = f.rfind("/") + 1 :])
+        var base = String(f[byte = f.rfind("/").or_else(-1) + 1 :])
         var name = String(base[byte = : base.byte_length() - 6])
         try:
             var text = String(from_utf8_lossy=Span(read_location(f)))

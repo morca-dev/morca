@@ -73,7 +73,7 @@ def join(mut db: State) raises -> Int:
     """Adds this process's row, waiting, with the migrations it knows and
     its image (`MORCA_IMAGE`); returns its id."""
     var me = process_owner()
-    var at = me.rfind(":")
+    var at = me.rfind(":").or_else(-1)
     return schedulers_db.join(
         db.conn,
         String(me[byte=:at]),

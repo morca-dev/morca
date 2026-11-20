@@ -543,7 +543,7 @@ struct _Parser(Movable):
             var c = self.peek()
             if c == ord('"'):
                 out.write(
-                    StringSlice(
+                    StringSpan(
                         unsafe_from_utf8=Span(self.src)[start : self.pos]
                     )
                 )
@@ -551,7 +551,7 @@ struct _Parser(Movable):
                 return out^
             if c == ord("\\"):
                 out.write(
-                    StringSlice(
+                    StringSpan(
                         unsafe_from_utf8=Span(self.src)[start : self.pos]
                     )
                 )

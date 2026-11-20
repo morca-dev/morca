@@ -62,7 +62,7 @@ def version_parts(v: String) -> List[Int]:
     prerelease and 1 for a release, so a prerelease sorts before its
     release; empty when `v` isn't a version (a commit, say)."""
     var full = String(v[byte=1:]) if v.startswith("v") else v
-    var dash = full.find("-")
+    var dash = full.find("-").or_else(-1)
     var pre = 1 if dash < 0 else 0
     var s = String(full[byte=:dash]) if dash >= 0 else full
     var out = List[Int]()

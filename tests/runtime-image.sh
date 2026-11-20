@@ -103,7 +103,7 @@ platforms = ["linux-64", "linux-aarch64"]
 preview = ["pixi-build"]
 
 [dependencies]
-mojo-compiler = "==1.2.0"
+mojo-compiler = "==1.3.0.dev2026111805"
 morca-mojo = { git = "$repo", rev = "$rev" }
 EOF
 pixi lock --manifest-path "$ctx/pixi.toml"

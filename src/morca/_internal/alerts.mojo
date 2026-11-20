@@ -33,7 +33,7 @@ from morca._internal.watchdog import active_trips
 
 def _first_line(text: String, limit: Int = 200) -> String:
     var line = String(text.strip())
-    var nl = line.find("\n")
+    var nl = line.find("\n").or_else(-1)
     if nl >= 0:
         var first = String(line[byte=:nl])
         line = first^

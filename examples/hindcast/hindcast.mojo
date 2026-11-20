@@ -148,7 +148,7 @@ def forecasts(mut ctx: Ctx, d: Day) raises -> Fetched:
         # that isn't there yet is waited for; an old one is gone.
         var msg = String(e)
         var age = now() // 86400 - day_number(d)
-        if msg.find(NOT_PUBLISHED) >= 0 and age <= 2:
+        if NOT_PUBLISHED in msg and age <= 2:
             raise defer(1800, msg)
         raise e^
 

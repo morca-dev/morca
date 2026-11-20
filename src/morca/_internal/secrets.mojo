@@ -50,7 +50,7 @@ def _id_ok(id: String) -> Bool:
 
 def secret_problem(spec: String) -> String:
     """What's wrong with `NAME=ID`, or "" if nothing is."""
-    var eq = spec.find("=")
+    var eq = spec.find("=").or_else(-1)
     if eq < 0:
         return String("--secret wants NAME=ID, not ", spec)
     var name = String(spec[byte=:eq])
@@ -73,7 +73,7 @@ def secrets_json(specs: List[String]) -> String:
         return ""
     var out = String("{")
     for i in range(len(specs)):
-        var eq = specs[i].find("=")
+        var eq = specs[i].find("=").or_else(-1)
         out.write(
             "" if i == 0 else ", ",
             quote(String(specs[i][byte=:eq])),

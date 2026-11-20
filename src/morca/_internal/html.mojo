@@ -18,7 +18,7 @@ from std.os import getenv
 from morca._internal.ui.terms import value_help
 
 
-def escape(s: StringSlice) -> String:
+def escape(s: StringSpan) -> String:
     """`s` with `&`, `<`, `>`, `"` and `'` as character references, safe in
     text and in a quoted attribute."""
     var out = String()
@@ -38,7 +38,7 @@ def escape(s: StringSlice) -> String:
     return out^
 
 
-def url_encode(s: StringSlice) -> String:
+def url_encode(s: StringSpan) -> String:
     """`s` as one path segment or query value: unreserved bytes as they are,
     every other byte as `%XX`."""
     comptime hex = "0123456789ABCDEF"
@@ -60,7 +60,7 @@ def url_encode(s: StringSlice) -> String:
     return out^
 
 
-def url_decode(s: StringSlice) -> String:
+def url_decode(s: StringSpan) -> String:
     """`%XX` and `+` in a query value decoded; a malformed escape is kept as
     it is."""
     var b = s.as_bytes()
@@ -84,28 +84,28 @@ def url_decode(s: StringSlice) -> String:
     return String(from_utf8_lossy=Span(out))
 
 
-def query_param(url: String, name: StringSlice) -> String:
+def query_param(url: String, name: StringSpan) -> String:
     """A query parameter's value, decoded, or empty."""
-    var q = url.find("?")
+    var q = url.find("?").or_else(-1)
     if q < 0:
         return ""
     for pair in url[byte = q + 1 :].split("&"):
-        var eq = pair.find("=")
+        var eq = pair.find("=").or_else(-1)
         var k = pair[byte=:eq] if eq >= 0 else pair
         if k == name:
             return url_decode(pair[byte = eq + 1 :]) if eq >= 0 else ""
     return ""
 
 
-def query_values(url: String, name: StringSlice) -> List[String]:
+def query_values(url: String, name: StringSpan) -> List[String]:
     """Each value of a query parameter given once or more, decoded, in
     order."""
     var out = List[String]()
-    var q = url.find("?")
+    var q = url.find("?").or_else(-1)
     if q < 0:
         return out^
     for pair in url[byte = q + 1 :].split("&"):
-        var eq = pair.find("=")
+        var eq = pair.find("=").or_else(-1)
         var k = pair[byte=:eq] if eq >= 0 else pair
         if k == name:
             out.append(url_decode(pair[byte = eq + 1 :]) if eq >= 0 else "")
@@ -151,11 +151,11 @@ struct Html(Movable, Writable):
         comptime for i in range(values.__len__()):
             self.out.write(escape(String(values[i])))
 
-    def link(mut self, href: StringSlice, label: StringSlice):
+    def link(mut self, href: StringSpan, label: StringSpan):
         """`<a href="href">label</a>`, both escaped."""
         self.out.write('<a href="', escape(href), '">', escape(label), "</a>")
 
-    def link_out(mut self, href: StringSlice, label: StringSlice):
+    def link_out(mut self, href: StringSpan, label: StringSpan):
         """A link that opens in a new tab: to code, or another site."""
         self.out.write(
             '<a href="',
@@ -165,9 +165,7 @@ struct Html(Movable, Writable):
             "</a>",
         )
 
-    def code(
-        mut self, href: StringSlice, label: StringSlice, commit: StringSlice
-    ):
+    def code(mut self, href: StringSpan, label: StringSpan, commit: StringSpan):
         """A link to source code on its host, set apart from links inside
         morca: an icon, `label` (where, as `file.mojo:26`) in monospace, and
         ↗; it opens in a new tab, and its title names the commit."""
@@ -175,10 +173,10 @@ struct Html(Movable, Writable):
 
     def code_named(
         mut self,
-        href: StringSlice,
-        name: StringSlice,
-        at: StringSlice,
-        commit: StringSlice,
+        href: StringSpan,
+        name: StringSpan,
+        at: StringSpan,
+        commit: StringSpan,
     ):
         """`code`'s link labelled with the function's `name`; where it is
         (`at`, as `file.mojo:26`) goes in the title, after the commit."""
@@ -228,13 +226,13 @@ struct Html(Movable, Writable):
             self.out.write(escape(String(values[i])))
         self.out.write("</td>")
 
-    def chip(mut self, href: StringSlice, label: StringSlice):
+    def chip(mut self, href: StringSpan, label: StringSpan):
         """A link to a run, as a small chip of its number."""
         self.out.write(
             '<a class="chip" href="', escape(href), '">', escape(label), "</a>"
         )
 
-    def status(mut self, s: StringSlice):
+    def status(mut self, s: StringSpan):
         """A status as a badge, its class named after it (a space in the
         status is a hyphen in the class), with what it means on hover or
         keyboard focus (`morca._internal.ui.terms`)."""
@@ -285,7 +283,7 @@ struct Html(Movable, Writable):
             )
         self.raw("</span></span>")
 
-    def term(mut self, kind: StringSlice, value: StringSlice):
+    def term(mut self, kind: StringSpan, value: StringSpan):
         """`value`, one of a fixed set (`kind` in `morca._internal.ui.terms`): dotted
         underlined, with what it means on hover, keyboard focus or a tap;
         plain text if the set doesn't know it."""

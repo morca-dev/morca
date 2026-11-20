@@ -1,4 +1,4 @@
-"""tests/lake.sh's pipeline: one step that writes three rows to lake.f and
+"""`tests/lake.sh`'s pipeline: one step that writes three rows to lake.f and
 then scans them with a filter iceberg can't parse, so the attempt fails
 inside the library with iceberg's own error. Built through liblake and with
 -D MORCA_LAKE_SOURCE=1, the step's log must say the same."""

@@ -15,7 +15,7 @@ def _kinds(src: String) -> String:
             continue
         if out:
             out.write(" ")
-        out.write(t.kind, ":", StringSlice(unsafe_from_utf8=s[t.start : t.end]))
+        out.write(t.kind, ":", StringSpan(unsafe_from_utf8=s[t.start : t.end]))
     return out^
 
 

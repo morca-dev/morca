@@ -64,7 +64,7 @@ def web_url(repo: String) -> String:
     without `.git`, and `git@host:owner/name`; "" for anything else."""
     var r = String(repo.strip())
     if r.startswith("git@"):
-        var colon = r.find(":")
+        var colon = r.find(":").or_else(-1)
         if colon < 0:
             return ""
         var ssh = String(

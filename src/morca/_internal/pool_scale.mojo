@@ -398,9 +398,9 @@ struct PoolScaler(Movable):
         # A type refused for the project's quota: the next usable type may
         # fit, this pass (waiting doesn't free quota); every location shares
         # the quota, so it isn't tried in the others.
-        var i = usable[at]
-        var t = p.machines[i][0]
-        var wait = p.machines[i][1]
+        var i: Int
+        var t: String
+        var wait: Int
         while True:
             i = usable[at]
             t = p.machines[i][0]

@@ -41,12 +41,12 @@ struct ImageRef(Copyable, Movable):
     @staticmethod
     def parse(image: String) raises -> ImageRef:
         """`ghcr.io/morca-dev/census:tag` (a tag is needed; a host too)."""
-        var slash = image.find("/")
+        var slash = image.find("/").or_else(-1)
         if slash <= 0:
             raise Error("morca: not an image with its registry: ", image)
         var host = String(image[byte=:slash])
         var rest = String(image[byte = slash + 1 :])
-        var colon = rest.rfind(":")
+        var colon = rest.rfind(":").or_else(-1)
         if colon <= 0 or "@" in rest:
             raise Error("morca: not an image with a tag: ", image)
         return ImageRef(

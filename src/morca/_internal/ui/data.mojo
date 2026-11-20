@@ -503,8 +503,8 @@ def _rows_panel(
         h.raw('<ul class="data__chips" aria-label="Filters">')
         for i in range(len(q.filters)):
             ref f = q.filters[i]
-            var a = f.find(":")
-            var b = f.find(":", a + 1)
+            var a = f.find(":").or_else(-1)
+            var b = f.find(":", a + 1).or_else(-1)
             h.raw("<li><code>")
             h.text(f[byte=:a])
             h.raw("</code> ")

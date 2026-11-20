@@ -273,7 +273,7 @@ def _ctx(run: Int, dataset: String) -> Ctx:
 
 def test_two_runs_replacing_one_partition_keep_one_runs_rows() raises:
     _create("c")
-    var cat = FilesystemCatalog.local(getenv("MORCA_WAREHOUSE"))
+    _ = FilesystemCatalog.local(getenv("MORCA_WAREHOUSE"))
     var t = _table("c")
     # An earlier run's January.
     var old = _ctx(9000, "db.c")
@@ -307,7 +307,7 @@ def test_a_commit_refuses_a_stale_removal() raises:
     """GAPS #29: an overwrite planned before another writer removed some of
     its files isn't committed over the rest."""
     _create("s")
-    var cat = FilesystemCatalog.local(getenv("MORCA_WAREHOUSE"))
+    _ = FilesystemCatalog.local(getenv("MORCA_WAREHOUSE"))
     var t = _table("s")
     var first = _ctx(9101, "db.s")
     _ = replace_partitions(first, t, _rows("2024-01", 1000, ROWS))
@@ -371,7 +371,7 @@ def test_an_unpartitioned_table_is_replaced_whole() raises:
 def test_append_to_a_replaced_dataset_replaces() raises:
     """`append` and `append_files` replace for a dataset in `replaces=`."""
     _create("d")
-    var cat = FilesystemCatalog.local(getenv("MORCA_WAREHOUSE"))
+    _ = FilesystemCatalog.local(getenv("MORCA_WAREHOUSE"))
     var t = _table("d")
     var one = _ctx(9301, "db.d")
     _ = append(one, t, _rows("2024-01", 1000, ROWS))

@@ -100,7 +100,7 @@ struct RunResult(Movable):
             return SUCCEEDED
         return DEFERRED if self.deferred_until() > 0 else FAILED
 
-    def find(self, step: StringSlice, partition: StringSlice) -> Int:
+    def find(self, step: StringSpan, partition: StringSpan) -> Int:
         """The index of `step` for `partition`, or -1."""
         for i in range(len(self.steps)):
             ref s = self.steps[i]
@@ -108,9 +108,7 @@ struct RunResult(Movable):
                 return i
         return -1
 
-    def status(
-        self, step: StringSlice, partition: StringSlice
-    ) raises -> String:
+    def status(self, step: StringSpan, partition: StringSpan) raises -> String:
         var i = self.find(step, partition)
         if i < 0:
             raise Error("no step ", step, " for '", partition, "'")
@@ -118,7 +116,7 @@ struct RunResult(Movable):
 
     def output[
         T: Movable
-    ](self, step: StringSlice, partition: StringSlice = "") raises -> T:
+    ](self, step: StringSpan, partition: StringSpan = "") raises -> T:
         """The decoded output of `step` for `partition`."""
         var i = self.find(step, partition)
         if i < 0:

@@ -95,7 +95,7 @@ def parse_cpus(v: String) raises -> Tuple[Int, Int]:
     var lo: Int
     var hi: Int
     try:
-        var dots = v.find("..")
+        var dots = v.find("..").or_else(-1)
         if dots >= 0:
             lo = Int(v[byte=:dots])
             hi = Int(v[byte = dots + 2 :])
@@ -141,7 +141,7 @@ def parse_memory_gb(v: String) raises -> Tuple[Int, Int]:
     var lo: Float64
     var hi: Float64
     try:
-        var dots = v.find("..")
+        var dots = v.find("..").or_else(-1)
         if dots >= 0:
             lo = Float64(String(v[byte=:dots]))
             hi = Float64(String(v[byte = dots + 2 :]))
@@ -179,7 +179,7 @@ def canonical_memory_gb(v: String) raises -> String:
         if r[1] == 0:
             return String(AUTO)
         return String("auto..", _num_text(Float64(_auto_max(v)[1])))
-    var dots = v.find("..")
+    var dots = v.find("..").or_else(-1)
     if dots < 0:
         return _num_text(Float64(v))
     var lo = Float64(String(v[byte=:dots]))

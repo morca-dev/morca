@@ -148,7 +148,7 @@ def machine_name(name: String) -> String:
 # ---------------------------------------------------------------------------
 
 
-def _int(s: StringSlice) -> Int:
+def _int(s: StringSpan) -> Int:
     try:
         return Int(String(s))
     except:
@@ -174,7 +174,7 @@ def parse_meminfo(text: String) -> Dict[String, Int]:
     """/proc/meminfo, in bytes."""
     var out = Dict[String, Int]()
     for line in text.splitlines():
-        var colon = line.find(":")
+        var colon = line.find(":").or_else(-1)
         if colon <= 0:
             continue
         var f = line[byte = colon + 1 :].split()
@@ -225,7 +225,7 @@ def parse_net_dev(text: String) -> Dict[String, Tuple[Int, Int]]:
     """/proc/net/dev: bytes received and sent per interface, but loopback."""
     var out = Dict[String, Tuple[Int, Int]]()
     for line in text.splitlines():
-        var colon = line.find(":")
+        var colon = line.find(":").or_else(-1)
         if colon <= 0:
             continue
         var name = String(line[byte=:colon].strip())
@@ -240,7 +240,7 @@ def parse_net_dev(text: String) -> Dict[String, Tuple[Int, Int]]:
 
 def parse_pid_stat(text: String) -> Tuple[Int, Int]:
     """/proc/<pid>/stat's parent and resident pages; (-1, 0) if malformed."""
-    var close = text.rfind(")")
+    var close = text.rfind(")").or_else(-1)
     if close < 0:
         return (-1, 0)
     var f = text[byte = close + 1 :].split()
@@ -263,7 +263,7 @@ struct PidUsage(ImplicitlyCopyable, Movable):
 
 def parse_pid_usage(text: String) -> PidUsage:
     """/proc/<pid>/stat's parent, resident pages and CPU ticks."""
-    var close = text.rfind(")")
+    var close = text.rfind(")").or_else(-1)
     if close < 0:
         return PidUsage(-1, 0, 0)
     var f = text[byte = close + 1 :].split()
@@ -427,7 +427,7 @@ def alive(pid: Int) -> Bool:
         return n >= 8 and _u32(info, 4) != 5
     else:
         var st = _read(String("/proc/", pid, "/stat"))
-        var close = st.rfind(")")
+        var close = st.rfind(")").or_else(-1)
         if close < 0:
             return True
         var f = st[byte = close + 1 :].split()
@@ -979,7 +979,7 @@ def tree_rss(root: Int, argv0: String = "") -> Int:
             rss[pid] = st[1] * page
             if argv0:
                 var cmd = _read(String("/proc/", pid, "/cmdline"))
-                var nul = cmd.find("\0")
+                var nul = cmd.find("\0").or_else(-1)
                 var first = String(cmd[byte=:nul]) if nul >= 0 else cmd
                 if first == argv0:
                     matched.append(pid)
@@ -1112,7 +1112,7 @@ def _trim(path: String, keep: Int) raises:
 
 
 def _parent(path: String) -> String:
-    var at = path.rfind("/")
+    var at = path.rfind("/").or_else(-1)
     return String(path[byte=:at]) if at > 0 else String(".")
 
 

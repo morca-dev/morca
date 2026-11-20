@@ -12,7 +12,7 @@ This is different from a [Rust worker](rust-workers.md), which is one step
 in Rust inside a Mojo pipeline. With `morca-sdk` there is no Mojo at all.
 
 [examples/toy-rust](../examples/toy-rust) is [examples/toy.mojo](../examples/toy.mojo)
-rebuilt this way, and `pixi run -e rust test-rust-sdk` (tests/rust_sdk.sh)
+rebuilt this way, and `pixi run -e data test-rust-sdk` (tests/rust_sdk.sh)
 runs it beside the Mojo toy under one scheduler.
 
 ## Writing a pipeline

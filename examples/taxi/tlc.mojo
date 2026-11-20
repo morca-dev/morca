@@ -92,8 +92,8 @@ def _is_parquet(io: FileIO, path: String) -> Bool:
         var head = io.read_range(path, 0, 4)
         var tail = io.read_range(path, n - 4, 4)
         return (
-            String(StringSlice(unsafe_from_utf8=Span(head))) == "PAR1"
-            and String(StringSlice(unsafe_from_utf8=Span(tail))) == "PAR1"
+            String(StringSpan(unsafe_from_utf8=Span(head))) == "PAR1"
+            and String(StringSpan(unsafe_from_utf8=Span(tail))) == "PAR1"
         )
     except:
         return False

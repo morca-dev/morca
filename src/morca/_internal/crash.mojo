@@ -74,7 +74,7 @@ def crash_summary(output: String) -> String:
         if len(parts) < 3:
             continue
         var rest = String(parts[2])
-        var sp = rest.rfind(" ")
+        var sp = rest.rfind(" ").or_else(-1)
         if rest.startswith("(") or sp < 0:
             continue
         var at = String(rest[byte = sp + 1 :])
@@ -82,7 +82,7 @@ def crash_summary(output: String) -> String:
             continue
         var end = sp
         for c in ["[", "("]:
-            var k = rest.find(c)
+            var k = rest.find(c).or_else(-1)
             if k > 0 and k < end:
                 end = k
         var name = String(rest[byte=:end])

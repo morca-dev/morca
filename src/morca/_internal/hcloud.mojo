@@ -288,7 +288,7 @@ struct HCloud(Movable):
         for n in loads(got[1])["networks"].array_items():
             if _text(n, "name") == name:
                 return _text(n, "id")
-        var slash = ip_range.find("/")
+        var slash = ip_range.find("/").or_else(-1)
         var base = String(ip_range[byte=:slash]) if slash > 0 else ip_range
         var made = self._call(
             "POST",

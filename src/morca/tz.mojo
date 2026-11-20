@@ -450,7 +450,7 @@ struct _Reader(Movable):
         if end >= len(self.data):
             raise Error("tz: the TZif footer has no closing newline")
         var out = String(
-            StringSlice(unsafe_from_utf8=Span(self.data)[start:end])
+            StringSpan(unsafe_from_utf8=Span(self.data)[start:end])
         )
         self.pos = end + 1
         for b in out.as_bytes():

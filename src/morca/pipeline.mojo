@@ -465,9 +465,7 @@ struct Pipeline[
         return res^
 
     @staticmethod
-    def _done(
-        res: RunResult, step: StringSlice, partition: StringSlice
-    ) -> Bool:
+    def _done(res: RunResult, step: StringSpan, partition: StringSpan) -> Bool:
         var j = res.find(step, partition)
         return j >= 0 and res.steps[j].status == SUCCEEDED
 
@@ -613,3 +611,27 @@ struct Pipeline[
             res.steps[j] = outcome^
         else:
             res.steps.append(outcome^)
+
+
+comptime PipelineOf[P: type_of(Pipeline)] = Pipeline[
+    P.name,
+    *P.Ts,
+    tasks=P.tasks,
+    partitions=P.partitions,
+    schedule=P.schedule,
+    fire=P.fire,
+    fills=P.fills,
+    catchup=P.catchup,
+    max_runs=P.max_runs,
+    run_retries=P.run_retries,
+    retry_seconds=P.retry_seconds,
+    max_retry_seconds=P.max_retry_seconds,
+    sensor=P.sensor,
+    keys_per_run=P.keys_per_run,
+    workers=P.workers,
+]
+"""The pipeline `P` is, named by its parameters: a function over any
+pipeline (`[P: type_of(Pipeline)]`) reads `P`'s parameters, but calls its
+static methods through this (`PipelineOf[P].describe()`), since Mojo 1.3
+can't infer a struct's parameters for a static method called on such a `P`.
+Every parameter of `Pipeline` is passed on here."""

@@ -691,17 +691,17 @@ def _key(key: String) -> StaticString:
     return ""
 
 
-def key_help(key: StringSlice) -> StaticString:
+def key_help(key: StringSpan) -> StaticString:
     """The help of a setting `key` of morca.toml (`env.NAME` is `env`'s)."""
     var k = String(key)
-    var dot = k.find(".")
+    var dot = k.find(".").or_else(-1)
     if dot > 0:
         var head = String(k[byte=:dot])
         k = head^
     return _key(k)
 
 
-def header_help(label: StringSlice, table: StringSlice = "") -> StaticString:
+def header_help(label: StringSpan, table: StringSpan = "") -> StaticString:
     """The help of a column named `label`, in `table` if it has its own."""
     if table:
         var t = _context_header(String(table, ":", label))
@@ -710,7 +710,7 @@ def header_help(label: StringSlice, table: StringSlice = "") -> StaticString:
     return _header(String(label))
 
 
-def value_help(kind: StringSlice, value: StringSlice) -> StaticString:
+def value_help(kind: StringSpan, value: StringSpan) -> StaticString:
     """The help of `value` of `kind` (`status`, `kind`, `trigger`,
     `placement`, `from`, `touch`, `role`, `fills`, `fill_order`, `spot`):
     a placement `worker:<pool>` is `worker`'s."""

@@ -41,7 +41,7 @@ def dataset_of(location: String) raises -> String:
 
 
 def _split(dataset: String) raises -> Tuple[String, String]:
-    var dot = dataset.rfind(".")
+    var dot = dataset.rfind(".").or_else(-1)
     if dot <= 0 or dot == dataset.byte_length() - 1:
         raise Error("morca: a dataset is named namespace.table, not ", dataset)
     return (

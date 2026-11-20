@@ -282,7 +282,7 @@ def _archive(
             return
         var path = stage_of(loc)
         if not exists(path):
-            makedirs(path[byte = : path.rfind("/")], exist_ok=True)
+            makedirs(path[byte = : path.rfind("/").or_else(-1)], exist_ok=True)
             # A new machine, or a cleaned stage: what is there is kept.
             if is_remote(loc) and location_exists(loc):
                 var before = read_location(loc)

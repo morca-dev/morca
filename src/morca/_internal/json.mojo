@@ -1,7 +1,7 @@
 """The little JSON morca writes: quoted strings."""
 
 
-def quote(s: StringSlice) -> String:
+def quote(s: StringSpan) -> String:
     """`s` as a JSON string literal, quotes included."""
     comptime digits = "0123456789abcdef"
     var out = String('"')

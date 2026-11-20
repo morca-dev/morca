@@ -176,7 +176,7 @@ struct _State(Movable):
             with open(self.path, "r") as f:
                 text = f.read()
             for line in text.split("\n"):
-                var eq = line.find("=")
+                var eq = line.find("=").or_else(-1)
                 if eq > 0:
                     self.keys.append(String(line[byte=:eq]))
                     self.values.append(String(line[byte = eq + 1 :]))
@@ -485,7 +485,7 @@ def _check(prefix: String, smoke: String) -> List[String]:
         ),
     ]
     if smoke:
-        var eq = smoke.find("=")
+        var eq = smoke.find("=").or_else(-1)
         var pipeline = String(smoke[byte=:eq])
         var key = String(smoke[byte = eq + 1 :])
         var last = String(
@@ -567,7 +567,7 @@ def _deploy(
     o: _Opts, st: _State, step: String, var params: List[String]
 ) raises:
     for p in slot_pins(o, _outputs(o)):
-        var key = String(p[byte = : p.find("=") + 1])
+        var key = String(p[byte = : p.find("=").or_else(-1) + 1])
         var given = False
         for q in params:
             if q.startswith(key):
@@ -1063,7 +1063,7 @@ def replace_control(args: List[String]) raises -> Int:
         return 2
     _ = _seconds(_keep(o))
     if o.smoke:
-        var eq = o.smoke.find("=")
+        var eq = o.smoke.find("=").or_else(-1)
         if eq <= 0 or eq + 1 >= o.smoke.byte_length():
             print("morca aws replace-control: --smoke is PIPELINE=KEY")
             return 2

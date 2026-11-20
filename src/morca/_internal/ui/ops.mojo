@@ -102,7 +102,7 @@ def system_page(mut db: State, range: String) raises -> Page:
     notify_html(h, notify_configured(), sent)
     h.raw("</div>")
     var json = system_json(now, charts)
-    var close = json.rfind("}")
+    var close = json.rfind("}").or_else(-1)
     var with_alerts = String(
         json[byte=:close],
         ', "notify": ',
@@ -139,7 +139,7 @@ def ops_home() -> Page:
 def moved(url: String, path: String) -> Page:
     """`/system`, the Ops page's old home: moved for good, the query
     kept."""
-    var q = url.find("?")
+    var q = url.find("?").or_else(-1)
     return Page(
         301,
         String(),

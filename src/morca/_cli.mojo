@@ -73,7 +73,7 @@ from morca._internal.logs import (
 from morca.tasks import workers
 from morca.civil import Civil, now, parse_time
 from morca._internal.crash import crash_summary
-from morca.pipeline import Pipeline
+from morca.pipeline import Pipeline, PipelineOf
 from morca._internal.pool import pool_next_main, pool_wait_main
 from morca._internal.sample import sample_main
 from morca._internal.sqlite_store import SqliteStore, sqlite_path
@@ -162,12 +162,12 @@ def _command[P: type_of(Pipeline)](args: List[String]) raises -> Int:
         _usage("set MORCA_DATABASE_URL or MORCA_STATE_URL, not both")
     # A schedule is checked on every command, so a binary whose cron
     # expression or zone is bad can't be registered or run.
-    comptime if P.scheduled():
-        _ = P.load_schedule()
+    comptime if PipelineOf[P].scheduled():
+        _ = PipelineOf[P].load_schedule()
     if cmd == "fires":
         return _fires[P](args)
     if cmd == "describe" and len(args) == 2:
-        print(P.describe())
+        print(PipelineOf[P].describe())
         return 0
     if cmd == "keep-log" and len(args) == 5:
         # For the ec2 runner's head instance: the driver's output, appended
@@ -236,7 +236,7 @@ def _command[P: type_of(Pipeline)](args: List[String]) raises -> Int:
             return 0
     if cmd == "sense" and len(args) == 2:
         var wh = getenv("MORCA_WAREHOUSE")
-        var names = P.sensed_datasets()
+        var names = PipelineOf[P].sensed_datasets()
         if len(names) > 0 and not wh:
             raise Error("morca: sense needs MORCA_WAREHOUSE")
         for d in names:
@@ -343,12 +343,12 @@ def _run[
 ) raises -> Int:
     """`run`: records the pipeline and a new run of `keys` in `store`, and
     runs it."""
-    var hash = hex(P.registry_hash())
+    var hash = hex(PipelineOf[P].registry_hash())
     store.migrate()
     # Only `morca register` moves a scheduled pipeline's code.
     var current = store.scheduled_hash(P.name)
     if not current:
-        store.register(P.name, hash, P.describe())
+        store.register(P.name, hash, PipelineOf[P].describe())
     elif current != hash and not new_code:
         print(
             "morca: pipeline ",
@@ -369,7 +369,10 @@ def _run[
         key.write("," if j > 0 else "", keys[j])
     var run = store.create_run(P.name, hash, key, "manual", owner)
     store.ran_version(
-        run, store.version(P.name, hash, P.describe(), getenv("MORCA_IMAGE"))
+        run,
+        store.version(
+            P.name, hash, PipelineOf[P].describe(), getenv("MORCA_IMAGE")
+        ),
     )
     print("run", run)
     return _execute[P](rt, store, run, owner, keys, RunResult())
@@ -392,7 +395,7 @@ def _resume[
             ", not ",
             P.name,
         )
-    var hash = hex(P.registry_hash())
+    var hash = hex(PipelineOf[P].registry_hash())
     if info.registry_hash != hash and not allow_new_code:
         raise Error(
             "morca: run ",
@@ -406,7 +409,10 @@ def _resume[
     var owner = process_owner()
     store.claim(run, owner, _stale_seconds())
     store.ran_version(
-        run, store.version(P.name, hash, P.describe(), getenv("MORCA_IMAGE"))
+        run,
+        store.version(
+            P.name, hash, PipelineOf[P].describe(), getenv("MORCA_IMAGE")
+        ),
     )
     var interrupted = store.interrupt(run)
     var prior = store.prior(run)
@@ -478,7 +484,7 @@ def _status[S: RunStore](mut store: S, args: List[String]) raises -> Int:
 def _fires[P: type_of(Pipeline)](args: List[String]) raises -> Int:
     """The schedule's next fires after now (or `--after`), each with the
     partition it runs: UTC time, wall-clock time, partition."""
-    comptime if not P.scheduled():
+    comptime if not PipelineOf[P].scheduled():
         _usage(String("pipeline ", P.name, " has no schedule"))
         return 2
     else:
@@ -502,20 +508,20 @@ def _print_fires[P: type_of(Pipeline)](args: List[String]) raises -> Int:
             except:
                 _usage(String("not a count: ", args[i]))
             i += 1
-    var s = P.load_schedule()
+    var s = PipelineOf[P].load_schedule()
     var t = after
     for _ in range(count):
         t = s.next_fire(t)
         print(
             String(Civil.of(t), "Z"),
             String(Civil.of(s.zone.to_local(t))),
-            P.fills_for(t, s),
+            PipelineOf[P].fills_for(t, s),
         )
     return 0
 
 
 def _parent(path: String) -> String:
-    var at = path.rfind("/")
+    var at = path.rfind("/").or_else(-1)
     return String(path[byte=:at]) if at > 0 else String(".")
 
 
@@ -546,11 +552,15 @@ def _execute[
     the run over), the run is left `running`; once its heartbeat is stale it
     can be resumed.
     """
-    store.own(run, owner, hex(P.registry_hash()))
-    store.start_heartbeat(heartbeat_interval(_stale_seconds()), P.timeouts())
+    store.own(run, owner, hex(PipelineOf[P].registry_hash()))
+    store.start_heartbeat(
+        heartbeat_interval(_stale_seconds()), PipelineOf[P].timeouts()
+    )
     var res: RunResult
     try:
-        res = P.execute(store, prior^, keys, run, Int(Pointer(to=rt)))
+        res = PipelineOf[P].execute(
+            store, prior^, keys, run, Int(Pointer(to=rt))
+        )
     except e:
         store.stop_heartbeat()
         if not store.cancel_requested():
