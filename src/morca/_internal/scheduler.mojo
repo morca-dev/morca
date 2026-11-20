@@ -381,7 +381,7 @@ struct Scheduler(Movable):
     appends to its `driver.log` once it ends."""
     var _keeping: Dict[Int, String]
     """A `keep-log` still going to the staging file it keeps, removed once
-    it has ended."""
+    it has kept it (`keep_log_ended`)."""
     var _meters: Dict[Int, Meter]
     """A local or control-placed run's process to its samples, recorded on
     its attempts when it's reaped (`morca._internal.usage`)."""
@@ -972,7 +972,7 @@ struct Scheduler(Movable):
         """Appends a control-placed run's output, or a local run's with
         secrets, to its `driver.log`, masked (`<binary> keep-log`, given the
         run's secrets as the run was); the staging file is removed once
-        that has ended."""
+        that has succeeded."""
         if not c.location:
             return
         try:

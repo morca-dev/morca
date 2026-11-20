@@ -5,11 +5,11 @@ before any pipeline's fill runs (#421).
 """
 
 from std.time import perf_counter_ns
-from std.os import remove
 import morca._internal.db.scheduler as scheduler_db
 import morca._internal.db.starting as starting_db
 from morca._internal.db.fill_requests import requested
 from morca._internal.alerts import failed_runs
+from morca._internal.control import keep_log_ended
 from morca._internal.notify import configured as notify_configured
 from morca._internal.logs import publish
 from morca._internal.proc import reap
@@ -48,12 +48,8 @@ def tick(mut self: Scheduler, now: Int64) raises:
             continue
         if done.pid in self._keeping:
             var stage = self._keeping.pop(done.pid)
-            if done.code != 0:
+            if not keep_log_ended(stage, done.code):
                 print("morca: keep-log exited", done.code, "keeping", stage)
-            try:
-                remove(stage)
-            except:
-                pass
             continue
         print("reaped pid", done.pid, "exit", done.code)
         var spawned = self._spawned.pop(done.pid, (-1, 0, String()))

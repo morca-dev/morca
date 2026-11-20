@@ -6,9 +6,11 @@ scheduler.
 """
 
 from std.os import getenv, setenv, unsetenv
+from std.os.path import exists
 from std.testing import (
     TestSuite,
     assert_equal,
+    assert_false,
     assert_raises,
     assert_true,
 )
@@ -17,6 +19,7 @@ from morca._internal.control import (
     ControlLimits,
     control_stage,
     fetch_secret,
+    keep_log_ended,
     parse_placement,
     pressure_reason,
     run_env,
@@ -142,6 +145,20 @@ def test_stage() raises:
         _ = setenv("TMPDIR", tmp)
     else:
         _ = unsetenv("TMPDIR")
+
+
+def test_keep_log_ended() raises:
+    # A keep-log that failed leaves the staging file, as it says (#526);
+    # one that kept the output removes it.
+    var stage = String(
+        getenv("TMPDIR", "/tmp").rstrip("/"), "/morca-test-keep-log-stage"
+    )
+    with open(stage, "w") as f:
+        f.write("output\n")
+    assert_false(keep_log_ended(stage, 1))
+    assert_true(exists(stage), "a failed keep-log removed its stage")
+    assert_true(keep_log_ended(stage, 0))
+    assert_false(exists(stage), "a kept stage stayed")
 
 
 def test_fetch() raises:
