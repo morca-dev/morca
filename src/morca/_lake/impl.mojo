@@ -10,8 +10,6 @@ library imports this.
 """
 
 from std.memory.alloc import unsafe_alloc
-from std.random import random_float64
-from std.time import sleep
 
 from dista import Codec
 from iceberg.append import AppendResult, prepare_append
@@ -63,6 +61,7 @@ from parquet import (
 from parquet.arrow import ArrayArena, ArrayData
 from parquet_full import AllCodecs
 
+from morca._lake.backoff import backoff
 from morca._lake.host import Host
 from morca._lake.names import (
     _split,
@@ -73,18 +72,6 @@ from morca._lake.names import (
 
 comptime _COMMIT_RETRIES = 8
 """How many times to reload and retry when another writer got there first."""
-
-
-def _backoff(attempt: Int):
-    """Waits before retry `attempt` (1, 2, ...) of a commit that clashed:
-    10 ms doubling with each, to 640 ms, times a random half to one and a
-    half. Two writers that both wrote the same metadata version both back
-    out (iceberg's filesystem catalog deletes both files), so retrying at
-    once can clash again and again; the random wait lets one get ahead.
-    Each process seeds `std.random` itself (`morca._cli.seed_random`).
-    """
-    var base = 0.01 * Float64(1 << min(attempt - 1, 6))
-    sleep(base * random_float64(0.5, 1.5))
 
 
 def _reload(mut table: Table) raises:
@@ -102,7 +89,7 @@ def _reload(mut table: Table) raises:
                 raise Error(
                     "morca: can't reload ", table.metadata.location, ": ", e
                 )
-            _backoff(attempt)
+            backoff(attempt)
 
 
 def _load(cat: FilesystemCatalog, ns: String, name: String) raises -> Table:
@@ -115,7 +102,7 @@ def _load(cat: FilesystemCatalog, ns: String, name: String) raises -> Table:
             attempt += 1
             if attempt > _COMMIT_RETRIES:
                 raise Error("morca: can't load ", ns, ".", name, ": ", e)
-            _backoff(attempt)
+            backoff(attempt)
 
 
 def _landed(table: Table, snapshot_id: Int64) -> Bool:
@@ -211,7 +198,7 @@ def _settle_properties(
             attempt += 1
             if attempt > _COMMIT_RETRIES:
                 raise Error("morca: can't set ", dataset, "'s properties: ", e)
-            _backoff(attempt)
+            backoff(attempt)
             _reload(table)
             continue
         ctx.log(String("set ", dataset, " properties: ", names))
@@ -359,7 +346,7 @@ def _evolve(
                         " tries): ",
                         e,
                     )
-                _backoff(attempt)
+                backoff(attempt)
                 _reload(table)
                 continue
             var added = String("")
@@ -917,7 +904,7 @@ def _commit_append(
                     " tries): ",
                     e,
                 )
-            _backoff(attempt)
+            backoff(attempt)
             _reload(table)
             # A commit that landed after all is done, not tried again.
             if not _landed(table, result.snapshot_id):
@@ -975,7 +962,7 @@ def commit(
                     " tries): ",
                     e,
                 )
-            _backoff(attempt)
+            backoff(attempt)
             _reload(table)
             # A commit that landed after all is done, not tried again.
             if not _landed(table, result.snapshot_id):
@@ -1300,7 +1287,7 @@ def _commit_replace(
                     " tries): ",
                     e,
                 )
-            _backoff(attempt)
+            backoff(attempt)
             _reload(table)
             # A commit that landed after all is done, not tried again.
             if not _landed(table, result.snapshot_id):
