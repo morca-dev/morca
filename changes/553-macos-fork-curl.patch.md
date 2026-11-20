@@ -1,0 +1,1 @@
+- **macOS:** a local run of a pipeline with dista tasks no longer loses its workers to an Objective-C fork crash on their first S3 request. (#553)

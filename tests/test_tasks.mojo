@@ -1,5 +1,7 @@
 """Dista inside steps: one runtime per run, reached through `Ctx.runtime`."""
 
+from objectstore.http import free_connection_pool, new_connection_pool
+
 from std.testing import TestSuite, assert_equal, assert_true
 
 from dista import ObjectRef, Seq, Task
@@ -26,9 +28,17 @@ def worker_of(x: Int) raises -> String:
     return String(external_call["getpid", Int32]())
 
 
+def curl_in_worker(x: Int) raises -> Int:
+    """Initialises libcurl in the worker, as a task's first S3 request does
+    (objectstore's `curl_global_init`)."""
+    free_connection_pool(new_connection_pool())
+    return x + 1
+
+
 comptime Square = Task[Int, Int, square]
+comptime CurlInWorker = Task[Int, Int, curl_in_worker]
 comptime WorkerOf = Task[Int, String, worker_of]
-comptime TheseTasks = Tasks[Square, WorkerOf]
+comptime TheseTasks = Tasks[Square, WorkerOf, CurlInWorker]
 
 
 def fan(mut ctx: Ctx, m: Month) raises -> Int:
@@ -67,6 +77,21 @@ def no_runtime(mut ctx: Ctx, m: Month) raises -> Int:
     return rt.get(rt.remote[Square](2))
 
 
+def curl_fan(mut ctx: Ctx, m: Month) raises -> Int:
+    """libcurl initialised in every worker, none of it in the driver."""
+    ref rt = ctx.runtime[TheseTasks]()
+    var refs = List[ObjectRef[Int]]()
+    for i in range(20):
+        refs.append(rt.remote[CurlInWorker](i))
+    var t = 0
+    for r in refs:
+        t += rt.get(r)
+    return t
+
+
+comptime CurlFan = Step["curl_fan", Month, Int, curl_fan, Mapped]
+comptime CurlFans = Pipeline["curl_fans", CurlFan, tasks=TheseTasks]
+
 comptime Fan = Step["fan", Month, Int, fan, Mapped]
 comptime Seen = Step["seen", Seq[Int], Int, workers_seen, Gather, after=Fan]
 comptime Fans = Pipeline["fans", Fan, Seen, tasks=TheseTasks]
@@ -82,6 +107,15 @@ def _sum_squares(offset: Int) -> Int:
     for i in range(100):
         t += (i + offset) * (i + offset)
     return t
+
+
+def test_workers_can_initialise_libcurl() raises:
+    """On macOS a forked worker crashed in `curl_global_init` (Objective-C's
+    fork check) unless the driver had initialised libcurl before forking
+    (#135). First in this file, so no earlier run has done it."""
+    var res = CurlFans.run(parse_months("2024-01"))
+    assert_true(res.succeeded())
+    assert_equal(res.output[Int]("curl_fan", "2024-01"), 210)
 
 
 def test_steps_fan_out_over_the_runs_workers() raises:

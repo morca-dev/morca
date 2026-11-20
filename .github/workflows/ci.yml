@@ -792,10 +792,11 @@ jobs:
   #
   # Left out: what needs Linux (test-cgroups and test-usage read
   # /sys/fs/cgroup, test-pressure and test-sample read /proc, test-kind needs
-  # docker), and everything of the data environment (it runs a local
-  # warehouse and MinIO, and local mode over an S3 warehouse crashes forked
-  # workers on macOS, morca #135). The nightly leg's macos-latest runs the two
-  # halves of `test` in full.
+  # docker), and everything of the data environment (a local warehouse and
+  # MinIO, with a dozen sibling checkouts this job doesn't lay out). What
+  # broke there on macOS, forked workers crashing in libcurl's setup (#135),
+  # test-tasks covers: its workers initialise libcurl. The nightly leg's
+  # macos-latest runs the two halves of `test` in full.
   #
   # Also left out, for time: test-versions (5 minutes here), test-hetzner (6,
   # and its hetzner-stacks.sh once failed here, an old scheduler not yet
