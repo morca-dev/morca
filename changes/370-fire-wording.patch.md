@@ -1,1 +1,0 @@
-- **Fire wording:** the pipeline page's Next runs table heads its partition column Partition, not Fills, and the docs say "fill" only for morca.toml's `fills`. (#PR)
