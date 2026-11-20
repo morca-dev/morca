@@ -810,7 +810,7 @@ resumes with the steps already done skipped.
 
 With `fills = "all"` a pipeline fills its whole range by itself, within limits (#155, `src/morca/_internal/fill.mojo`). People change the limits; nobody has to drive a long backfill by hand.
 
-The default, `fills = "since_registration"`, is what morca did before. A schedule fills from the pipeline's registration on, and `morca backfill` fills the rest by hand.
+The default, `fills = "since_registration"`, is what morca did before. Only the schedule's fires run, from the pipeline's registration on, and `morca backfill` runs the rest by hand.
 
 ### What the scheduler does
 
@@ -841,7 +841,7 @@ The pipeline page and `/api/pipelines/<name>` say which of these stopped it, in 
 | `paused` | `morca pause`, the UI's Pause button, or the [watchdog](watchdog.md) tripping: it pauses the pipeline, and a fill stops like everything else. The reason names the watchdog's rule when the watchdog paused it. |
 | `outside its window` | The UTC hour is outside `fill_window`. A fill run that has started goes on past the window's end. |
 | `no budget` | The runs cost money (EC2 or Kubernetes) and `fill_budget_per_day` isn't set. |
-| `price unknown` | Neither morca.fleet's price table nor a Kubernetes cluster can price the run. The [cost estimate](#the-cost-estimate) fails closed. |
+| `price unknown` | morca.fleet's price table has no price for an instance type, or the run is on Kubernetes and neither `MORCA_KUBE_PRICE_VCPU_HOUR` nor `MORCA_KUBE_PRICE_GB_HOUR` is set. The [cost estimate](#the-cost-estimate) fails closed. |
 | `budget` | Today's estimated spend plus what the next run may cost would go over `fill_budget_per_day`. It starts again at 00:00 UTC. |
 | `waiting` | Other runs of the pipeline are queued, and they start first. |
 | `at fill_max_runs` | As many fill runs are going as `fill_max_runs` allows: running, or on a worker pool queued for a worker. |
@@ -850,11 +850,22 @@ The pipeline page and `/api/pipelines/<name>` say which of these stopped it, in 
 
 The estimate is conservative and fails closed. The AWS project's spend limit pauses the whole project, so a fill must stop well before it.
 
-- **Price.** A run's price is an hour of its head instance plus its most workers, at on-demand prices from morca.fleet's table (`hourly_price` in `src/morca/_internal/fleet.mojo`). That's the us-east-2 on-demand price for the types morca uses. The estimate is multiplied by 1.2 for what the table leaves out: EBS, transfer and requests.
-- **Spend today.** It sums each fill run's instances (`orca.instances`) since 00:00 UTC, at their own types' prices. An instance still up counts to now, including its idle time in the warm pool.
+- **Price.** On EC2, a run's price is an hour of its head instance plus its most workers, at on-demand prices from morca.fleet's table (`hourly_price` in `src/morca/_internal/fleet.mojo`). That's the us-east-2 on-demand price for the types morca uses. On Kubernetes, it's what the run's pods ask for at the stack's prices (see [Kubernetes prices](#kubernetes-prices)). The estimate is multiplied by 1.2 for what the prices leave out: EBS, transfer and requests.
+- **Spend today.** It sums each fill run's instances (`orca.instances`) since 00:00 UTC, at their own types' prices, and each fill run's pods on Kubernetes for the time its latest start ran. An instance still up, or a run still running, counts to now, including an instance's idle time in the warm pool.
 - **Before starting a run**, morca adds what the fill runs going and the new one may still cost. The expected time of a run is the longest of the pipeline's last 20 ended fill runs, or an hour before any has ended. It is at least a minute (EC2's minimum), plus `MORCA_EC2_POOL_SECONDS` of idle time in the pool. A run already going is charged that time less what it has run. The run starts only if the spend plus that is within `fill_budget_per_day`.
-- **Unknown prices.** No fill run starts on a budget when the price isn't known: an instance type that isn't in the table (today's runs' or the next run's), or a run on Kubernetes. The reason says which type.
+- **Unknown prices.** No fill run starts on a budget when the price isn't known: an instance type that isn't in the table (today's runs' or the next run's), or a run on Kubernetes with no price set. The reason says which.
 - **Free runs.** A run on the control host (`placement = "control"`) or a local process costs nothing beyond the machine already running. Its fill needs no budget.
+
+#### Kubernetes prices
+
+morca can't see what a cluster's nodes cost, so the stack sets a price for what pods ask for, as two variables in `/etc/orca.env` (or the scheduler's and `morca ui`'s environment), like the runner's other settings:
+
+| Variable | Meaning |
+|---|---|
+| `MORCA_KUBE_PRICE_VCPU_HOUR` | US dollars a vCPU of pod requests costs an hour |
+| `MORCA_KUBE_PRICE_GB_HOUR` | US dollars a GiB of pod memory requests costs an hour |
+
+A run's price an hour is its pods' CPU (`MORCA_DRIVER_CPU`, plus `MORCA_HEAD_CPU` and `workers` × `MORCA_WORKER_CPU` for a run with dista tasks) times the vCPU price, plus their memory (`MORCA_POD_MEMORY` for each of those pods) times the GiB price. Its cost is that for as long as it ran. Take the prices from a managed cluster's per-pod rates (GKE Autopilot, EKS Fargate), or spread a node's hourly price over the vCPUs and GiB it holds. With one of the two set, the other costs nothing; with neither, or one that isn't a number, Kubernetes runs have no price and a budgeted fill there starts nothing. The same prices feed the watchdog's `cost` rule and the run page's Cost. A run's memory is recorded as it starts (`orca.runs.pod_memory_mb`), so a run started before this was added is priced by its CPU alone.
 
 The budget is per pipeline, so a `fill_budget_per_day` in `[defaults]` gives each pipeline in the file that much. The estimate can't see a run that lasts longer than every earlier one until it has. The watchdog's `cost` rule (`MORCA_WATCHDOG_COST_DAY`, $25) is the stack-wide backstop: it pauses everything.
 

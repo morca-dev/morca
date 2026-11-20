@@ -24,8 +24,8 @@ Monthly month from the 1st of the next plus the lag.
 Until then the partition is outside the range, for the fill and for the
 coverage alike (`range_keys`), so it isn't counted as missing; the
 pipeline page's Fill line says when it fills (`FillStatus.lag_key`). The default,
-`since_registration`, is what morca did before: a schedule fills from the
-pipeline's registration on, and `morca backfill` the rest by hand.
+`since_registration`, is what morca did before: only the schedule's fires
+run, from the pipeline's registration on, and `morca backfill` the rest by hand.
 
 **What a fill takes.** A partition is left alone when it's done in a run of
 any code of the pipeline (every mapped step succeeded for it; with no
@@ -54,17 +54,18 @@ runs cost nothing more than its machines, which run anyway.
 
 **The cost estimate** is conservative, and fails closed. A fill run's
 cost is its instances' time (`orca.instances`) at `morca._internal.fleet`'s on-demand
-price table, times `COST_MARGIN` for what the table leaves out (EBS,
-transfer, requests). The day's spend is that over the fill runs' instances
-since 00:00 UTC, up to now. Before starting a run, morca also counts what
+price table, or on Kubernetes its pods' requests for the time it ran at
+the stack's prices (`morca._internal.kube_price`), times `COST_MARGIN` for
+what those leave out (EBS, transfer, requests). The day's spend is that
+over the fill runs since 00:00 UTC, up to now. Before starting a run, morca also counts what
 the fill runs going and the new one may still cost: the pipeline's
 hourly price (head plus its most workers) for the longest fill run of its
 last `_HISTORY` (an hour if it has none, at least a minute, plus the warm
 pool's idle time on EC2), less what each has run already. A run starts only
 if the spend plus that stays within `fill_budget_per_day`. When a price
-isn't known (an instance type not in the table, or Kubernetes, whose
-cluster morca can't price), no fill run starts on a budget, and the reason
-says so. A pipeline whose runs cost money (placed on EC2 or Kubernetes)
+isn't known (an instance type not in the table, or Kubernetes without
+`MORCA_KUBE_PRICE_VCPU_HOUR` or `MORCA_KUBE_PRICE_GB_HOUR`), no fill run
+starts on a budget, and the reason says so. A pipeline whose runs cost money (placed on EC2 or Kubernetes)
 starts no fill run without a budget. Runs on the control host or local
 processes cost nothing more than the machine already running.
 
@@ -86,6 +87,7 @@ from morca._internal.fill_requests import (
 from morca.civil import Civil
 from morca._internal.fleet import hourly_price
 from morca._internal.json import quote
+from morca._internal.kube_price import PRICE_HINT, kube_price, kube_requests
 from morca._internal.db.live import (
     dead_sql,
     live_runs,
@@ -102,7 +104,8 @@ from morca.tz import Zone
 
 comptime ALL = "all"
 comptime SINCE_REGISTRATION = "since_registration"
-"""The default of `fills`: a schedule fills from registration on."""
+"""The default of `fills`: only the schedule's fires run, from registration
+on."""
 comptime FILL_TRIGGER = "fill"
 """`orca.runs.trigger` of a fill's runs."""
 comptime COST_MARGIN = 1.2
@@ -405,11 +408,19 @@ def run_hourly(
     0 on the control host, as a local process or on a worker pool's
     machines (which run anyway), the head and its most
     workers at on-demand prices on EC2 (a type left empty is the runner's,
-    `MORCA_EC2_HEAD_TYPE` / `MORCA_EC2_WORKER_TYPE`), and -1 for a price that
-    isn't known (a type not in `morca._internal.fleet`'s table, or Kubernetes).
+    `MORCA_EC2_HEAD_TYPE` / `MORCA_EC2_WORKER_TYPE`), its pods' requests at
+    the stack's prices on Kubernetes (`morca._internal.kube_price`), and -1
+    for a price that isn't known (a type not in `morca._internal.fleet`'s
+    table, or Kubernetes with no price set).
     """
     if placed == "control" or placed == "local" or placed.startswith("worker:"):
         return 0.0
+    if placed == "kubernetes":
+        try:
+            var q = kube_requests(workers)
+            return kube_price().hourly(q.cpu_millis, q.memory_mb)
+        except:
+            return -1.0  # a request it can't read: unpriced
     if placed != "ec2":
         return -1.0
     var head = head_type if head_type else getenv(
@@ -427,6 +438,32 @@ def run_hourly(
             return -1.0
         price += Float64(workers) * w
     return price
+
+
+def over_budget(spent: Float64, next_cost: Float64, budget: Float64) -> Bool:
+    """Whether today's spend plus what the runs going and one more may
+    still cost would go over the day's budget: no fill run starts."""
+    return spent + next_cost > budget
+
+
+def budget_slots(
+    slots: Int,
+    budget: Float64,
+    spent: Float64,
+    next_cost: Float64,
+    hourly: Float64,
+    expected: Int,
+) -> Int:
+    """How many of `slots` fill runs may start on a budget: none when one
+    more would go over it (`over_budget`), else as many as it holds, each
+    `expected` seconds at `hourly` (all of them for a run that's free)."""
+    if over_budget(spent, next_cost, budget):
+        return 0
+    if hourly <= 0:
+        return slots
+    var one = COST_MARGIN * hourly * Float64(expected) / 3600.0
+    var room = budget - spent - next_cost
+    return min(slots, 1 + Int(room / one))
 
 
 def unknown_type(
@@ -622,7 +659,8 @@ def fill_status(
         s.rate = Float64(n) / hours
         s.eta_seconds = Int(Float64(s.left + s.live) / s.rate * 3600.0)
 
-    # Spend: the fill runs' instances since 00:00 UTC.
+    # Spend: the fill runs' instances, and their pods on Kubernetes, since
+    # 00:00 UTC.
     var day = now - now % 86400
     var unpriced = String()
     for r in fill_db.fill_instances(tx, p.name, now, day):
@@ -631,6 +669,13 @@ def fill_status(
             unpriced = r.instance_type
             continue
         s.spent += COST_MARGIN * price * max(r.seconds, 0.0) / 3600.0
+    var kube = kube_price()
+    for r in fill_db.fill_pods(tx, p.name, now, day):
+        var cost = kube.cost(r.cpu_millis, r.memory_mb, r.seconds)
+        if cost < 0:
+            unpriced = "Kubernetes"
+            continue
+        s.spent += COST_MARGIN * cost
     if unpriced:
         s.spent = -1.0
 
@@ -694,20 +739,22 @@ def fill_status(
         )
     elif s.budget >= 0 and s.hourly < 0:
         var t = unknown_type(p.placed, p.head_type, p.worker_type, p.workers)
+        var why = String("morca can't price runs on ", p.placed)
+        if t:
+            why = String("no price for ", t, " in morca.fleet's table")
+        elif p.placed == "kubernetes":
+            why = String("runs on kubernetes have no price (", PRICE_HINT, ")")
         s.idle = String(
-            "price unknown: ",
-            String("no price for ", t, " in morca.fleet's table") if t else (
-                String("morca can't price runs on ", p.placed)
-            ),
-            ", so it can't keep to a budget",
+            "price unknown: ", why, ", so it can't keep to a budget"
         )
     elif s.budget >= 0 and s.spent < 0:
         s.idle = String(
             "price unknown: today's fill runs ran on ",
             unpriced,
-            ", which morca.fleet's table has no price for",
+            String(" with no price (", PRICE_HINT, ")") if unpriced
+            == "Kubernetes" else ", which morca.fleet's table has no price for",
         )
-    elif s.budget >= 0 and s.spent + s.next_cost > s.budget:
+    elif s.budget >= 0 and over_budget(s.spent, s.next_cost, s.budget):
         s.idle = String(
             "budget: ",
             money(s.spent),
@@ -745,10 +792,10 @@ def fill_status(
     if not s.idle:
         s.slots = p.fill.max_runs - s.running - s.queued
         # On a budget, as many as it holds.
-        if s.budget >= 0 and s.hourly > 0:
-            var one = COST_MARGIN * s.hourly * Float64(expected) / 3600.0
-            var room = s.budget - s.spent - s.next_cost
-            s.slots = min(s.slots, 1 + Int(room / one))
+        if s.budget >= 0:
+            s.slots = budget_slots(
+                s.slots, s.budget, s.spent, s.next_cost, s.hourly, expected
+            )
     var k = max(p.keys_per_run, 1)
     if len(asked) > 0:
         s.request.value().next = _batch(asked, 0, k, p.fill.newest_first)

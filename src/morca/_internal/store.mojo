@@ -384,8 +384,9 @@ trait RunStore(Store):
 
     def claim(mut self, run: Int, owner: String, stale_seconds: Float64) raises:
         """Makes `owner` the run's writer if no live process holds it: the
-        run is `queued`, `failed`, or `running` with a heartbeat older than
-        `stale_seconds` or cleared. Raises otherwise, saying why."""
+        run is `queued`, `failed`, `deferred`, or `running` with a heartbeat
+        older than `stale_seconds` or cleared. Raises otherwise, saying
+        why."""
         ...
 
     def ran_version(mut self, run: Int, version: Int) raises:

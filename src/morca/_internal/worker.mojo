@@ -51,7 +51,7 @@ started has its start given back.
 """
 
 from std.ffi import c_int, external_call
-from std.os import getenv, makedirs, remove
+from std.os import getenv, makedirs
 from std.sys.info import CompilationTarget, num_logical_cores
 from std.time import perf_counter_ns, sleep
 
@@ -77,7 +77,11 @@ from morca._internal.cgroup import (
 from morca._internal.cgroup import put as put_cgroup
 from morca._internal.cgroup import start_limit_mb
 from morca._internal.run_cpu import CpuKnobs
-from morca._internal.control import fetch_secret, pool_problem
+from morca._internal.control import (
+    fetch_secret,
+    keep_log_ended,
+    pool_problem,
+)
 from morca._internal.http_store import Body, StateApi
 from morca._internal.logs import run_dir
 from morca._internal.pressure import (
@@ -468,13 +472,8 @@ struct Worker(Movable):
         var code = done.code
         if pid in self.keeping:
             var stage = self.keeping.pop(pid)
-            if code != 0:
+            if not keep_log_ended(stage, code):
                 print("morca worker: keep-log exited", code, "keeping", stage)
-            else:
-                try:
-                    remove(stage)
-                except:
-                    pass
             return
         if pid in self.members:
             var member = self.members.pop(pid)

@@ -64,6 +64,7 @@ executor-core:tests/test_formal_fence.mojo:test-formal-fence
 executor-core:tests/test_crash.mojo:test-crash
 executor-core:tests/test_tasks.mojo:test-tasks
 executor-core:tests/test_logs.mojo:test-logs
+executor-core:tests/test_kube.mojo:test-kube
 executor-core:tests/test_usage.mojo:test-usage
 executor-core:tests/test_resources.mojo:test-resources
 executor-core:tests/test_recommend.mojo:test-recommend

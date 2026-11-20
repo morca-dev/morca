@@ -564,6 +564,7 @@ write_app_envs() {
             {
                 lake_env
                 sed -n 's/^MORCA_POSTHOG_KEY=/POSTHOG_KEY=/p' "$CONF/settings.env" | tail -n 1
+                image_bytes "$image:$atag"
             } > "$f"
             echo "$name $port $atag ${check:-/} 0" >> "$ENVDIR/apps.run"
             continue
@@ -582,6 +583,7 @@ write_app_envs() {
         {
             ! echo "$decl" | grep -qx 'lake true' || lake_env
             echo "$decl" | sed -n 's/^env //p'
+            image_bytes "$image:$atag"
         } > "$f"
         echo "$decl" | sed -n 's/^secret //p' > "$ENVDIR/app-$name.secrets"
         while read -r sname sid; do
@@ -602,6 +604,25 @@ write_app_envs() {
         echo "$name $dport $atag ${dcheck:-/} ${mb:-0}" >> "$ENVDIR/apps.run"
     done < "$APPS"
     rm -f "$ENVDIR"/decl.*
+}
+
+# image_bytes IMAGE: "MORCA_IMAGE_BYTES=N", IMAGE's size in bytes (docker
+# image inspect's .Size), for a container that runs it to show its own
+# size (census #124); nothing if inspect fails, never an empty value. The
+# size is the image's: the same image gives the same line, so it changes a
+# container's env file, and its spec, only when its image changes anyway.
+image_bytes() {
+    b_n=$(docker image inspect -f '{{.Size}}' "$1" 2> /dev/null) || return 0
+    case "$b_n" in "" | *[!0-9]*) return 0 ;; esac
+    echo "MORCA_IMAGE_BYTES=$b_n"
+}
+
+# image_bytes_env DIR: morca.env's MORCA_IMAGE_BYTES (image_bytes), after
+# pull_all: write_env runs before the images are pulled, and a line there
+# missing for a tag not pulled yet would replace the containers on the next
+# apply.
+image_bytes_env() {
+    image_bytes "$image:$tag" >> "$1/morca.env"
 }
 
 pull() { # IMAGE: fatal on failure (a trial run may use an image it has)
@@ -872,7 +893,11 @@ containers() {
         "$image:$tag" ui
     # This machine's own samples, for the Control page: the host's processes
     # and network, and each container's memory by name.
-    $cb sampler - - "$image:$tag" --pid host --network host \
+    # It has no env file: its MORCA_IMAGE_BYTES is an -e (in its args, so
+    # in its spec, as the others' is in their env file's).
+    sbytes=$(image_bytes "$image:$tag")
+    # shellcheck disable=SC2086
+    $cb sampler - - "$image:$tag" --pid host --network host ${sbytes:+-e "$sbytes"} \
         -v "$STATE/stage:/var/lib/orca/stage" \
         -v /sys/fs/cgroup:/host/cgroup:ro -v /var/lib/docker/containers:/host/containers:ro "$image:$tag" \
         sample --out /var/lib/orca/stage/control.jsonl --dirs /var/lib/orca/stage --keep 720 \
@@ -1151,6 +1176,7 @@ cmd_plan() {
     write_env "$ENVDIR"
     login
     pull_all
+    image_bytes_env "$ENVDIR"
     write_app_envs
     PLAN=$ENVDIR/plan
     : > "$PLAN"
@@ -1241,6 +1267,7 @@ cmd_apply() {
     if [ "$dbonly" = 0 ]; then
         pull_all
         ENVDIR=$CONF
+        image_bytes_env "$CONF"
         write_app_envs
         PLAN=$CONF/plan
         : > "$PLAN"

@@ -2,7 +2,7 @@
 
 November 1, 2026
 
-How morca will create the pods a run needs, what that takes on AWS, how its cost stays bounded, and the small Kubernetes client it needs. This is phase 5 of [DESIGN.md](DESIGN.md). The client is built ([k8s.mojo](https://github.com/magmalake/k8s.mojo)), and so are the image, the manifests (`deploy/`) and a dista cluster per run (`morca._internal.kube`), tested on kind (`tests/kind.sh`); object storage and AWS come next (DESIGN.md, phase 5).
+How morca will create the pods a run needs, what that takes on AWS, how its cost stays bounded, and the small Kubernetes client it needs. This is phase 5 of [DESIGN.md](DESIGN.md). The client is built ([k8s.mojo](https://github.com/magmalake/k8s.mojo)), and so are the image, the manifests (`deploy/`) and a dista cluster per run (`morca._internal.kube`), tested on kind (`tests/kind.sh`), with the warehouse and the logs in object storage (MinIO on kind); AWS comes next (DESIGN.md, phase 5).
 
 ## Who creates the pods
 
@@ -13,6 +13,9 @@ How morca will create the pods a run needs, what that takes on AWS, how its cost
 | A Pod and a Service for the dista head | The Service gives the head a DNS name, which becomes `DISTA_HEAD` |
 | N worker Pods, sized for the pipeline | dista's workers: the pipeline's image with `DISTA_ROLE=worker` |
 | A Job for the driver | The pipeline binary: `taxi run ...`, or `taxi resume <run>` |
+| A Secret, for a run with secrets | The values of its `secrets`, which its pods refer to by name |
+
+Every pod also gets the bucket: the scheduler's `AWS_REGION`, `AWS_ENDPOINT_URL_S3` and the like, and `MORCA_WAREHOUSE` and `MORCA_LOGS` when they're in object storage, so steps reach the warehouse and attempts' logs and timelines go to the bucket. The S3 keys come from the stack's Secret `morca-s3` in `morca-runs` (`MORCA_RUN_S3_SECRET`) by `secretKeyRef`, so no Job or Pod object holds them. Before a run's objects go, the scheduler keeps its driver's, head's and workers' logs beside its attempts' (`driver.log`, `head.log`, `worker-<i>.log`).
 
 The scheduler watches the Job, and deletes everything labelled with the run when it ends.
 
@@ -31,7 +34,7 @@ Driver-side autoscaling, a run asking for more workers while it runs as Ray's au
 The Kubernetes API is HTTPS with JSON. Creating a pod is `POST /api/v1/namespaces/morca-runs/pods` with the pod's spec as the body.
 
 - **Authentication.** The scheduler runs under a **ServiceAccount**. Kubernetes mounts a token and the cluster's CA certificate into its pod (`/var/run/secrets/kubernetes.io/serviceaccount/`), and the scheduler sends the token as a bearer header.
-- **Authorization.** A **Role** in the `morca-runs` namespace grants create, get, list, watch and delete on pods, jobs and services there, and nothing else.
+- **Authorization.** A **Role** in the `morca-runs` namespace grants create, get, list, watch and delete on pods, jobs and services there, and create, get, list and delete on secrets (a run's own, `morca._internal.kube`), and nothing else.
 - **Watching.** `GET ...?watch=true&labelSelector=morca.run%3D<id>` is a long-lived response with one JSON event per line.
 
 ### Cleanup, in layers
@@ -70,7 +73,7 @@ Limits stack from morca down to AWS, and each layer catches what the one above m
 
 | Layer | Control |
 |---|---|
-| **morca** | `max_runs` per pipeline; a total vCPU budget across all runs, checked before a cluster is created; a maximum cluster size per pipeline; a deadline per run. morca records pods × size × duration per run in Postgres, so the UI can show an estimated cost per run. |
+| **morca** | `max_runs` per pipeline; a total vCPU budget across all runs, checked before a cluster is created; a maximum cluster size per pipeline; a deadline per run. morca records pods × size × duration per run in Postgres, and with `MORCA_KUBE_PRICE_VCPU_HOUR` and `MORCA_KUBE_PRICE_GB_HOUR` set the run page shows an estimated cost per run, fills keep to `fill_budget_per_day`, and the watchdog's `cost` rule counts the pods ([Kubernetes prices](docs/morca-toml.md#kubernetes-prices)). |
 | **Kubernetes** | A **ResourceQuota** on `morca-runs`: a hard cap on the CPU and memory all run pods can request. If morca has a bug, extra pods just wait. |
 | **Karpenter** | **NodePool limits**, such as `cpu: 64`: the most EC2 that can run at once, whatever asks for it. |
 | **Spot** | Workers on Spot, typically 60–90% cheaper. A reclaimed worker means retried dista tasks, a lost driver means `morca resume`, both of which phase 1 already handles. The head and driver stay on on-demand. |

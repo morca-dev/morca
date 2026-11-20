@@ -2,7 +2,7 @@
 authors = ["Marius S <39998+winding-lines@users.noreply.github.com>"]
 channels = ["https://conda.modular.com/max-nightly", "conda-forge"]
 name = "morca"
-version = "0.38.0"
+version = "0.39.0"
 description = "Orchestration for Mojo data pipelines: DAGs in Mojo, cron schedules, a web UI."
 preview = ["pixi-build"]
 platforms = ["osx-arm64", "linux-64", "linux-aarch64"]
@@ -46,7 +46,7 @@ sqlite = ">=3.45,<4"
 # revisions mojoshelf published of what it imports.
 [package]
 name = "morca-mojo"
-version = "0.38.0"
+version = "0.39.0"
 
 [package.build]
 backend = { name = "pixi-build-mojo", version = "0.*" }
@@ -192,6 +192,7 @@ test-formal-fence = { cmd = "scripts/unit-tests.sh build executor-core && script
 test-crash = { cmd = "scripts/unit-tests.sh build executor-core && scripts/unit-tests.sh run test-crash && scripts/with-postgres.sh tests/crash.sh" }
 test-tasks = { cmd = "scripts/unit-tests.sh build executor-core && scripts/unit-tests.sh run test-tasks" }
 test-logs = { cmd = "scripts/unit-tests.sh build executor-core && scripts/unit-tests.sh run test-logs && rm -f build/logs.db build/logs.db-wal build/logs.db-shm && MORCA_DATABASE_URL=sqlite:build/logs.db tests/logs.sh" }
+test-kube = { cmd = "scripts/unit-tests.sh build executor-core && scripts/unit-tests.sh run test-kube" }
 test-scheduler = { cmd = "scripts/with-postgres.sh tests/scheduler.sh" }
 test-chaos = { cmd = "scripts/with-postgres.sh tests/chaos.sh" }
 # The same over a SQLite file (morca.sqlite_store), with no server.
@@ -322,7 +323,7 @@ test-kind = { cmd = "tests/kind.sh" }
 build-shared = { cmd = "scripts/build-shared.sh" }
 # CI runs these three parts on runners of their own; `test` is all of them.
 # The executor, stores, crashes, what runs use and the data a run makes:
-test-executor-core = { depends-on = ["build-shared", "test-sample", "test-steps", "test-cron", "test-warehouse", "test-cli", "test-hetzner", "test-compile-fail", "test-store", "test-formal-pins", "test-state", "test-formal-migrate", "test-formal-fence", "test-crash", "test-tasks", "test-logs", "test-usage", "test-resources", "test-recommend", "test-cgroups", "test-aws", "test-source", "test-highlight", "test-step-cards", "test-graph", "test-locate", "test-timeline", "test-datasets", "test-db-blip", "test-chaos", "test-chaos-sqlite", "test-conformance"] }
+test-executor-core = { depends-on = ["build-shared", "test-sample", "test-steps", "test-cron", "test-warehouse", "test-cli", "test-hetzner", "test-compile-fail", "test-store", "test-formal-pins", "test-state", "test-formal-migrate", "test-formal-fence", "test-crash", "test-tasks", "test-logs", "test-kube", "test-usage", "test-resources", "test-recommend", "test-cgroups", "test-aws", "test-source", "test-highlight", "test-step-cards", "test-graph", "test-locate", "test-timeline", "test-datasets", "test-db-blip", "test-chaos", "test-chaos-sqlite", "test-conformance"] }
 # Workers, pools, placement and the clouds they run on:
 test-executor-workers = { depends-on = ["build-shared", "test-ec2", "test-autoscale", "test-no-workers", "test-pool", "test-hcloud", "test-pool-scale", "test-pool-scale-ec2", "test-pool-image", "test-run-cluster", "test-secrets", "test-placement", "test-grants", "test-pressure", "test-lost-workers"] }
 test-executor = { depends-on = ["test-executor-core", "test-executor-workers"] }

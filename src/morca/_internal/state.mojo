@@ -1,6 +1,6 @@
 """morca's state in Postgres: pipelines, runs, steps and attempts.
 
-Everything lives in the `morca` schema, which `State.migrate` creates and
+Everything lives in the `orca` schema, which `State.migrate` creates and
 brings up to date; migrations are SQL in `_migrations`, applied in order
 under a transaction-scoped advisory lock, so two processes starting at once
 don't both apply one.
@@ -189,8 +189,8 @@ struct State(Movable):
         """Makes `owner` the run's writer, if no live process holds it.
 
         A run can be claimed while it's `queued`, unfinished (`running` with
-        a stale or cleared heartbeat; the scheduler starts a run with none)
-        or `failed`. Raises otherwise, saying why.
+        a stale or cleared heartbeat; the scheduler starts a run with none),
+        `failed` or `deferred`. Raises otherwise, saying why.
         """
         if runs_db.claim(self.conn, run, owner, stale_seconds):
             return

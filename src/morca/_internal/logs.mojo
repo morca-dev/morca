@@ -58,10 +58,20 @@ def mask(text: String) -> String:
 
 def mask_bytes(data: Span[UInt8, _]) -> List[UInt8]:
     """`mask`, on bytes that may not be UTF-8."""
+    return mask_values(data, _secret_values())
+
+
+def mask_values(data: Span[UInt8, _], values: List[String]) -> List[UInt8]:
+    """`data` with each of `values` replaced by `***`: what `mask_bytes`
+    does with the run's secrets, for a process that doesn't have them in its
+    environment (the scheduler, keeping a Kubernetes run's pod logs). Values
+    shorter than 4 bytes are left, as `mask` leaves them."""
     var out = List[UInt8](capacity=len(data))
     for b in data:
         out.append(b)
-    for v in _secret_values():
+    for v in values:
+        if v.byte_length() < 4:
+            continue
         var pat = v.as_bytes()
         var n = len(pat)
         var got = List[UInt8](capacity=len(out))
@@ -82,6 +92,37 @@ def mask_bytes(data: Span[UInt8, _]) -> List[UInt8]:
                 i += 1
         out = got^
     return out^
+
+
+def mask_main() -> Int:
+    """`mask`: copies stdin to stdout a line at a time, `mask_bytes`ed, until
+    stdin ends. A Kubernetes run with secrets (`morca._internal.kube`) has
+    its pods' output go through it, so their logs never hold the values."""
+    var buf = List[UInt8](length=65536, fill=0)
+    var line = List[UInt8]()
+    while True:
+        var n = external_call["read", Int](c_int(0), buf.unsafe_ptr(), 65536)
+        if n <= 0:
+            break
+        for i in range(n):
+            line.append(buf[i])
+            if buf[i] == UInt8(ord("\n")):
+                _write_out(mask_bytes(Span(line)))
+                line.clear()
+    if len(line) > 0:
+        _write_out(mask_bytes(Span(line)))
+    return 0
+
+
+def _write_out(data: List[UInt8]):
+    var at = 0
+    while at < len(data):
+        var n = external_call["write", Int](
+            c_int(1), data.unsafe_ptr() + at, len(data) - at
+        )
+        if n <= 0:
+            return
+        at += n
 
 
 def logs_dir() -> String:

@@ -209,6 +209,12 @@ case "$all" in
         h=$FAKE/health/${n%-next}
         if [ -f "$h" ]; then cat "$h"; else echo 200; fi
         ;;
+    # An image's size: a number from its id (a tag pushed again is another
+    # size), unless $FAKE/no-size exists, when inspect fails.
+    "image inspect -f {{.Size}} "*)
+        [ ! -e "$FAKE/no-size" ] || exit 1
+        image_id "${all##* }" | cksum | cut -d' ' -f1
+        ;;
     "image inspect -f "*) image_id "${all##* }" ;;
     "image inspect "*) exit 0 ;;
     "inspect -f "*orca.stack.spec*)

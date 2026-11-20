@@ -1,6 +1,6 @@
 # Where runs' clusters go (K8S.md, morca.kube): the `morca-runs` namespace,
 # what the scheduler may do there and nothing else, the database its drivers
-# reach, and a hard cap on what all run pods together can ask for.
+# reach, the S3 keys of the bucket every pod reaches, and a hard cap on what all run pods together can ask for.
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -15,6 +15,18 @@ metadata:
 stringData:
   url: postgresql://orca:morca-local@postgres.morca.svc:5432/orca
 ---
+# The S3 keys every run pod gets by reference (morca.kube,
+# MORCA_RUN_S3_SECRET), so no Job or Pod holds them: as morca.yaml's, for its
+# MinIO; anywhere else, make it yourself.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: morca-s3
+  namespace: morca-runs
+stringData:
+  AWS_ACCESS_KEY_ID: morca-local
+  AWS_SECRET_ACCESS_KEY: morca-local-s3-secret
+---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -24,13 +36,19 @@ rules:
   - apiGroups: [""]
     resources: [pods, services]
     verbs: [create, get, list, watch, delete]
-  # A driver's log, kept under MORCA_LOGS before its Job is deleted.
+  # The driver's, head's and workers' logs, kept under MORCA_LOGS before
+  # the Job is deleted.
   - apiGroups: [""]
     resources: [pods/log]
     verbs: [get]
   - apiGroups: [batch]
     resources: [jobs]
     verbs: [create, get, list, watch, delete]
+  # A run's secrets (morca.toml's `secrets`): a Secret per run, which its
+  # pods refer to, read to mask its driver log and deleted with the run.
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [create, get, list, delete]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

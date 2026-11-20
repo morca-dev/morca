@@ -63,6 +63,7 @@ from morca._internal.heartbeat import heartbeat_interval
 from morca._internal.http_store import HttpStore
 from morca._internal.logs import (
     location_exists,
+    mask_main,
     publish,
     read_location,
     run_dir,
@@ -99,7 +100,8 @@ comptime USAGE = """usage:
   <pipeline> sense
   <pipeline> keys
   <pipeline> fires [<count>] [--after YYYY-MM-DDTHH:MM[:SS]Z]
-  <pipeline> sample --out <location>|- [--pid PID] [--seconds S] ..."""
+  <pipeline> sample --out <location>|- [--pid PID] [--seconds S] ...
+  <pipeline> mask                  stdin to stdout, the run's secrets masked"""
 
 
 def _usage(msg: String = ""):
@@ -149,6 +151,10 @@ def _command[P: type_of(Pipeline)](args: List[String]) raises -> Int:
     if cmd == "sample":
         # For the runners: this machine's metrics beside a run (morca.sample).
         return sample_main(args)
+    if cmd == "mask" and len(args) == 2:
+        # For the Kubernetes runner: a pod's output, its secrets masked
+        # (morca._internal.kube).
+        return mask_main()
     var url = getenv("MORCA_DATABASE_URL")
     # A worker's run records itself over morca ui's API (morca.http_store).
     var state_url = getenv("MORCA_STATE_URL")

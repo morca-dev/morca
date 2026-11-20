@@ -353,6 +353,21 @@ stack apply > "$FAKE/out" 2>&1 || fail "an apply of what runs"
 for c in scheduler ui sampler console; do has "$c: unchanged"; done
 grep -q 'run -d\|rm -f\|stop ' "$FAKE/docker.log" && fail "an unchanged apply started or stopped a container"
 
+# Each container has its image's size, MORCA_IMAGE_BYTES (census #124): in
+# its env file, the sampler's as an -e. The same image, the same size: the
+# unchanged apply above replaced nothing. An image inspect can't size
+# leaves the variable out, never empty.
+grep -qx 'MORCA_IMAGE_BYTES=[0-9][0-9]*' "$MORCA_CONF/morca.env" || fail "no MORCA_IMAGE_BYTES in morca.env"
+grep -qx 'MORCA_IMAGE_BYTES=[0-9][0-9]*' "$MORCA_CONF/app-console.env" || fail "no MORCA_IMAGE_BYTES in app-console.env"
+grep 'run -d --name sampler ' "$FAKE/docker.all" | tail -n 1 | grep -q ' -e MORCA_IMAGE_BYTES=[0-9][0-9]* ' \
+    || fail "the sampler has no MORCA_IMAGE_BYTES"
+touch "$FAKE/no-size"
+stack apply > "$FAKE/out" 2>&1 || fail "an apply that can't size the images"
+grep -q MORCA_IMAGE_BYTES "$MORCA_CONF/morca.env" "$MORCA_CONF/app-console.env" && fail "MORCA_IMAGE_BYTES without a size"
+grep 'run -d --name sampler ' "$FAKE/docker.all" | tail -n 1 | grep -q MORCA_IMAGE_BYTES && fail "the sampler's MORCA_IMAGE_BYTES without a size"
+rm "$FAKE/no-size"
+stack apply > /dev/null 2>&1 || fail "an apply that sizes the images again"
+
 # Runs running: an apply that keeps the scheduler goes on; one that would
 # replace it is refused and changes nothing.
 echo 2 > "$FAKE/running"

@@ -247,6 +247,15 @@ instance and image has. `morca sample` is the same command
 (`src/morca/_internal/sample.mojo:9-14`). A second implementation may leave
 it out, as above, or exec `morca sample` where `morca` is on the path.
 
+### `mask`
+
+Copies stdin to stdout a line at a time, the values of the variables
+`MORCA_SECRETS` names replaced by `***` (`src/morca/_internal/logs.mojo`,
+`mask_main`). The Kubernetes runner sends a container's output through it
+for a run with secrets, so its pods' logs never hold them
+(`src/morca/_internal/kube.mojo`). A second implementation run there with
+secrets needs it; without, it can't run with secrets on Kubernetes.
+
 ### `keep-log <stage> <location> <start>`
 
 After a run's process ends, the runner hands its staged driver output to

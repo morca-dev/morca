@@ -1,0 +1,1 @@
+- **Kubernetes:** runs get their pipeline's secrets, from a Secret of their own that goes with the run, and their pods' logs mask them; a pipeline with secrets needs an image built from this version. (#554)

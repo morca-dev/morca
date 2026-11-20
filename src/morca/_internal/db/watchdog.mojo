@@ -5,12 +5,37 @@
 from postgres import Connection, Params
 
 
-@fieldwise_init
 struct Lease(Copyable, Movable):
     """An instance's row: its type, how long ago it started and ended
-    (-1: it hasn't)."""
+    (-1: it hasn't); or a Kubernetes run's pods (type `kubernetes`), with
+    their price."""
 
     var instance_type: String
+    var start_ago: Float64
+    var end_ago: Float64
+    var hourly: Float64
+    """US dollars an hour, or -1 for the price table's for its type."""
+
+    def __init__(
+        out self,
+        instance_type: String,
+        start_ago: Float64,
+        end_ago: Float64,
+        hourly: Float64 = -1.0,
+    ):
+        self.instance_type = instance_type
+        self.start_ago = start_ago
+        self.end_ago = end_ago
+        self.hourly = hourly
+
+
+@fieldwise_init
+struct PodLease(Copyable, Movable):
+    """A Kubernetes run's latest start: what its pods ask for in all, how
+    long ago it started and ended (-1: it hasn't)."""
+
+    var cpu_millis: Int
+    var memory_mb: Int
     var start_ago: Float64
     var end_ago: Float64
 
@@ -112,6 +137,32 @@ def leases(mut conn: Connection) raises -> List[Lease]:
     ):
         out.append(
             Lease(r.text("instance_type"), r.float64("s"), r.float64("e"))
+        )
+    return out^
+
+
+def pod_leases(mut conn: Connection) raises -> List[PodLease]:
+    """The runs on Kubernetes running, or that ended in the last 24 hours."""
+    var out = List[PodLease]()
+    for r in conn.query(
+        (
+            "SELECT coalesce(cpu_millis, 0) AS cpu, coalesce(pod_memory_mb, 0)"
+            " AS mem, extract(epoch FROM now() - started)::float8 AS s, CASE"
+            " WHEN status = 'running' THEN -1.0::float8 ELSE extract(epoch"
+            " FROM now() - coalesce(ended, started))::float8 END AS e FROM"
+            " orca.runs WHERE placement = 'kubernetes' AND started IS NOT"
+            " NULL AND (status = 'running' OR ended > now() - interval '24"
+            " hours')"
+        ),
+        Params(),
+    ):
+        out.append(
+            PodLease(
+                Int(r.int64("cpu")),
+                Int(r.int64("mem")),
+                r.float64("s"),
+                r.float64("e"),
+            )
         )
     return out^
 

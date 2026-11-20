@@ -626,6 +626,7 @@ struct RunFacts(Copyable, Movable):
     var batch_runs: Int
     var version: Int
     var cpu_millis: Int
+    var pod_memory_mb: Int
     var seconds: Int
 
 
@@ -636,9 +637,9 @@ def run_facts(mut conn: Connection, run: Int) raises -> RunFacts:
             " coalesce(batch, 0) AS batch, (SELECT count(*) FROM orca.runs b"
             " WHERE b.batch = r.batch) AS batch_runs,"
             " coalesce(version, 0) AS version,"
-            " coalesce(cpu_millis, 0) AS cpu, coalesce(extract(epoch FROM"
-            " coalesce(ended, now()) - started)::bigint, 0) AS secs FROM"
-            " orca.runs r WHERE id = $1"
+            " coalesce(cpu_millis, 0) AS cpu, coalesce(pod_memory_mb, 0) AS"
+            " mem, coalesce(extract(epoch FROM coalesce(ended, now()) -"
+            " started)::bigint, 0) AS secs FROM orca.runs r WHERE id = $1"
         ),
         Params().int64(Int64(run)),
     ).row(0)
@@ -649,6 +650,7 @@ def run_facts(mut conn: Connection, run: Int) raises -> RunFacts:
         Int(row.int64("batch_runs")),
         Int(row.int64("version")),
         Int(row.int64("cpu")),
+        Int(row.int64("mem")),
         Int(row.int64("secs")),
     )
 
@@ -679,18 +681,23 @@ def run_batch(mut conn: Connection, run: Int) raises -> RunBatch:
     )
 
 
-def run_pods(mut conn: Connection, run: Int) raises -> Tuple[Int, Int]:
-    """What run `run`'s pods asked for (`cpu_millis`, 0 off Kubernetes), and
-    how long it ran (or has so far), in seconds."""
+def run_pods(mut conn: Connection, run: Int) raises -> Tuple[Int, Int, Int]:
+    """What run `run`'s pods asked for (`cpu_millis`, 0 off Kubernetes, and
+    `pod_memory_mb`, MiB), and how long it ran (or has so far), in
+    seconds."""
     var row = conn.query(
         (
-            "SELECT coalesce(cpu_millis, 0) AS cpu, coalesce(extract(epoch"
-            " FROM coalesce(ended, now()) - started)::bigint, 0) AS secs FROM"
-            " orca.runs WHERE id = $1"
+            "SELECT coalesce(cpu_millis, 0) AS cpu, coalesce(pod_memory_mb, 0)"
+            " AS mem, coalesce(extract(epoch FROM coalesce(ended, now()) -"
+            " started)::bigint, 0) AS secs FROM orca.runs WHERE id = $1"
         ),
         Params().int64(Int64(run)),
     ).row(0)
-    return (Int(row.int64("cpu")), Int(row.int64("secs")))
+    return (
+        Int(row.int64("cpu")),
+        Int(row.int64("mem")),
+        Int(row.int64("secs")),
+    )
 
 
 def sensed(mut conn: Connection, run: Int) raises -> List[Tuple[String, Int64]]:

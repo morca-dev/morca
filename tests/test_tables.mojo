@@ -4,6 +4,7 @@ scripts/with-postgres.sh, in the data environment."""
 
 from std.os import getenv, setenv
 from std.os.path import exists
+from std.random import seed
 from std.testing import TestSuite, assert_equal, assert_true
 
 from iceberg.catalog.filesystem import FilesystemCatalog
@@ -27,6 +28,7 @@ from morca import (
     Step,
     parse_months,
 )
+from morca._lake.backoff import jitter
 from morca.tables import (
     BatchBuilder,
     Schema,
@@ -490,6 +492,22 @@ def test_ensure_table_refuses_an_incompatible_schema() raises:
     )
     # Nothing above committed a schema.
     assert_equal(len(_table("out").metadata.schemas), 1)
+
+
+def test_commit_backoff_differs_between_processes() raises:
+    """A commit's retry waits don't follow `std.random`: two processes in
+    the same state (unseeded, as every process starts) wait differently,
+    so writers that clashed don't clash again on every retry (#532)."""
+    var waits = List[Float64]()
+    for _ in range(4):
+        seed(532)
+        waits.append(jitter())
+    var distinct = 0
+    for i in range(len(waits)):
+        assert_true(0.5 <= waits[i] < 1.5, String(waits[i]))
+        if i > 0 and waits[i] != waits[i - 1]:
+            distinct += 1
+    assert_true(distinct > 0, "the same wait each time: " + String(waits[0]))
 
 
 def main() raises:

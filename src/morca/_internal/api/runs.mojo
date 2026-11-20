@@ -4,6 +4,7 @@ code version, and a run's machines with their metrics.
 
 from morca._internal.ui.cluster import cluster_json
 from morca._internal.json import quote
+from morca._internal.kube_price import kube_price
 from morca._internal.metrics import InstanceMetrics, peaks_json
 from morca._internal.source import commit_url
 from morca._internal.usage import usage_json
@@ -253,6 +254,17 @@ def runs_filters_json(mut j: String, p: RunsPage):
     j.write("}")
 
 
+def _cost(v: RunView) -> String:
+    """A Kubernetes run's estimated US dollars at the stack's prices
+    (`morca._internal.kube_price`), or null: elsewhere, or unpriced."""
+    if not v.cpu_millis or v.run.placement != "kubernetes":
+        return "null"
+    var c = kube_price().cost(v.cpu_millis, v.pod_memory_mb, Float64(v.seconds))
+    if c < 0:
+        return "null"
+    return String(Float64(Int(c * 10000.0 + 0.5)) / 10000.0)
+
+
 def run_json(v: RunView) -> String:
     """`/runs/<id>` (and `/api/...`) as JSON: the run, its code, its
     machines, what started it, its steps and the tables they touched."""
@@ -275,6 +287,10 @@ def run_json(v: RunView) -> String:
         String(cpu) if cpu else String("null"),
         ', "cpu_seconds": ',
         String(cpu * v.seconds // 1000) if cpu else String("null"),
+        ', "pod_memory_mb": ',
+        String(v.pod_memory_mb) if v.pod_memory_mb else String("null"),
+        ', "cost_estimate": ',
+        _cost(v),
         ', "version": ',
     )
     if v.version:
