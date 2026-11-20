@@ -109,6 +109,12 @@ def migrations() -> List[List[String]]:
         [
             "ALTER TABLE runs ADD COLUMN token TEXT",
         ],
+        # When a running run asked to cancel is stopped if its step hasn't
+        # finished, as Postgres's migration 19 keeps it (#527), in Unix
+        # seconds; the heartbeat's watchdog reads it.
+        [
+            "ALTER TABLE runs ADD COLUMN cancel_at REAL",
+        ],
     ]
 
 
