@@ -252,8 +252,18 @@ kubectl -n morca delete pod lake-register --wait=false > /dev/null
 morca_cli morca backfill lake 2024-01 > /dev/null || fail "backfill lake"
 lake=$(q "SELECT max(id) FROM orca.runs WHERE pipeline = 'lake'")
 until_true "SELECT status IN ('succeeded', 'failed') FROM orca.runs WHERE id = $lake" 300
-[ "$(q "SELECT status FROM orca.runs WHERE id = $lake")" = succeeded ] \
-    || { pull_logs; cat build/kind-logs/lake/"$lake"/driver.log 2> /dev/null || true; fail "run $lake of lake"; }
+if [ "$(q "SELECT status FROM orca.runs WHERE id = $lake")" != succeeded ]; then
+    kubectl -n morca-runs logs -l "orca.run=$lake" --prefix --tail=100 || true
+    q "SELECT s.step, s.partition, s.status, s.error FROM orca.steps s WHERE s.run = $lake" || true
+    # The driver log, once the scheduler has kept it.
+    i=0
+    until s3 s3 cp "s3://morca/logs/lake/$lake/driver.log" - 2> /dev/null; do
+        i=$((i + 1)); [ "$i" -lt 30 ] || break; sleep 1
+    done
+    pull_logs
+    find build/kind-logs/lake -name '*.log' -exec sh -c 'echo "== $1"; cat "$1"' _ {} \; || true
+    fail "run $lake of lake"
+fi
 gone "orca.run=$lake"
 s3 s3 ls s3://morca/warehouse/kind/rows/metadata/ | grep -q "metadata.json" || fail "no table kind.rows in the warehouse"
 pull_logs
