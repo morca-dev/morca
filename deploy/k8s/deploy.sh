@@ -621,14 +621,14 @@ if [ "$scheduler" = 1 ]; then
     log "registering the pipelines from $tag"
     if [ "$DRY_RUN" = 1 ]; then
         [ "$OVERLAP" = 0 ] || echo "+ kubectl -n $NS exec deploy/morca-scheduler -c scheduler -- morca scheduler wait-lead --timeout $HEALTH_TIMEOUT"
-        echo "+ kubectl -n $NS exec deploy/morca-scheduler -c scheduler -- morca register"
+        echo "+ kubectl -n $NS exec deploy/morca-scheduler -c scheduler -- morca register --image $IMG"
     else
         if [ "$OVERLAP" != 0 ]; then
             sched scheduler wait-lead --timeout "$HEALTH_TIMEOUT" > /dev/null \
                 || rollback_now "the new scheduler doesn't lead after ${HEALTH_TIMEOUT}s (kubectl -n $NS logs deploy/morca-scheduler)"
         fi
         n=0
-        until out=$(sched register 2>&1); do
+        until out=$(sched register --image "$IMG" 2>&1); do
             n=$((n + 1))
             [ "$n" -lt 15 ] || { echo "$out" >&2; rollback_now "$tag is deployed, but registering failed"; }
             sleep 2
@@ -765,22 +765,28 @@ if [ "$OVERLAP" != 0 ]; then
         check_fail "scheduler instances: ${leaders:-0} lead (morca scheduler status)"
     fi
 fi
-regs=$(psql_q "SELECT name || ' ' || coalesce(binary_path, '-') || ' ' || paused FROM orca.pipelines p WHERE to_jsonb(p)->>'retired' IS NULL ORDER BY name" 2> /dev/null) || regs=
+regs=$(psql_q "SELECT name || ' ' || coalesce(binary_path, '-') || ' ' || coalesce(nullif(image, ''), '-') || ' ' || paused FROM orca.pipelines p WHERE to_jsonb(p)->>'retired' IS NULL ORDER BY name" 2> /dev/null) || regs=
 n=0
 missing=
 paused=
+imageless=
 for line in $(echo "$regs" | tr ' ' '|'); do
     pname=${line%%|*}
     rest=${line#*|}
     pbin=${rest%%|*}
+    rest=${rest#*|}
+    pimg=${rest%%|*}
     n=$((n + 1))
     [ "${rest#*|}" != t ] || paused="$paused $pname"
+    # Its runs' pods run the image it's registered with.
+    [ "$pimg" != - ] || imageless="$imageless $pname"
     if [ "$pbin" = - ]; then
         missing="$missing $pname (no binary)"
     elif ! k exec deploy/morca-scheduler -c scheduler -- test -x "$pbin" > /dev/null 2>&1; then
         missing="$missing $pname ($pbin)"
     fi
 done
+[ -z "$imageless" ] || check_fail "pipelines: registered without an image, so their runs wait:$imageless (morca register --image $IMG)"
 if [ "$n" = 0 ]; then
     check_fail "pipelines: none registered"
 elif [ -n "$missing" ]; then

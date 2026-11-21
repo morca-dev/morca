@@ -1,1 +1,1 @@
-- **A deploy for Kubernetes:** `deploy/k8s/deploy.sh <tag>` deploys a project's image as Hetzner's deploy.sh does, with its upgrade steps, the overlap, drain and handover-wait settings, a backup first, a check after and a rollback when that fails (K8S.md#deploying). (#562)
+- **A deploy for Kubernetes:** `deploy/k8s/deploy.sh <tag>` deploys a project's image as Hetzner's deploy.sh does, with its upgrade steps, the overlap, drain and handover-wait settings, a backup first, a check after and a rollback when that fails (K8S.md#deploying). (#573)
