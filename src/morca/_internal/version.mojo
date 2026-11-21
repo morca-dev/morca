@@ -18,7 +18,7 @@ and no `"morca"`; `morca register` refuses a protocol it doesn't speak.
 from std.os import getenv
 from json import Value, loads
 
-comptime MORCA_VERSION = "0.40.0"
+comptime MORCA_VERSION = "0.41.0"
 """morca-mojo's version: pixi.toml's `[package] version`."""
 
 comptime PROTOCOL_VERSION = 1

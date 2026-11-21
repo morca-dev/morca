@@ -1,1 +1,0 @@
-- **Kubernetes apps and a UI of its own:** `morca config apps --kube` prints a Deployment and a Service per `[apps.<name>]` for `kubectl apply`, and `morca ui` leaves the scheduler's pod for a rolling Deployment with an Ingress (deploy/k8s/ui.yaml, which you now apply too). (#571)
