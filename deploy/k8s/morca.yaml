@@ -13,37 +13,22 @@
 #
 #     docker build -f deploy/k8s/minio.Dockerfile -t morca-minio:dev deploy/k8s
 #     kind load docker-image morca-minio:dev   # or push it where the cluster pulls
-#     kubectl apply -f deploy/k8s/morca.yaml -f deploy/k8s/runs.yaml
+#     kubectl apply -f deploy/k8s/morca.yaml -f deploy/k8s/runs.yaml \
+#         -f deploy/k8s/local-secrets.yaml -f deploy/k8s/postgres-backup.yaml
 #     kubectl -n morca port-forward svc/morca-ui 8270:8270
 #
-# The passwords in morca-db and morca-s3 are for a local cluster; anywhere
-# else, make the Secrets yourself and leave them out of this file. With a
-# bucket of your own, drop MinIO and set AWS_ENDPOINT_URL_S3 (or leave it out
-# on AWS), AWS_REGION and the two locations to it.
+# The Secrets these refer to, morca-db (the database's password and URL) and
+# morca-s3 (the bucket's keys), are in neither file: local-secrets.yaml has
+# them with passwords for a local cluster only; anywhere else, make them
+# yourself (local-secrets.yaml says how). The run secrets the scheduler
+# reads are in the Secret morca-secrets, if there is one (MORCA_SECRET_FETCH
+# below). Postgres is backed up to the bucket nightly (postgres-backup.yaml).
+# With a bucket of your own, drop MinIO and set AWS_ENDPOINT_URL_S3 (or leave
+# it out on AWS), AWS_REGION and the two locations to it.
 apiVersion: v1
 kind: Namespace
 metadata:
   name: morca
----
-apiVersion: v1
-kind: Secret
-metadata:
-  name: morca-db
-  namespace: morca
-stringData:
-  password: morca-local
-  url: postgresql://orca:morca-local@postgres.morca.svc:5432/orca
----
-# The S3 keys, for MinIO, the scheduler and the UI here, and as morca-s3 in
-# morca-runs (runs.yaml) for the run pods.
-apiVersion: v1
-kind: Secret
-metadata:
-  name: morca-s3
-  namespace: morca
-stringData:
-  AWS_ACCESS_KEY_ID: morca-local
-  AWS_SECRET_ACCESS_KEY: morca-local-s3-secret
 ---
 apiVersion: v1
 kind: Service
@@ -177,6 +162,9 @@ spec:
       labels: {app: morca-scheduler}
     spec:
       serviceAccountName: morca-scheduler
+      volumes:
+        - name: secrets
+          secret: {secretName: morca-secrets, optional: true, defaultMode: 0400}
       containers:
         - name: scheduler
           image: morca:dev
@@ -205,6 +193,19 @@ spec:
             - {name: MORCA_REGISTER, value: ""}
             - {name: MORCA_IMAGE, value: "morca:dev"}
             - {name: MORCA_RUNNER, value: kubernetes}
+            # Run secrets (morca register --secret NAME=orca/<id>) from the
+            # Secret morca-secrets, mounted below: the id orca/github-token
+            # is its key orca.github-token (each / a .), as Secret keys
+            # can't hold a /. Its pipelines' runs get them from a Secret of
+            # their own (morca.kube). Make it with
+            #   kubectl -n morca create secret generic morca-secrets \
+            #       --from-literal=orca.github-token=...
+            # A change reaches the scheduler within a minute or so.
+            - name: MORCA_SECRET_FETCH
+              value: >-
+                sh -c 'exec cat "/etc/morca/secrets/$(printf %s "$0" | tr / .)"'
+          volumeMounts:
+            - {name: secrets, mountPath: /etc/morca/secrets, readOnly: true}
           resources:
             requests: {cpu: 500m, memory: 512Mi}
         - name: ui

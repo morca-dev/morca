@@ -1,31 +1,13 @@
 # Where runs' clusters go (K8S.md, morca.kube): the `morca-runs` namespace,
-# what the scheduler may do there and nothing else, the database its drivers
-# reach, the S3 keys of the bucket every pod reaches, and a hard cap on what all run pods together can ask for.
+# what the scheduler may do there and nothing else, and a hard cap on what all
+# run pods together can ask for. The Secrets its pods refer to are made apart
+# from this file (local-secrets.yaml): morca-db, the database its drivers
+# reach, and morca-s3, the S3 keys of the bucket every pod reaches by
+# reference (morca.kube, MORCA_RUN_S3_SECRET), so no Job or Pod holds them.
 apiVersion: v1
 kind: Namespace
 metadata:
   name: morca-runs
----
-# For a local cluster, as morca.yaml's; anywhere else, make it yourself.
-apiVersion: v1
-kind: Secret
-metadata:
-  name: morca-db
-  namespace: morca-runs
-stringData:
-  url: postgresql://orca:morca-local@postgres.morca.svc:5432/orca
----
-# The S3 keys every run pod gets by reference (morca.kube,
-# MORCA_RUN_S3_SECRET), so no Job or Pod holds them: as morca.yaml's, for its
-# MinIO; anywhere else, make it yourself.
-apiVersion: v1
-kind: Secret
-metadata:
-  name: morca-s3
-  namespace: morca-runs
-stringData:
-  AWS_ACCESS_KEY_ID: morca-local
-  AWS_SECRET_ACCESS_KEY: morca-local-s3-secret
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role

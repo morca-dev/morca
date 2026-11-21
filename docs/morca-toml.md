@@ -546,7 +546,10 @@ server (see [hetzner.md](hetzner.md)), set it to a command that reads one:
 MORCA_SECRET_FETCH='sh /etc/orca/secret-fetch'   # prints /etc/orca/secrets/<id>, mode 600, root only
 ```
 
-The ids still start with `orca/`; the script must refuse `..`. For an
+The ids still start with `orca/`; the script must refuse `..`. On
+Kubernetes, deploy/k8s/morca.yaml sets it to read the Secret `morca-secrets`,
+mounted in the scheduler, whose key is the id with each `/` as a `.`
+([K8S.md](../K8S.md#secrets-and-backups)). For an
 S3-compatible store instead of S3, set `AWS_ENDPOINT_URL_S3` (and
 `AWS_REGION`, the keys) in the scheduler's environment file, not in `env`.
 
