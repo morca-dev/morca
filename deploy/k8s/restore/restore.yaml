@@ -1,14 +1,15 @@
 # Restores a dump postgres-backup.yaml made (or morca-stack backup, on
 # Hetzner: the same dump) into the stack's Postgres, as morca-stack restore
 # does. It's in a directory of its own so kubectl apply -f deploy/k8s/ never
-# runs it. With the scheduler stopped, so nothing writes meanwhile (K8S.md#backups):
+# runs it. With the scheduler and the UI stopped, so nothing writes or holds a
+# connection meanwhile (K8S.md#backups):
 #
-#     kubectl -n morca scale deployment/morca-scheduler --replicas=0
+#     kubectl -n morca scale deployment/morca-scheduler deployment/morca-ui --replicas=0
 #     kubectl -n morca delete job morca-restore --ignore-not-found
 #     kubectl apply -f deploy/k8s/restore/restore.yaml       # the newest dump
 #     kubectl -n morca wait --for=condition=complete job/morca-restore --timeout=600s
 #     kubectl -n morca logs job/morca-restore --all-containers
-#     kubectl -n morca scale deployment/morca-scheduler --replicas=1
+#     kubectl -n morca scale deployment/morca-scheduler deployment/morca-ui --replicas=1
 #
 # DUMP picks another (a name from `aws s3 ls s3://morca/backups/pg/`, with
 # or without backups/pg/), and FORCE=1 drops a database's orca schema first;

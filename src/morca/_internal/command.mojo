@@ -74,6 +74,7 @@ from morca._internal.remote import (
 from morca._internal.sample import sample_main
 from morca._internal.upgrade import upgrade_command
 from morca._internal.apps_config import apps_text
+from morca._internal.apps_kube import apps_kube
 from morca._internal.config import (
     ProjectConfig,
     RegisterFlags,
@@ -183,6 +184,9 @@ comptime USAGE = """usage:
   morca config apps [<morca.toml>] [--overlay <file>]
                 (its [apps.<name>] tables, a line per fact, as the stack's
                 script reads them; secrets by ID; no database)
+  morca config apps [<morca.toml>] --kube --image <ref> [--image-bytes <n>]
+                [--namespace <ns>] [--pull-secret <name>]
+                (a Deployment and a Service per app, for kubectl apply -f -)
   morca config check [<morca.toml>] [--overlay <file>] [--secrets]
                 (checks a file as register does, and its instance types,
                 with no database; --secrets reads each secret too)
@@ -1151,10 +1155,26 @@ def _config_check(
     var path = String()
     var overlay = getenv("MORCA_CONFIG_OVERLAY")
     var read_secrets = False
+    var kube = False
+    var kube_opts = Dict[String, String]()
     var k = 4 if show else 3
     while k < len(args):
         if args[k] == "--secrets" and not show and not apps:
             read_secrets = True
+        elif args[k] == "--kube" and apps:
+            kube = True
+        elif (
+            apps
+            and k + 1 < len(args)
+            and (
+                args[k] == "--image"
+                or args[k] == "--image-bytes"
+                or args[k] == "--namespace"
+                or args[k] == "--pull-secret"
+            )
+        ):
+            kube_opts[args[k]] = args[k + 1]
+            k += 1
         elif args[k] == "--overlay" and k + 1 < len(args):
             overlay = args[k + 1]
             k += 1
@@ -1179,7 +1199,26 @@ def _config_check(
     if show:
         print(file.shown(), end="")
         return 0
+    if apps and kube:
+        # deploy/k8s's Deployments and Services for them (#565).
+        try:
+            print(
+                apps_kube(
+                    file.apps(),
+                    kube_opts.get("--image", ""),
+                    kube_opts.get("--namespace", "morca"),
+                    kube_opts.get("--image-bytes", ""),
+                    kube_opts.get("--pull-secret", ""),
+                ),
+                end="",
+            )
+        except e:
+            print("morca: ", e, sep="", file=stderr)
+            return 1
+        return 0
     if apps:
+        if len(kube_opts) > 0:
+            _usage("--image and the like go with --kube")
         print(apps_text(file.apps()), end="")
         return 0
     var problems = 0

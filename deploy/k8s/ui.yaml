@@ -1,0 +1,103 @@
+# morca ui in a Deployment of its own (#565), beside the scheduler in the
+# `morca` namespace (morca.yaml): a rolling update, ready on /healthz, so a
+# change to the scheduler, or to the UI itself, never takes it down. Its
+# Service is morca-ui, and an Ingress routes to it.
+#
+#     kubectl apply -f deploy/k8s/   # morca.yaml, runs.yaml, local-secrets.yaml, ... and this
+#     kubectl -n morca port-forward svc/morca-ui 8270:8270
+#
+# The project's apps ([apps.<name>] of its morca.toml, docs/morca-toml.md#apps)
+# are a Deployment and a Service each, which the project's image prints:
+#
+#     docker run --rm IMAGE config apps --kube --image IMAGE \
+#         --image-bytes "$(docker image inspect -f '{{.Size}}' IMAGE)" | kubectl apply -f -
+#
+# An app with `lake = true` gets the ConfigMap morca-lake below and the
+# Secret morca-s3 (local-secrets.yaml's, or yours); one with `secrets` the keys of the Secret
+# morca-app-<name>, one per variable, which you make (the manifests name
+# each one's secret ID), and after changing one,
+# `kubectl -n morca rollout restart deployment/<name>`.
+---
+# The warehouse settings the UI and the apps get (as the scheduler's in
+# morca.yaml, which keep in step with these).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: morca-lake
+  namespace: morca
+data:
+  MORCA_WAREHOUSE: "s3://morca/warehouse"
+  AWS_ENDPOINT_URL_S3: "http://minio.morca.svc:9000"
+  AWS_REGION: us-east-1
+  AWS_S3_FORCE_PATH_STYLE: "true"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: morca-ui
+  namespace: morca
+spec:
+  replicas: 1
+  # The new pod serves before the old one goes; the old one drains (it
+  # answers /healthz 503 while it does, docs/ui.md#stopping).
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: {maxUnavailable: 0, maxSurge: 1}
+  selector:
+    matchLabels: {app: morca-ui}
+  template:
+    metadata:
+      labels: {app: morca-ui}
+    spec:
+      containers:
+        - name: ui
+          image: morca:dev
+          imagePullPolicy: IfNotPresent
+          args: [ui]
+          envFrom:
+            - configMapRef: {name: morca-lake}
+            - secretRef: {name: morca-s3}
+          env:
+            - name: MORCA_DATABASE_URL
+              valueFrom: {secretKeyRef: {name: morca-db, key: url}}
+            - {name: MORCA_LOGS, value: "s3://morca/logs"}
+            # Actions need a user (morca user add, in the scheduler's
+            # container); reading doesn't, so set the Ingress's host only
+            # behind a proxy that asks for a login too. Behind HTTPS, set
+            # MORCA_UI_SECURE_COOKIES=1, and MORCA_UI_TRUST_PROXY=1 if the
+            # proxy sets X-Forwarded-Proto.
+            - {name: MORCA_UI_ADDR, value: "0.0.0.0:8270"}
+            - {name: MORCA_UI_LOGIN, value: required}
+          ports: [{containerPort: 8270}]
+          readinessProbe:
+            httpGet: {path: /healthz, port: 8270}
+            periodSeconds: 2
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: morca-ui
+  namespace: morca
+spec:
+  selector: {app: morca-ui}
+  ports: [{port: 8270}]
+---
+# The cluster's default ingress class; set ingressClassName, a host and TLS
+# for yours.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: morca-ui
+  namespace: morca
+spec:
+  rules:
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: morca-ui
+                port: {number: 8270}

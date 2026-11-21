@@ -7,6 +7,12 @@
 #   succeeds, morca ui shows it and the driver log the scheduler kept, its
 #   driver pod's samples are kept apart from that log, and nothing
 #   labelled with it is left;
+# - a project's app, declared in its image's morca.toml (morca:apps, morca
+#   ui as /opt/morca/bin/hello), gets its Deployment and Service from
+#   `morca config apps --kube`, and answers its check with its env, the
+#   lake, its secret, its memory limit and MORCA_IMAGE_BYTES; and morca ui,
+#   a Deployment of its own (ui.yaml), answers /healthz throughout a
+#   restart of the scheduler;
 # - fanout's runs get a head and 3 workers each, and the tasks of a run
 #   reach all 3; every pod's samples are kept;
 # - fanout, registered with a secret, which the scheduler reads from the
@@ -115,7 +121,7 @@ kind load docker-image morca:dev morca:data morca-minio:dev --name "$cluster"
 
 kubectl delete namespace morca morca-runs --ignore-not-found --wait
 kubectl apply -f deploy/k8s/morca.yaml -f deploy/k8s/runs.yaml \
-    -f deploy/k8s/local-secrets.yaml -f deploy/k8s/postgres-backup.yaml
+    -f deploy/k8s/local-secrets.yaml -f deploy/k8s/postgres-backup.yaml -f deploy/k8s/ui.yaml
 kubectl -n morca rollout status statefulset/postgres --timeout=180s || fail "postgres"
 kubectl -n morca rollout status statefulset/minio --timeout=180s || fail "minio"
 free_port s3port
@@ -169,6 +175,52 @@ ls build/kind-logs/toy/"$toy"/*/*/1.log > /dev/null 2>&1 || fail "the toy's atte
 python3 tests/metrics_ok.py build/kind-toy-metrics.jsonl > /dev/null || fail "the toy's metrics"
 ! curl -fsS "$base/runs/$toy/driver.log" | grep -q "^orca-sample" || fail "samples in the toy's driver log"
 echo "ok   the toy ran as a driver Job, its driver log and metrics were kept, and nothing of it is left"
+
+# A project's app (#565): morca ui on $PORT as the binary hello, declared in
+# the image's morca.toml, its database URL a secret.
+docker build -q -t morca:apps - > /dev/null << 'EOF'
+FROM morca:dev
+RUN printf '#!/bin/sh\nMORCA_UI_ADDR=0.0.0.0:$PORT exec morca ui\n' > /opt/morca/bin/hello && chmod +x /opt/morca/bin/hello \
+    && printf '[apps.hello]\nport = 8080\ncheck = "/healthz"\nenv = { HELLO = "1" }\nlake = true\nsecrets = { MORCA_DATABASE_URL = "orca/db-url" }\nmemory_gb = 0.25\n' > /opt/morca/morca.toml
+ENV MORCA_CONFIG=/opt/morca/morca.toml
+EOF
+kind load docker-image morca:apps --name "$cluster"
+bytes=$(docker image inspect -f '{{.Size}}' morca:apps)
+docker run --rm morca:apps config apps --kube --image morca:apps --image-bytes "$bytes" > build/kind-apps.yaml \
+    || fail "config apps --kube"
+kubectl -n morca create secret generic morca-app-hello \
+    --from-literal=MORCA_DATABASE_URL=postgresql://orca:morca-local@postgres.morca.svc:5432/orca > /dev/null
+kubectl apply -f build/kind-apps.yaml > /dev/null || fail "apply the app"
+kubectl -n morca rollout status deployment/hello --timeout=180s || fail "the app hello"
+pod=$(kubectl -n morca get pods -l morca.app=hello -o jsonpath='{.items[0].metadata.name}')
+appenv=$(kubectl -n morca exec "$pod" -- env)
+for v in PORT=8080 HELLO=1 "MORCA_IMAGE_BYTES=$bytes" MORCA_WAREHOUSE=s3://morca/warehouse AWS_ACCESS_KEY_ID=morca-local \
+    MORCA_DATABASE_URL=postgresql://orca:morca-local@postgres.morca.svc:5432/orca; do
+    echo "$appenv" | grep -qxF "$v" || fail "the app's env has no $v"
+done
+[ "$(kubectl -n morca get pod "$pod" -o jsonpath='{.spec.containers[0].resources.limits.memory}')" = 256Mi ] \
+    || fail "the app's memory limit"
+free_port aport
+kubectl -n morca port-forward svc/hello "$aport:8080" > build/kind-app-forward.log 2>&1 &
+afwd=$!
+i=0
+until [ "$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$aport/healthz")" = 200 ]; do
+    i=$((i + 1)); [ "$i" -lt 30 ] || { kill "$afwd"; fail "the app's /healthz through its Service"; }; sleep 1
+done
+kill "$afwd"
+echo "ok   a project's declared app runs from config apps --kube and answers its check through its Service"
+# The UI, a Deployment of its own, stays up while the scheduler is replaced
+# (Recreate: the old one goes first).
+: > build/kind-ui-up.log
+(while :; do curl -s -o /dev/null -w '%{http_code}\n' --max-time 2 "$base/healthz" >> build/kind-ui-up.log; sleep 0.25; done) &
+uiloop=$!
+kubectl -n morca rollout restart deployment/morca-scheduler > /dev/null
+kubectl -n morca rollout status deployment/morca-scheduler --timeout=180s || { kill "$uiloop"; fail "the scheduler's restart"; }
+kill "$uiloop"
+[ "$(grep -c . build/kind-ui-up.log)" -gt 4 ] || fail "too few UI checks: $(cat build/kind-ui-up.log)"
+[ -z "$(grep -vx 200 build/kind-ui-up.log)" ] \
+    || fail "the UI's /healthz during the scheduler's restart: $(sort build/kind-ui-up.log | uniq -c | tr '\n' ' ')"
+echo "ok   morca ui answered /healthz throughout the scheduler's restart"
 
 # Two fanout runs, one at a time, and a toy run beside them.
 morca_cli morca register --image morca:dev --memory-gb 0.25 --secret GITHUB_TOKEN=orca/kind-token /opt/morca/pipelines/fanout > /dev/null \
@@ -414,11 +466,12 @@ until_true "SELECT status = 'cancelled' FROM orca.runs WHERE id = $img" 60
 gone "orca.run=$img"
 echo "ok   a run whose image can't be pulled said so, alerted once, and was cancelled"
 
-# A backup, with the scheduler stopped so nothing changes after it, restored
-# into a new Postgres on an empty volume.
+# A backup, with the scheduler and the UI stopped so nothing changes after
+# it or holds a connection, restored into a new Postgres on an empty volume.
 kill "$fwd"; fwd=
-kubectl -n morca scale deployment/morca-scheduler --replicas=0 > /dev/null
+kubectl -n morca scale deployment/morca-scheduler deployment/morca-ui --replicas=0 > /dev/null
 kubectl -n morca rollout status deployment/morca-scheduler --timeout=60s > /dev/null
+kubectl -n morca rollout status deployment/morca-ui --timeout=60s > /dev/null
 kubectl -n morca create job backup-kind --from=cronjob/morca-backup > /dev/null
 kubectl -n morca wait --for=condition=complete job/backup-kind --timeout=300s > /dev/null \
     || { kubectl -n morca logs job/backup-kind --all-containers || true; fail "the backup"; }
@@ -435,8 +488,9 @@ kubectl apply -f deploy/k8s/restore/restore.yaml > /dev/null
 kubectl -n morca wait --for=condition=complete job/morca-restore --timeout=300s > /dev/null \
     || { kubectl -n morca logs job/morca-restore --all-containers || true; fail "the restore"; }
 [ "$(q "$listing")" = "$before" ] || fail "the restored runs: $(q "$listing"), not $before"
-kubectl -n morca scale deployment/morca-scheduler --replicas=1 > /dev/null
+kubectl -n morca scale deployment/morca-scheduler deployment/morca-ui --replicas=1 > /dev/null
 kubectl -n morca rollout status deployment/morca-scheduler --timeout=180s || fail "the scheduler after the restore"
+kubectl -n morca rollout status deployment/morca-ui --timeout=180s || fail "the UI after the restore"
 free_port port
 kubectl -n morca port-forward svc/morca-ui "$port:8270" > build/kind-forward.log 2>&1 &
 fwd=$!

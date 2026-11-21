@@ -19,6 +19,8 @@ Every pod also gets the bucket: the scheduler's `AWS_REGION`, `AWS_ENDPOINT_URL_
 
 The scheduler watches the Job, and deletes everything labelled with the run when it ends.
 
+Beside the scheduler, in the `morca` namespace, `morca ui` is a Deployment of its own with an Ingress, rolled one pod at a time on `/healthz`, so replacing the scheduler leaves the UI up. A project's apps (`[apps.<name>]`, [docs/morca-toml.md](docs/morca-toml.md#apps)) are a Deployment and a Service each, which `morca config apps --kube` prints from the image's morca.toml for `kubectl apply`, as `morca-stack` reads the image's `morca config apps` on Hetzner. The scheduler doesn't apply them: it has no rights in `morca`, and an app changes only with its image, when the stack's manifests are applied anyway (deploy/k8s/ui.yaml).
+
 The driver and workers ask for the pipeline's `cpus` and `memory_gb`, its minimum as their requests and its maximum as their limits, and the head for the runner's defaults ([docs/morca-toml.md](docs/morca-toml.md#on-kubernetes)). A pod killed for its memory, `OOMKilled` or `Evicted`, fails the run's attempts saying so, and the run starts again on a new cluster whose pods ask for 1.5 times the memory, up to `memory_gb`'s maximum, as a run killed in its cgroup does on Hetzner.
 
 Why the scheduler, and not the driver asking for its own workers:
@@ -61,14 +63,14 @@ kubectl -n morca create secret generic morca-secrets --from-literal=orca.github-
 
 **Backups.** The CronJob `morca-backup` (`deploy/k8s/postgres-backup.yaml`) makes the dump `morca-stack backup` makes on Hetzner ([docs/hetzner.md](docs/hetzner.md#backups-and-restore)), every night at 02:30 UTC: `pg_dump -n orca -Fc`, checked that it reads back, uploaded to `MORCA_BACKUPS` (`s3://morca/backups/pg/<time>.dump`), the newest `MORCA_BACKUP_KEEP` (14) kept. A failed backup fails the Job and is pushed with `morca notify --kind backup-failed` when alerts are set up on it (`MORCA_NOTIFY_URL`, `MORCA_NOTIFY_SECRET`). `kubectl -n morca create job backup-now --from=cronjob/morca-backup` makes one now.
 
-**Restore.** Into a new, empty Postgres (a lost volume) or over the old one, with the scheduler stopped so nothing writes meanwhile:
+**Restore.** Into a new, empty Postgres (a lost volume) or over the old one, with the scheduler and the UI stopped so nothing writes or holds a connection meanwhile:
 
 ```sh
-kubectl -n morca scale deployment/morca-scheduler --replicas=0
+kubectl -n morca scale deployment/morca-scheduler deployment/morca-ui --replicas=0
 kubectl -n morca delete job morca-restore --ignore-not-found
 kubectl apply -f deploy/k8s/restore/restore.yaml        # the newest dump
 kubectl -n morca wait --for=condition=complete job/morca-restore --timeout=600s
-kubectl -n morca scale deployment/morca-scheduler --replicas=1
+kubectl -n morca scale deployment/morca-scheduler deployment/morca-ui --replicas=1
 ```
 
 The Job's `DUMP` names another dump (`20261107T023000Z.dump`), and `FORCE=1` drops an existing `orca` schema first; without it a database that has one is left alone and the Job fails (the file says how to set them). The warehouse and the logs are in the bucket and need no restore. Test a restore before you need one: `tests/kind.sh` restores into a new Postgres and checks the runs are back.

@@ -677,6 +677,16 @@ console env CONSOLE_SEMANTIC=1
 console secret POSTHOG_KEY orca/posthog-key
 ```
 
+On Kubernetes, `morca config apps --kube --image <ref>` prints a Deployment
+and a Service per app instead, for `kubectl apply -f -`: `PORT`, its `env`,
+the ConfigMap `morca-lake` and Secret `morca-s3` with `lake = true`, each
+secret by reference to its key of the Secret `morca-app-<name>` (`_` in a
+name becomes `-`), `memory_gb` as its memory request and limit, `check` as
+its readiness probe, and a rolling update that keeps the old pod until the
+new one is ready. `--image-bytes <n>` sets `MORCA_IMAGE_BYTES`,
+`--namespace` (default `morca`) and `--pull-secret` the rest
+(deploy/k8s/ui.yaml).
+
 ## Datasets
 
 A `[datasets."<namespace>.<table>"]` table holds a dataset's settings
