@@ -90,6 +90,22 @@ The Job's `DUMP` names another dump (`20261107T023000Z.dump`), and `FORCE=1` dro
 
 When the rollout, the registration or the check fails, it rolls back to the tag before (`deploy.sh --rollback`, which doesn't overlap and runs no upgrade steps) and fails, unless `--no-rollback`. `deploy.sh --rollback` does it by hand. `--dry-run` prints the plan and the commands that would change something, and changes nothing; it runs no pod of the new image, so it lists no upgrade steps and shows the way without overlap. `tests/kind-deploy.sh` tests it on kind.
 
+## Testing on a real cluster
+
+`tests/kind.sh` runs on one kind node. `tests/k3s-hetzner.sh` (#559) runs on a real cluster: two Hetzner CAX (ARM) servers made for the test, k3s on them, the project's image from ghcr and a bucket of its own on Hetzner Object Storage. It isn't in CI, since each run costs money: about 0.04 for the started hour of two CAX21s. Ask before you run it. It checks that:
+
+- a census pipeline (gharchive, one day) runs with its dista head on node a and its driver and workers on node b, and succeeds, with its logs and tables in the bucket;
+- a backfill run whose node b is powered off mid-run is started again on node a 30 s or so later, workers included, and succeeds. A run of `morca start` isn't retried, by design (`run_retries` covers scheduled, backfilled, sensed and fill runs);
+- the lost start's pods, stuck `Terminating` on the dead node, are swept. This fails until [#575](https://github.com/morca-dev/morca/issues/575).
+
+```sh
+S=../ops-secrets/dev/secrets.sops.yaml
+eval "$(sops -d --extract '["s3.env"]' $S | sed "s/^\([^=]*\)=\(.*\)$/export \1='\2'/")"
+GHCR_TOKEN=$(sops -d --extract '["ghcr-token"]' $S) GHCR_USER=... HCLOUD_CONTEXT=orca-dev tests/k3s-hetzner.sh
+```
+
+The script's header lists its settings: server type, location, image, days, workers and k3s version. It deletes everything it made (servers, firewall, SSH key and bucket, all named and labelled `morca-k3s-test-<time>`) on every exit, and prints what the servers cost. If something is left, it says so. `tests/k3s-hetzner.sh --cleanup` deletes whatever any earlier run left. Node a is tainted `PreferNoSchedule` and node b `NoSchedule`, and the runs' placement settings (`MORCA_KUBE_HEAD_NODE_SELECTOR`, `MORCA_KUBE_DRIVER_TOLERATIONS`, `MORCA_KUBE_WORKER_TOLERATIONS`) put each role where the checks expect it. k3s takes a node for NotReady after 20 s, and evicts its pods 30 s later.
+
 ## What it needs on AWS
 
 Everything goes in the project's selected Region; confirm it in AWS Settings > View all projects > Overview > Additional Info > Region. The dista benchmarks ran in us-east-2. The project is on the paid plan.
