@@ -53,8 +53,9 @@ T1=2024-03-09T12:00Z  # after daily's fire at 02:30 New York time
 tick() { MORCA_NOW="$1" ./build/morca tick >> "$log" 2>&1 || fail "tick at $1 exited $?"; }
 reg() {  # reg BINARY...: registered from $proj/morca.toml at T0
     for b in "$@"; do
-        MORCA_NOW=$T0 ./build/morca register --config "$proj/morca.toml" "./build/$b" >> "$log" 2>&1 \
-            || fail "register $b: $(tail -3 "$log")"
+        regout=$(MORCA_NOW=$T0 ./build/morca register --config "$proj/morca.toml" "./build/$b" 2>&1) \
+            || { echo "$regout" >> "$log"; fail "register $b: $regout"; }
+        echo "$regout" >> "$log"
     done
 }
 running() { q "SELECT coalesce(string_agg(pipeline, ',' ORDER BY id), '') FROM orca.runs WHERE status = 'running'"; }
@@ -136,7 +137,12 @@ echo "ok   the higher priority starts first, and the run that waits says whose r
 
 # --- Equal priorities: by name. The overlay sets zulu's back to 0. ---
 printf '[pipelines.zulu]\npriority = 0\n' > "$proj/morca.overlay.toml"
-MORCA_CONFIG_OVERLAY="$proj/morca.overlay.toml" reg zulu
+# Exported and unset around the call: in front of a function call, bash as
+# sh (macOS) keeps the assignment afterwards and dash doesn't, and kept, it
+# fails the next section's register, whose file has no zulu.
+export MORCA_CONFIG_OVERLAY="$proj/morca.overlay.toml"
+reg zulu
+unset MORCA_CONFIG_OVERLAY
 is "SELECT priority FROM orca.pipelines WHERE name = 'zulu'" 0 || fail "the overlay's priority wasn't registered"
 ./build/morca config show zulu 2>&1 | grep -qE '^  priority +0 +morca.toml \[pipelines.zulu\], overlay ' \
     || fail "config show zulu with the overlay: $(./build/morca config show zulu 2>&1)"
