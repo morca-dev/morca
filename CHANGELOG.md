@@ -2,30 +2,10 @@
 
 ## 0.40.0 - 2026-11-21
 
-- **morca-mojo requires Mojo 1.3.0.dev2026111805:** it is built with that Mojo 1.3 nightly instead of 1.2.0, so a project pins `mojo-compiler = "==1.3.0.dev2026111805"` to add it. (#550)
-- **The Rust tests run in the data environment:** `pixi run -e data test-rust-worker` (and `test-hindcast`, `test-rust-sdk`); the `rust` environment now holds only the Rust toolchain, which scripts/cargo.sh runs cargo in, since conda-forge's `rust` overwrites the Mojo nightly's libLLVM on macOS. (#550)
-
-- **Hetzner:** every container the stack starts gets `MORCA_IMAGE_BYTES`, the size of the image it runs, so an app can show its own. (#551)
-
-- **Fire wording:** the pipeline page's Next runs table heads its partition column Partition, not Fills, and the docs say "fill" only for morca.toml's `fills`. (#552)
-
-- **macOS:** a local run of a pipeline with dista tasks no longer loses its workers to an Objective-C fork crash on their first S3 request. (#553)
-
-- **Kubernetes:** runs get their pipeline's secrets, from a Secret of their own that goes with the run, and their pods' logs mask them; a pipeline with secrets needs an image built from this version. (#554)
-
-- **Logs:** a run's staged driver output is kept, not deleted, when `keep-log` fails, as the log line says. (#555)
-
-- **SQLite:** a cancelled run kept in a SQLite file stops from its heartbeat once its `cancel_at` passes, as on Postgres, not only between attempts. (#556)
-
-- **Commits:** writers that clash on a table back off for random times of their own, so a program that commits without `morca_main` no longer retries in lockstep with the others and runs out of commit retries. (#557)
-
-- **Kubernetes:** the warehouse and the logs live in object storage: every run pod gets the bucket settings and its S3 keys from the stack Secret `morca-s3` (`MORCA_RUN_S3_SECRET`), never as plain values, and head and worker logs are kept beside the driver's; deploy/k8s now runs MinIO and sets `MORCA_LOGS` to `s3://morca/logs`, so re-apply the manifests, and make `morca-s3` in both namespaces for a bucket of your own. (#566)
-
-- **Kubernetes runs have a price:** set `MORCA_KUBE_PRICE_VCPU_HOUR` and `MORCA_KUBE_PRICE_GB_HOUR` for the scheduler and `morca ui`, and fills with `fill_budget_per_day` run on Kubernetes, the watchdog's `cost` rule counts the pods, and the run page shows a cost; unset, budgeted fills there still start nothing. (#567)
-
-- **Kubernetes pods sized per pipeline:** a run's driver and workers ask for its `cpus` and `memory_gb` (minimum as requests, maximum as limits; the old variables are the defaults, and every pod now has limits), and a pod `OOMKilled` or `Evicted` fails its attempts saying so, its retry asking 1.5 times the memory. (#568)
-
-- **Kubernetes pull secrets, node placement and stuck pods:** run pods take the stack's pull secrets, per-role node selectors and tolerations, worker anti-affinity and a priority class (`MORCA_KUBE_PULL_SECRET`, `MORCA_KUBE_<ROLE>_NODE_SELECTOR`, ...; none set is as before), and a run whose pods can't be scheduled or pulled says why on its page and alerts once instead of restarting every start grace. (#569)
+- **Mojo 1.3 nightly:** morca-mojo is built with Mojo 1.3.0.dev2026111805; projects pin `mojo-compiler = "==1.3.0.dev2026111805"`, and the Rust tests run in the `data` environment. (#550)
+- **Hetzner:** every container gets `MORCA_IMAGE_BYTES`, its image's size; deploy tools 0.38.0. (#551)
+- **Kubernetes:** runs get their secrets, the warehouse and logs live in object storage (`morca-s3`), pods are sized from `cpus` and `memory_gb`, runs are priced, and pull secrets, node placement and stuck pods are handled. (#554, #566, #567, #568, #569)
+- **Fixes:** "fire" wording in the UI, macOS fork crash with dista tasks, staged driver output kept when `keep-log` fails, SQLite `cancel_at`, random commit backoff. (#552, #553, #555, #556, #557)
 
 ## 0.39.0 - 2026-11-19
 
