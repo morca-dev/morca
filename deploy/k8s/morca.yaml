@@ -148,7 +148,11 @@ metadata:
 ---
 # One replica: two schedulers are safe (every decision is a row in
 # Postgres), but one is all that's needed. Recreate, so an upgrade doesn't
-# run the old and the new at once.
+# run the old and the new at once; the runs are Jobs, which go on through
+# it. deploy.sh deploys it (K8S.md#deploying): the image, the ConfigMap
+# morca-settings (MORCA_OVERLAP, MORCA_DRAIN_SECONDS,
+# MORCA_HANDOVER_WAIT_SECONDS) and their hash as the morca.dev/settings
+# annotation, so a change to them replaces the pod.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -162,6 +166,7 @@ spec:
   template:
     metadata:
       labels: {app: morca-scheduler}
+      annotations: {morca.dev/settings: none}
     spec:
       serviceAccountName: morca-scheduler
       volumes:
@@ -178,6 +183,9 @@ spec:
             - /bin/sh
             - -c
             - for b in $MORCA_REGISTER; do morca register --image "$MORCA_IMAGE" "$b" || exit 1; done; exec morca scheduler
+          # deploy.sh's settings; without the ConfigMap, overlap is off.
+          envFrom:
+            - configMapRef: {name: morca-settings, optional: true}
           env:
             - name: MORCA_DATABASE_URL
               valueFrom: {secretKeyRef: {name: morca-db, key: url}}

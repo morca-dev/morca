@@ -75,6 +75,21 @@ kubectl -n morca scale deployment/morca-scheduler deployment/morca-ui --replicas
 
 The Job's `DUMP` names another dump (`20261107T023000Z.dump`), and `FORCE=1` drops an existing `orca` schema first; without it a database that has one is left alone and the Job fails (the file says how to set them). The warehouse and the logs are in the bucket and need no restore. Test a restore before you need one: `tests/kind.sh` restores into a new Postgres and checks the runs are back.
 
+## Deploying
+
+`deploy/k8s/deploy.sh <tag>` deploys the project's image at a tag, as `deploy/hetzner/deploy.sh` does on Hetzner ([docs/hetzner.md](docs/hetzner.md#deploying-code)), with kubectl's current context as the cluster. Its settings are `deploy/k8s/kube.env` (`KUBE_ENV` names another; `kube.env.example` says what each is): `MORCA_IMAGE`, the image without its tag, and `DRAIN_SECONDS` are required, and `HANDOVER_WAIT_SECONDS` once the image's morca.toml declares a concurrency key, as the census's does. The scheduler gets them from the ConfigMap `morca-settings` as `MORCA_OVERLAP` (on unless `OVERLAP=0`), `MORCA_DRAIN_SECONDS` and `MORCA_HANDOVER_WAIT_SECONDS`. In order, it:
+
+1. checks the settings, and the new image's `morca config check` for a concurrency key without the wait limit, before anything changes;
+2. when the tag changes, does the "before" steps of the image's `upgrade.toml` ([A release's upgrade steps](docs/hetzner.md#a-releases-upgrade-steps)), each asked for, run with `--yes` or named in `--confirmed`;
+3. plans: the scheduler is replaced when its image or its settings change. A run is a Job, not the scheduler's process, so a replacement (a `Recreate`) doesn't stop it either way. When the new image's `morca scheduler can-overlap` says yes, nothing is paused: the old image's runs go on, see they're outdated once the new code is registered (`morca.outdated()`) and end when their code decides, and a run waiting on their concurrency key then starts on the new code. Otherwise (`OVERLAP=0`, a migration that raises the floor, a rollback) it pauses the pipelines, waits for the running runs (`--timeout`, an hour) and unpauses them at the end;
+4. backs up the database, the CronJob `morca-backup` as a Job of its own, and stops if that fails (`--no-backup` doesn't back up);
+5. applies the manifests (`MANIFESTS`, by default `morca.yaml`, `runs.yaml`, `postgres-backup.yaml` and `ui.yaml`, their `morca:dev` as the new image) and the apps from the image's `morca config apps --kube`, and waits for them to roll out;
+6. waits until the new scheduler leads and registers the pipelines from the image's morca.toml (`morca register`);
+7. does the "after" steps, unpauses what it paused, and records the tag and the one before it in the ConfigMap `morca-deployed`;
+8. checks: Postgres answers, the Deployments run the new image, one scheduler instance leads, every pipeline's binary is in the image, and `CANARY`'s runs succeed.
+
+When the rollout, the registration or the check fails, it rolls back to the tag before (`deploy.sh --rollback`, which doesn't overlap and runs no upgrade steps) and fails, unless `--no-rollback`. `deploy.sh --rollback` does it by hand. `--dry-run` prints the plan and the commands that would change something, and changes nothing; it runs no pod of the new image, so it lists no upgrade steps and shows the way without overlap. `tests/kind-deploy.sh` tests it on kind.
+
 ## What it needs on AWS
 
 Everything goes in the project's selected Region; confirm it in AWS Settings > View all projects > Overview > Additional Info > Region. The dista benchmarks ran in us-east-2. The project is on the paid plan.
