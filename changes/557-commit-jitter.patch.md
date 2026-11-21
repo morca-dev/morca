@@ -1,1 +1,0 @@
-- **Commits:** writers that clash on a table back off for random times of their own, so a program that commits without `morca_main` no longer retries in lockstep with the others and runs out of commit retries. (#557)

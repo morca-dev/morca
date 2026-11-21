@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.40.0 - 2026-11-21
+
+- **Mojo 1.3 nightly:** morca-mojo is built with Mojo 1.3.0.dev2026111805; projects pin `mojo-compiler = "==1.3.0.dev2026111805"`, and the Rust tests run in the `data` environment. (#550)
+- **Hetzner:** every container gets `MORCA_IMAGE_BYTES`, its image's size; deploy tools 0.38.0. (#551)
+- **Kubernetes:** runs get their secrets, the warehouse and logs live in object storage (`morca-s3`), pods are sized from `cpus` and `memory_gb`, runs are priced, and pull secrets, node placement and stuck pods are handled. (#554, #566, #567, #568, #569)
+- **Fixes:** "fire" wording in the UI, macOS fork crash with dista tasks, staged driver output kept when `keep-log` fails, SQLite `cancel_at`, random commit backoff. (#552, #553, #555, #556, #557)
+
 ## 0.39.0 - 2026-11-19
 
 - **ui:** with `MORCA_UI_TURNSTILE_*` set, a visitor who is not logged in passes Cloudflare Turnstile once a day before a data read; Hetzner deploy tools 0.37.0 set it from `TURNSTILE_SITEKEY` and `secrets/orca/turnstile-secret`.
