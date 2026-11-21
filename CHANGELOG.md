@@ -2,17 +2,9 @@
 
 ## 0.41.0 - 2026-11-21
 
-- **Kubernetes backups and secrets:** a nightly CronJob backs Postgres up to the bucket as on Hetzner, with a restore Job, and run secrets come from the Secret `morca-secrets` with no AWS; the manifests no longer hold the Secrets `morca-db` and `morca-s3`, so apply `deploy/k8s/local-secrets.yaml` on kind or make them yourself. (#570)
-
-- **Kubernetes apps and a UI of its own:** `morca config apps --kube` prints a Deployment and a Service per `[apps.<name>]` for `kubectl apply`, and `morca ui` leaves the scheduler's pod for a rolling Deployment with an Ingress (deploy/k8s/ui.yaml, which you now apply too). (#571)
-
-- **A deploy for Kubernetes:** `deploy/k8s/deploy.sh <tag>` deploys a project's image as Hetzner's deploy.sh does, with its upgrade steps, the overlap, drain and handover-wait settings, a backup first, a check after and a rollback when that fails (K8S.md#deploying). (#573)
-
-- **dista-mojo 0.6.0:** morca pins the published dista 0.6.0 release instead of the unreleased commit it was cut from; the code is the same. (#574)
-
-- **A k3s test on Hetzner:** `tests/k3s-hetzner.sh` runs a census pipeline on a throwaway two-node CAX k3s cluster, loses a node mid-run, deletes everything and prints the cost (K8S.md#testing-on-a-real-cluster). (#576)
-
-- **Key ranges:** `A..B` is expanded with a loop tested at the top, so newer Mojo 1.3 nightlies compile it correctly (modular/modular#7716). (#577)
+- **Kubernetes:** Postgres backups to the bucket with a restore Job, run secrets from the Secret `morca-secrets` (the manifests no longer hold `morca-db` and `morca-s3`: apply `deploy/k8s/local-secrets.yaml` on kind or make them yourself), `morca config apps --kube`, the UI as its own Deployment (`deploy/k8s/ui.yaml`, which you now apply too), and `deploy/k8s/deploy.sh <tag>` (K8S.md#deploying). (#570, #571, #573)
+- **Tests:** `tests/k3s-hetzner.sh` runs a census pipeline on a throwaway two-node k3s cluster on Hetzner and loses a node mid-run. (#576)
+- **Fixes:** dista pinned at its published 0.6.0 (#574); key ranges `A..B` use a loop newer Mojo 1.3 nightlies compile correctly (modular/modular#7716) (#577).
 
 ## 0.40.0 - 2026-11-21
 
