@@ -333,6 +333,49 @@ maximum, for its retry's pods and its later runs', requests and limits,
 until 20 of its runs have succeeded since. Killed at that maximum already,
 the run fails, unretried.
 
+#### Where the pods go
+
+The scheduler's environment says where a run's pods go
+(`morca._internal.kube_place`). None is set by default, and then the pods
+have none of these fields.
+
+| Variable | | Example |
+|---|---|---|
+| `MORCA_KUBE_PULL_SECRET` | Secrets in the runs' namespace (`kubernetes.io/dockerconfigjson`) every pod pulls its image with, comma-separated | `ghcr-pull` |
+| `MORCA_KUBE_DRIVER_NODE_SELECTOR`, `MORCA_KUBE_HEAD_NODE_SELECTOR`, `MORCA_KUBE_WORKER_NODE_SELECTOR` | the role's `nodeSelector`: `key=value` pairs, comma-separated | `karpenter.sh/capacity-type=spot` |
+| `MORCA_KUBE_DRIVER_TOLERATIONS`, `MORCA_KUBE_HEAD_TOLERATIONS`, `MORCA_KUBE_WORKER_TOLERATIONS` | the role's `tolerations`: each `key[=value][:effect]`, as `kubectl taint` writes a taint (without a value, any value), comma-separated | `spot=true:NoSchedule` |
+| `MORCA_KUBE_WORKER_ANTI_AFFINITY` | `preferred` or `required`: a run's workers on different nodes (`kubernetes.io/hostname`) when they can be, or always | `preferred` |
+| `MORCA_KUBE_PRIORITY_CLASS` | every run pod's `priorityClassName`; the PriorityClass must exist | `morca-runs` |
+
+With Karpenter, or EKS Auto Mode, K8S.md's plan of workers on Spot and the
+driver and head on on-demand is:
+
+```sh
+MORCA_KUBE_DRIVER_NODE_SELECTOR=karpenter.sh/capacity-type=on-demand
+MORCA_KUBE_HEAD_NODE_SELECTOR=karpenter.sh/capacity-type=on-demand
+MORCA_KUBE_WORKER_NODE_SELECTOR=karpenter.sh/capacity-type=spot
+MORCA_KUBE_WORKER_ANTI_AFFINITY=preferred
+```
+
+A private image's pull secret goes in the runs' namespace:
+`kubectl -n morca-runs create secret docker-registry ghcr-pull
+--docker-server=ghcr.io --docker-username=<user> --docker-password=<token>`,
+then `MORCA_KUBE_PULL_SECRET=ghcr-pull`. A bad value stops the scheduler
+as it starts.
+
+#### Stuck pods
+
+A pod that can't start, because no node will take it (`Unschedulable`: a
+node selector no node matches, a taint it doesn't tolerate, a cluster that's
+full) or its image can't be pulled (`ImagePullBackOff`, `ErrImagePull`; or
+its container made, `CreateContainerConfigError`), holds its run: the run's
+page says why in its Held line (`held` in the JSON), and the run waits for
+Kubernetes, which keeps trying, rather than starting again on new pods that
+would wait the same way. Past the start grace (`MORCA_START_SECONDS`, 300),
+it sends one `pod-stuck` [alert](alerts.md). The run goes on once its pods
+start; it can be cancelled meanwhile, and the Job's deadline
+(`MORCA_RUN_DEADLINE`) ends it at the latest.
+
 ### Learned requests
 
 From the peaks of a pipeline's last 20 successful measured runs ([What a
@@ -465,7 +508,8 @@ too old, or, before its first beat, when the run was started too long ago.
 A dead run is queued again if its trigger retries (within `run_retries`),
 else it fails `interrupted: its process stopped`. A run on a machine or pod
 that starts slowly is taken for dead once the start grace runs out, so raise
-it there.
+it there. A Kubernetes run whose pods can't start isn't: it waits, saying
+why ([stuck pods](#stuck-pods)).
 
 | Variable | Default | |
 |---|---|---|

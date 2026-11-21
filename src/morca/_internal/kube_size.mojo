@@ -1,5 +1,5 @@
-"""How big a run's pods are on Kubernetes (#560), and what a pod killed for
-its memory says.
+"""How big a run's pods are on Kubernetes (#560), what a pod killed for
+its memory says, and what a pod that can't start says (#561).
 
 **Sizes.** The pods that run the pipeline's code, its driver and each of its
 dista workers, are sized from the pipeline's `cpus` and `memory_gb`, `auto`
@@ -28,6 +28,11 @@ the limit it was killed at (an eviction: the request it had), at most
 `memory_gb`'s maximum: the retry's pods, and the pipeline's later runs',
 ask for at least that, requests and limits, until 20 of its runs have
 succeeded since. One killed at that maximum already fails, unretried.
+
+**Stuck.** A `Pending` pod that no node will take (`Unschedulable`), or
+whose image can't be pulled or container made (`ImagePullBackOff`,
+`ErrImagePull`, `CreateContainerConfigError`, ...), is `pod_stuck`: its run
+says why (`stuck_text`) and waits for it (`morca._internal.kube`).
 """
 
 from std.os import getenv
@@ -316,3 +321,93 @@ def next_memory_mb(
     `ceiling_mb` (0 for none) and never less."""
     var at = limit_mb if k.reason == OOM_KILLED else request_mb
     return raised_mb(at, growth_pct, ceiling_mb)
+
+
+# ── pods stuck ───────────────────────────────────────────────────────────────
+
+comptime UNSCHEDULABLE = "Unschedulable"
+
+
+@fieldwise_init
+struct Stuck(Copyable, Movable):
+    """Why a pod can't start, if it can't: `Unschedulable` (no node it may
+    go on, `PodScheduled` false), a container's image pull or config error
+    (`ImagePullBackOff`, `ErrImagePull`, `InvalidImageName`,
+    `ErrImageNeverPull`, `CreateContainerConfigError`), or empty; and what
+    Kubernetes says of it."""
+
+    var reason: String
+    var message: String
+
+
+def _cant_start(reason: String) -> Bool:
+    return (
+        reason == "ImagePullBackOff"
+        or reason == "ErrImagePull"
+        or reason == "InvalidImageName"
+        or reason == "ErrImageNeverPull"
+        or reason == "CreateContainerConfigError"
+    )
+
+
+def pod_stuck(pod: Value) -> Stuck:
+    """Whether `pod`, still `Pending`, can't start: a container of it waits
+    on its image or its config, or the scheduler found it no node."""
+    try:
+        var phase = pod.try_at("/status/phase")
+        if phase and phase.value().string_value() != "Pending":
+            return Stuck(String(), String())
+        var statuses = pod.try_at("/status/containerStatuses")
+        if statuses:
+            for c in statuses.value().array_items():
+                var r = c.try_at("/state/waiting/reason")
+                if r and _cant_start(r.value().string_value()):
+                    var m = c.try_at("/state/waiting/message")
+                    return Stuck(
+                        r.value().string_value(),
+                        m.value().string_value() if m else String(),
+                    )
+        var conditions = pod.try_at("/status/conditions")
+        if conditions:
+            for c in conditions.value().array_items():
+                var t = c.try_at("/type")
+                var s = c.try_at("/status")
+                var r = c.try_at("/reason")
+                if (
+                    t
+                    and t.value().string_value() == "PodScheduled"
+                    and s
+                    and s.value().string_value() == "False"
+                    and r
+                    and r.value().string_value() == UNSCHEDULABLE
+                ):
+                    var m = c.try_at("/message")
+                    return Stuck(
+                        String(UNSCHEDULABLE),
+                        m.value().string_value() if m else String(),
+                    )
+    except:
+        pass
+    return Stuck(String(), String())
+
+
+def stuck_text(s: Stuck, pod: String, role: String) -> String:
+    """A run's `held` while its pod `pod` (its `role`) is stuck as `s`
+    says."""
+    var t = String("held: pod ", pod, " (the ", role, ") ")
+    if s.reason == UNSCHEDULABLE:
+        t.write("can't be scheduled")
+    elif s.reason == "CreateContainerConfigError":
+        t.write("can't start")
+    else:
+        t.write("can't pull its image")
+    t.write(" (", s.reason, ")")
+    var m = String()
+    for cp in s.message.strip().codepoint_slices():
+        if m.byte_length() >= 300:
+            m.write("...")
+            break
+        m.write(cp)
+    if m:
+        t.write(": ", m)
+    return t^

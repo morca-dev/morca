@@ -4,7 +4,8 @@ alive, as SQL the other queries build on (`live_sql`, `dead_sql`, ...).
 A running run's process is taken to have died when its heartbeat is older
 than the stale limit (`MORCA_STALE_SECONDS`), or, before its first beat, when
 the scheduler started it longer ago than the start grace
-(`MORCA_START_SECONDS`). A live run holds its partition keys: the
+(`MORCA_START_SECONDS`); a Kubernetes run whose pods can't start waits
+past that, saying why (`stale_sql`). A live run holds its partition keys: the
 scheduler, sensors, rebuilds and the UI's start queue no second run over a
 key a live run has.
 
@@ -89,7 +90,10 @@ def held_sql(stale: String, t: String = "orca.runs") -> String:
 def stale_sql(stale: String, grace: Float64, t: String = "orca.runs") -> String:
     """SQL true for a running run whose process looks stopped: its
     heartbeat is older than `stale` (seconds, or a parameter such as `$2`),
-    or it has none and was started longer ago than `grace` seconds. `t` is
+    or it has none and was started longer ago than `grace` seconds, unless
+    it's a Kubernetes run whose pods can't start (its `held` says why,
+    `morca._internal.kube`) and it isn't asked to cancel: it waits for them
+    rather than starting again on pods that would wait the same way. `t` is
     how the query names `orca.runs`: the table itself, or its alias."""
     return String(
         "((",
@@ -106,7 +110,13 @@ def stale_sql(stale: String, grace: Float64, t: String = "orca.runs") -> String:
         t,
         ".started <= now() - make_interval(secs => ",
         grace,
-        "))))",
+        ")) AND NOT (coalesce(",
+        t,
+        ".placement, '') = 'kubernetes' AND ",
+        t,
+        ".held IS NOT NULL AND NOT coalesce(",
+        t,
+        ".cancel_requested, false))))",
     )
 
 

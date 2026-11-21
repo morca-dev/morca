@@ -72,6 +72,23 @@ pod of a running start that was `OOMKilled` or `Evicted` (`killed`): its
 attempts fail saying so, the pipeline asks for more memory from then on,
 and the start's objects go, its logs kept, so the run starts again on a new
 cluster.
+
+**Placement.** Every pod gets the stack's pull secrets, its role's node
+selector and tolerations, the workers their anti-affinity, and all the
+priority class, as `morca._internal.kube_place` reads them
+(`MORCA_KUBE_PULL_SECRET`, `MORCA_KUBE_<ROLE>_NODE_SELECTOR`, ...); none
+with nothing set.
+
+**Stuck pods.** Every tick, `sweep` also looks for a pod of a running start
+that can't start (`morca._internal.kube_size.pod_stuck`): no node it may go
+on (`Unschedulable`), or an image it can't pull (`ImagePullBackOff`,
+`ErrImagePull`, ...). Its run says why as its `held`, on its page, and
+isn't taken for dead while it does (`morca._internal.db.live.stale_sql`), so
+it isn't started again on a new cluster that would wait the same way; it
+waits for Kubernetes instead, which tries again, until it's cancelled or its
+Job's deadline. Once past the start grace (`MORCA_START_SECONDS`), it sends
+one `pod-stuck` alert (docs/alerts.md). The `held` goes once the run beats,
+or its pods have gone.
 """
 
 from std.os import getenv
@@ -81,11 +98,13 @@ from std.base64 import b64decode
 
 from k8s import JOBS, PODS, SERVICES, Client, Config, Resource
 import morca._internal.db.kube as kube_db
+import morca._internal.db.notify as notify_db
 import morca._internal.db.scheduler as scheduler_db
 
 from morca._internal.cgroup import growth_pct_of
 
 from morca._internal.crash import crash_summary
+from morca._internal.db.live import stale_limit, start_grace
 from morca._internal.json import quote
 from morca._internal.kube_size import (
     OOM_KILLED,
@@ -97,7 +116,10 @@ from morca._internal.kube_size import (
     next_memory_mb,
     pod_killed,
     pod_memory,
+    pod_stuck,
+    stuck_text,
 )
+from morca._internal.kube_place import KubePlacement
 from morca._internal.logs import (
     is_remote,
     location_exists,
@@ -106,6 +128,7 @@ from morca._internal.logs import (
     run_dir,
     write_location,
 )
+from morca._internal.notify import alert, ui_link
 from morca._internal.sample import PREFIX, metrics_location, sample_seconds
 from morca._internal.resources import Request
 from morca._internal.state import State
@@ -366,6 +389,10 @@ struct KubeRunner(Movable):
     var s3_secret: String
     """The stack's Secret of S3 keys, which every pod refers to; "" for
     none."""
+    var place: KubePlacement
+    """Where its pods go (`morca._internal.kube_place`)."""
+    var grace: Float64
+    """The start grace, after which a stuck pod alerts."""
 
     def __init__(out self) raises:
         self.namespace = getenv("MORCA_RUNS_NAMESPACE", "morca-runs")
@@ -375,6 +402,8 @@ struct KubeRunner(Movable):
         self.secret = getenv("MORCA_RUN_SECRET", "morca-db")
         # Read now, so a bad size stops the scheduler as it starts.
         _ = KubeDefaults.from_env()
+        self.place = KubePlacement.from_env()
+        self.grace = start_grace(stale_limit())
         self.deadline = Int(getenv("MORCA_RUN_DEADLINE", "86400"))
         self.s3_secret = getenv("MORCA_RUN_S3_SECRET", "morca-s3")
         self.env = List[String]()
@@ -434,8 +463,9 @@ struct KubeRunner(Movable):
             self._labels(r, role),
             ', "ownerReferences": [',
             owner,
-            ']}, "spec": {"restartPolicy": "Never", "containers": [{"name":',
-            ' "main", "image": ',
+            ']}, "spec": {"restartPolicy": "Never"',
+            self.place.spec(role, r.run, r.start),
+            ', "containers": [{"name": "main", "image": ',
             quote(r.image),
             ', "imagePullPolicy": "IfNotPresent", "command": ',
             command,
@@ -507,8 +537,9 @@ struct KubeRunner(Movable):
             ', "ttlSecondsAfterFinished": 600, "template": {"metadata":',
             ' {"labels": ',
             self._labels(r, "driver"),
-            '}, "spec": {"restartPolicy": "Never", "containers": [{"name":',
-            ' "driver", "image": ',
+            '}, "spec": {"restartPolicy": "Never"',
+            self.place.spec("driver", r.run, r.start),
+            ', "containers": [{"name": "driver", "image": ',
             quote(r.image),
             ', "imagePullPolicy": "IfNotPresent", "command": ',
             argv,
@@ -744,6 +775,68 @@ struct KubeRunner(Movable):
         n += self.k.delete_all(PODS, sel)
         return n
 
+    def _stuck(self, mut db: State, live: Dict[String, Bool]) raises:
+        """Has each running start a pod of which can't start say why
+        (`held`), alerting once for one past the start grace, and clears
+        the `held` of those that beat now, or whose pods have gone."""
+        var why = Dict[String, String]()
+        var has_pods = Dict[String, Bool]()
+        for pod in self.k.list(PODS, "orca.run").items:
+            var key = _key(pod)
+            if key not in live or pod.try_at("/metadata/deletionTimestamp"):
+                continue
+            has_pods[key] = True
+            if key in why:
+                continue
+            var s = pod_stuck(pod)
+            if not s.reason:
+                continue
+            var role = pod.try_at("/metadata/labels/orca.role")
+            why[key] = stuck_text(
+                s,
+                _name_of(pod),
+                role.value().string_value() if role else String("pod"),
+            )
+        for e in why.items():
+            try:
+                self._hold(db, e.key, e.value)
+            except err:
+                print("morca: can't say why run", e.key, "waits:", err)
+        for h in kube_db.held_running(db.conn):
+            if h[0] not in why and (h[1] or h[0] not in has_pods):
+                kube_db.clear_held(db.conn, h[0])
+
+    def _hold(self, mut db: State, key: String, why: String) raises:
+        """Has the start `key` (`<run>-<start>`) say `why` it waits, and
+        alerts once (`pod-stuck`) if it started longer ago than the start
+        grace."""
+        var dash = key.find("-").or_else(-1)
+        var run = Int(key[byte=:dash])
+        var start = String(key[byte = dash + 1 :])
+        var got = kube_db.hold_stuck(db.conn, run, start, why)
+        if not got:
+            return
+        var pipeline = got.value()[0]
+        var subject = String(run, "/", start)
+        if got.value()[1] < self.grace or notify_db.is_known(
+            db.conn, "pod-stuck", subject
+        ):
+            return
+        var text = String(why.removeprefix("held: "))
+        if alert(
+            db,
+            "pod-stuck",
+            subject,
+            "high",
+            "warning,hourglass",
+            String("morca: ", pipeline, " run ", run, " is stuck"),
+            text,
+            ui_link(String("/runs/", run)),
+            pipelines=pipeline,
+            run=run,
+        ):
+            print("run", run, "of", pipeline, "is stuck:", text)
+
     def remove(self, run: Int) raises:
         """Deletes everything labelled with the run, whatever its start."""
         var sel = String("orca.run=", run)
@@ -768,6 +861,7 @@ struct KubeRunner(Movable):
         ):
             settling[k] = True
         var n = self._killed(db, live)
+        self._stuck(db, live)
         for o in self.k.list(JOBS, "orca.run").items:
             var finished = (
                 _count(o, "/status/succeeded") > 0

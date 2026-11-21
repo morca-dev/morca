@@ -34,7 +34,12 @@
 #   says so, and its retry's pods ask for 1.5 times the memory and succeed;
 # - a pod and a Secret a killed scheduler left behind are deleted when it
 #   starts again, and the logs, in the bucket, are all still there and on
-#   the UI.
+#   the UI;
+# - after that restart, with a driver node selector no node matches, a toy
+#   run says it can't be scheduled on its page, alerts once past the start
+#   grace and isn't started again, then succeeds once the node is labelled;
+#   and a toy run of an image that isn't there says it can't pull it,
+#   alerts once, and is cancelled.
 #
 # KEEP_CLUSTER=1 leaves a cluster this made; KIND_CLUSTER names one to use.
 # Needs docker, kind, kubectl, curl, jq and the AWS CLI (aws), which reads
@@ -338,6 +343,11 @@ metadata:
   labels: {orca.run: "999", orca.start: "1", orca.role: secrets}
 stringData: {GITHUB_TOKEN: left-behind}
 EOF
+# For the stuck pods below: a driver node selector no node matches yet, a
+# short start grace, and alerts on (to nowhere: orca.alerts records them).
+kubectl -n morca set env deployment/morca-scheduler -c scheduler \
+    MORCA_KUBE_DRIVER_NODE_SELECTOR=morca.dev/pool=on-demand MORCA_START_SECONDS=20 \
+    MORCA_NOTIFY_URL=http://127.0.0.1:9/morca-kind > /dev/null
 kubectl -n morca scale deployment/morca-scheduler --replicas=1
 kubectl -n morca rollout status deployment/morca-scheduler --timeout=180s || fail "the scheduler again"
 gone "orca.run=999"
@@ -362,4 +372,38 @@ curl -fsS "$base/runs/$f1/timeline.json" | jq -e . > /dev/null || fail "run $f1'
 count=$(q "SELECT a.id FROM orca.attempts a JOIN orca.steps s ON s.id = a.step WHERE s.run = $lake AND s.step = 'count' ORDER BY a.id DESC LIMIT 1")
 curl -fsS "$base/runs/$lake/attempts/$count/log" | grep -q "ROWS 3" || fail "lake's count log on the UI after a restart"
 echo "ok   the logs are in the bucket and on the UI after the scheduler restarted"
+
+# Pods that can't start hold their run: it says why, alerts once past the
+# start grace (20 s), and isn't started again.
+held() { json "/runs/$1" | jq -r '.run.held // ""'; }
+alerts() { q "SELECT count(*) FROM orca.alerts WHERE kind = 'pod-stuck' AND run = $1"; }
+stuck() {
+    i=0
+    until held "$1" | grep -qF "$2"; do
+        i=$((i + 1)); [ "$i" -lt 120 ] || fail "run $1's held: $(held "$1")"; sleep 1
+    done
+    until_true "SELECT count(*) > 0 FROM orca.alerts WHERE kind = 'pod-stuck' AND run = $1" 60
+    sleep 10
+    [ "$(q "SELECT status || ' ' || starts FROM orca.runs WHERE id = $1")" = "running 1" ] \
+        || fail "run $1 with stuck pods: $(q "SELECT status || ' ' || starts FROM orca.runs WHERE id = $1")"
+    [ "$(alerts "$1")" = 1 ] || fail "run $1 alerted $(alerts "$1") times"
+}
+morca_cli morca backfill toy 2024-07 > /dev/null || fail "backfill the toy's 2024-07"
+sel=$(q "SELECT max(id) FROM orca.runs WHERE pipeline = 'toy' AND partitions = '2024-07'")
+stuck "$sel" "can't be scheduled (Unschedulable)"
+curl -fsS "$base/runs/$sel" | grep -q "Unschedulable" || fail "run $sel's page doesn't say why it's held"
+kubectl label nodes --all morca.dev/pool=on-demand > /dev/null
+until_true "SELECT status = 'succeeded' FROM orca.runs WHERE id = $sel" 180
+[ "$(q "SELECT starts FROM orca.runs WHERE id = $sel")" = 1 ] || fail "run $sel started again"
+gone "orca.run=$sel"
+echo "ok   a run no node would take said so, alerted once, and ran once a node would"
+morca_cli morca register --image morca:missing /opt/morca/pipelines/toy > /dev/null \
+    || fail "register the toy with a missing image"
+morca_cli morca backfill toy 2024-08 > /dev/null || fail "backfill the toy's 2024-08"
+img=$(q "SELECT max(id) FROM orca.runs WHERE pipeline = 'toy' AND partitions = '2024-08'")
+stuck "$img" "can't pull its image ("
+morca_cli morca cancel "$img" > /dev/null || fail "cancel run $img"
+until_true "SELECT status = 'cancelled' FROM orca.runs WHERE id = $img" 60
+gone "orca.run=$img"
+echo "ok   a run whose image can't be pulled said so, alerted once, and was cancelled"
 echo "ok   kind"
