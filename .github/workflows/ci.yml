@@ -300,6 +300,22 @@ jobs:
       - name: The scheduler, Postgres and the UI on kind
         run: tests/kind.sh
 
+  # deploy/k8s/deploy.sh on kind (#562): a first deploy of a project with a
+  # concurrency key, one over a going run that hands over, a failed check
+  # rolled back, and --dry-run changing nothing. A job of its own beside
+  # kind's, with its own image.
+  kind-deploy:
+    needs: [changes, release]
+    if: ${{ !cancelled() && github.event_name != 'schedule' && needs.changes.outputs.code != 'false' && needs.release.outputs.release_only != 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: helm/kind-action@v1.15.1
+        with:
+          install_only: true
+      - name: deploy.sh on kind
+        run: tests/kind-deploy.sh
+
   # The runtime image projects build FROM (deploy/runtime.Dockerfile), and a
   # scratch project's image on it. On pull requests it's built and tested
   # for arm64 and amd64, with the project on arm64 only, the servers'
@@ -857,7 +873,7 @@ jobs:
   # gate doesn't cover.)
   ci:
     if: ${{ always() && github.event_name != 'schedule' }}
-    needs: [release, release-check, changes, version, test, kind, runtime-image, runtime-image-main, runtime-image-release, runtime-lock, project-image, project-test, project-release, fuzz, format, formal, data, rust-worker, customs]
+    needs: [release, release-check, changes, version, test, kind, kind-deploy, runtime-image, runtime-image-main, runtime-image-release, runtime-lock, project-image, project-test, project-release, fuzz, format, formal, data, rust-worker, customs]
     runs-on: ubuntu-latest
     steps:
       - env:

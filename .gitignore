@@ -2,3 +2,4 @@
 build/
 *.conda
 deploy/hetzner/hetzner.env
+deploy/k8s/kube.env
