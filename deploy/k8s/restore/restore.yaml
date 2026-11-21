@@ -1,0 +1,106 @@
+# Restores a dump postgres-backup.yaml made (or morca-stack backup, on
+# Hetzner: the same dump) into the stack's Postgres, as morca-stack restore
+# does. It's in a directory of its own so kubectl apply -f deploy/k8s/ never
+# runs it. With the scheduler and the UI stopped, so nothing writes or holds a
+# connection meanwhile (K8S.md#backups):
+#
+#     kubectl -n morca scale deployment/morca-scheduler deployment/morca-ui --replicas=0
+#     kubectl -n morca delete job morca-restore --ignore-not-found
+#     kubectl apply -f deploy/k8s/restore/restore.yaml       # the newest dump
+#     kubectl -n morca wait --for=condition=complete job/morca-restore --timeout=600s
+#     kubectl -n morca logs job/morca-restore --all-containers
+#     kubectl -n morca scale deployment/morca-scheduler deployment/morca-ui --replicas=1
+#
+# DUMP picks another (a name from `aws s3 ls s3://morca/backups/pg/`, with
+# or without backups/pg/), and FORCE=1 drops a database's orca schema first;
+# without it, a database that has one is left alone and the Job fails:
+#
+#     sed -e 's|value: latest|value: 20261107T023000Z.dump|' -e 's|value: "0"|value: "1"|' \
+#         deploy/k8s/restore/restore.yaml | kubectl apply -f -
+#
+# Pipelines paused in the dump stay paused (morca unpause <name>).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: morca-restore
+  namespace: morca
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 3600
+  template:
+    spec:
+      restartPolicy: Never
+      volumes:
+        - name: b
+          emptyDir: {}
+      initContainers:
+        - name: fetch
+          image: amazon/aws-cli:2.41.0
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -u
+              if [ "${AWS_S3_FORCE_PATH_STYLE:-}" = true ]; then
+                  printf '[default]\ns3 =\n    addressing_style = path\n' > /b/aws.conf
+                  export AWS_CONFIG_FILE=/b/aws.conf
+              fi
+              dest=${MORCA_BACKUPS%/}
+              b=${dest#s3://}
+              name=${DUMP##*/}
+              if [ "$DUMP" = latest ]; then
+                  # The names sort by time.
+                  name=$(aws s3api list-objects-v2 --bucket "${b%%/*}" --prefix "${b#*/}/" --output text \
+                      --query "sort((Contents || \`[]\`)[?ends_with(Key, '.dump')].Key)" | tr '\t' '\n' | tail -n 1) || exit 1
+                  name=${name##*/}
+                  [ -n "$name" ] && [ "$name" != None ] || { echo "morca-restore: no dumps in $dest/" >&2; exit 1; }
+              fi
+              case "$name" in
+                  *.dump) ;;
+                  *) echo "morca-restore: DUMP is a dump's name, like 20261107T023000Z.dump, or latest" >&2; exit 1 ;;
+              esac
+              aws s3 cp --only-show-errors "$dest/$name" /b/restore.dump || exit 1
+              echo "$name" > /b/name
+          env:
+            - {name: DUMP, value: latest}
+            # As postgres-backup.yaml has them.
+            - {name: MORCA_BACKUPS, value: "s3://morca/backups/pg"}
+            - {name: AWS_ENDPOINT_URL_S3, value: "http://minio.morca.svc:9000"}
+            - {name: AWS_REGION, value: us-east-1}
+            - {name: AWS_S3_FORCE_PATH_STYLE, value: "true"}
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom: {secretKeyRef: {name: morca-s3, key: AWS_ACCESS_KEY_ID}}
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom: {secretKeyRef: {name: morca-s3, key: AWS_SECRET_ACCESS_KEY}}
+            - {name: AWS_REQUEST_CHECKSUM_CALCULATION, value: when_required}
+            - {name: AWS_RESPONSE_CHECKSUM_VALIDATION, value: when_required}
+          volumeMounts: [{name: b, mountPath: /b}]
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+      containers:
+        - name: restore
+          image: postgres:17-bookworm
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              i=0
+              until pg_isready -q -d "$MORCA_DATABASE_URL"; do
+                  i=$((i + 1)); [ "$i" -lt 150 ] || { echo "morca-restore: Postgres isn't up" >&2; exit 1; }
+                  sleep 2
+              done
+              have=$(psql "$MORCA_DATABASE_URL" -Atc "SELECT count(*) FROM information_schema.schemata WHERE schema_name = 'orca'")
+              if [ "$have" != 0 ]; then
+                  [ "$FORCE" = 1 ] || { echo "morca-restore: the database already has the orca schema; FORCE=1 drops it first" >&2; exit 1; }
+                  psql "$MORCA_DATABASE_URL" -qc 'DROP SCHEMA orca CASCADE'
+              fi
+              pg_restore -d "$MORCA_DATABASE_URL" --no-owner --exit-on-error /b/restore.dump
+              echo "morca-restore: restored $(cat /b/name); now start the scheduler again"
+          env:
+            - {name: FORCE, value: "0"}
+            - name: MORCA_DATABASE_URL
+              valueFrom: {secretKeyRef: {name: morca-db, key: url}}
+          volumeMounts: [{name: b, mountPath: /b}]
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}

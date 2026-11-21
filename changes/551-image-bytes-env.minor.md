@@ -1,1 +1,0 @@
-- **Hetzner:** every container the stack starts gets `MORCA_IMAGE_BYTES`, the size of the image it runs, so an app can show its own. (#551)

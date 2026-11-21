@@ -3,7 +3,7 @@
 # change to the scheduler, or to the UI itself, never takes it down. Its
 # Service is morca-ui, and an Ingress routes to it.
 #
-#     kubectl apply -f deploy/k8s/morca.yaml -f deploy/k8s/runs.yaml -f deploy/k8s/ui.yaml
+#     kubectl apply -f deploy/k8s/   # morca.yaml, runs.yaml, local-secrets.yaml, ... and this
 #     kubectl -n morca port-forward svc/morca-ui 8270:8270
 #
 # The project's apps ([apps.<name>] of its morca.toml, docs/morca-toml.md#apps)
@@ -13,7 +13,7 @@
 #         --image-bytes "$(docker image inspect -f '{{.Size}}' IMAGE)" | kubectl apply -f -
 #
 # An app with `lake = true` gets the ConfigMap morca-lake below and the
-# Secret morca-s3; one with `secrets` the keys of the Secret
+# Secret morca-s3 (local-secrets.yaml's, or yours); one with `secrets` the keys of the Secret
 # morca-app-<name>, one per variable, which you make (the manifests name
 # each one's secret ID), and after changing one,
 # `kubectl -n morca rollout restart deployment/<name>`.

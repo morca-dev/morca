@@ -15,8 +15,9 @@
 #   restart of the scheduler;
 # - fanout's runs get a head and 3 workers each, and the tasks of a run
 #   reach all 3; every pod's samples are kept;
-# - fanout, registered with a secret (MORCA_SECRET_FETCH stands in for
-#   Secrets Manager), gets it from a Secret of the run's own: the Job and
+# - fanout, registered with a secret, which the scheduler reads from the
+#   Secret morca-secrets with the manifests' MORCA_SECRET_FETCH and no AWS,
+#   gets it from a Secret of the run's own: the Job and
 #   Pods hold only its name, its step sees the value (its length is
 #   logged), its driver and tasks print it, yet no pod log, no log under
 #   MORCA_LOGS (the driver log the scheduler keeps, the attempts') and not
@@ -45,7 +46,10 @@
 #   run says it can't be scheduled on its page, alerts once past the start
 #   grace and isn't started again, then succeeds once the node is labelled;
 #   and a toy run of an image that isn't there says it can't pull it,
-#   alerts once, and is cancelled.
+#   alerts once, and is cancelled;
+# - with the scheduler stopped, the CronJob morca-backup writes a dump to
+#   the bucket, which deploy/k8s/restore restores into a new, empty
+#   Postgres, and the restarted stack shows the earlier runs.
 #
 # KEEP_CLUSTER=1 leaves a cluster this made; KIND_CLUSTER names one to use.
 # Needs docker, kind, kubectl, curl, jq and the AWS CLI (aws), which reads
@@ -116,7 +120,8 @@ fi
 kind load docker-image morca:dev morca:data morca-minio:dev --name "$cluster"
 
 kubectl delete namespace morca morca-runs --ignore-not-found --wait
-kubectl apply -f deploy/k8s/morca.yaml -f deploy/k8s/runs.yaml -f deploy/k8s/ui.yaml
+kubectl apply -f deploy/k8s/morca.yaml -f deploy/k8s/runs.yaml \
+    -f deploy/k8s/local-secrets.yaml -f deploy/k8s/postgres-backup.yaml -f deploy/k8s/ui.yaml
 kubectl -n morca rollout status statefulset/postgres --timeout=180s || fail "postgres"
 kubectl -n morca rollout status statefulset/minio --timeout=180s || fail "minio"
 free_port s3port
@@ -128,15 +133,17 @@ until s3 s3 ls s3://morca > /dev/null 2>&1; do
 done
 # The clock just after the toy's fire for January (03:00 UTC on 2 February);
 # small pods, room for one fanout cluster (100m driver and head, 3 × 100m
-# workers) and no more; a run whose heartbeat stops is restarted soon. A
-# secret's value is printf's, from its ID, and fanout prints and logs the
-# one it's given. A toy run of 2024-05 holds 200 MiB, over its 128Mi.
+# workers) and no more; a run whose heartbeat stops is restarted soon. The
+# secret orca/kind-token is morca-secrets' key orca.kind-token, and fanout
+# prints and logs the one it's given. A toy run of 2024-05 holds 200 MiB,
+# over its 128Mi.
 value=kind-s3cr3t-orca/kind-token
+kubectl -n morca create secret generic morca-secrets --from-literal=orca.kind-token="$value" > /dev/null
 kubectl -n morca set env deployment/morca-scheduler -c scheduler \
     MORCA_NOW=2024-02-02T03:00Z MORCA_STALE_SECONDS=10 \
     MORCA_DRIVER_CPU=100m MORCA_HEAD_CPU=100m MORCA_WORKER_CPU=100m MORCA_POD_MEMORY=128Mi \
     MORCA_VCPU_BUDGET=550m MORCA_FANOUT_SHOW_HOST=1 MORCA_FANOUT_SLEEP=1 \
-    MORCA_SECRET_FETCH="printf kind-s3cr3t-%s" MORCA_FANOUT_SECRET=GITHUB_TOKEN MORCA_TOY_GROW=2024-05 \
+    MORCA_FANOUT_SECRET=GITHUB_TOKEN MORCA_TOY_GROW=2024-05 \
     MORCA_RUN_ENV=MORCA_FANOUT_SHOW_HOST,MORCA_FANOUT_SLEEP,MORCA_FANOUT_SECRET,MORCA_TOY_GROW
 kubectl -n morca rollout status deployment/morca-scheduler --timeout=180s || fail "the scheduler"
 morca_cli env MORCA_NOW=2024-02-01T00:00Z morca register --image morca:dev /opt/morca/pipelines/toy \
@@ -458,4 +465,42 @@ morca_cli morca cancel "$img" > /dev/null || fail "cancel run $img"
 until_true "SELECT status = 'cancelled' FROM orca.runs WHERE id = $img" 60
 gone "orca.run=$img"
 echo "ok   a run whose image can't be pulled said so, alerted once, and was cancelled"
+
+# A backup, with the scheduler and the UI stopped so nothing changes after
+# it or holds a connection, restored into a new Postgres on an empty volume.
+kill "$fwd"; fwd=
+kubectl -n morca scale deployment/morca-scheduler deployment/morca-ui --replicas=0 > /dev/null
+kubectl -n morca rollout status deployment/morca-scheduler --timeout=60s > /dev/null
+kubectl -n morca rollout status deployment/morca-ui --timeout=60s > /dev/null
+kubectl -n morca create job backup-kind --from=cronjob/morca-backup > /dev/null
+kubectl -n morca wait --for=condition=complete job/backup-kind --timeout=300s > /dev/null \
+    || { kubectl -n morca logs job/backup-kind --all-containers || true; fail "the backup"; }
+s3 s3 ls s3://morca/backups/pg/ | grep -q '[0-9]Z\.dump$' || fail "no dump in s3://morca/backups/pg/"
+listing="SELECT count(*) || ': ' || string_agg(id || ' ' || pipeline || ' ' || status, ', ' ORDER BY id) FROM orca.runs"
+before=$(q "$listing")
+kubectl -n morca scale statefulset/postgres --replicas=0 > /dev/null
+kubectl -n morca wait --for=delete pod/postgres-0 --timeout=120s > /dev/null 2>&1 || true
+kubectl -n morca delete pvc data-postgres-0 --wait > /dev/null
+kubectl -n morca scale statefulset/postgres --replicas=1 > /dev/null
+kubectl -n morca rollout status statefulset/postgres --timeout=180s > /dev/null || fail "a new postgres"
+until_true "SELECT count(*) = 0 FROM information_schema.schemata WHERE schema_name = 'orca'" 60
+kubectl apply -f deploy/k8s/restore/restore.yaml > /dev/null
+kubectl -n morca wait --for=condition=complete job/morca-restore --timeout=300s > /dev/null \
+    || { kubectl -n morca logs job/morca-restore --all-containers || true; fail "the restore"; }
+[ "$(q "$listing")" = "$before" ] || fail "the restored runs: $(q "$listing"), not $before"
+kubectl -n morca scale deployment/morca-scheduler deployment/morca-ui --replicas=1 > /dev/null
+kubectl -n morca rollout status deployment/morca-scheduler --timeout=180s || fail "the scheduler after the restore"
+kubectl -n morca rollout status deployment/morca-ui --timeout=180s || fail "the UI after the restore"
+free_port port
+kubectl -n morca port-forward svc/morca-ui "$port:8270" > build/kind-forward.log 2>&1 &
+fwd=$!
+base="http://127.0.0.1:$port"
+i=0
+until [ "$(json "/runs/$f1" 2> /dev/null | jq -r .run.status)" = succeeded ]; do
+    i=$((i + 1)); [ "$i" -lt 60 ] || fail "run $f1 on the UI after the restore"; sleep 1
+done
+[ "$(json '/runs?pipeline=fanout' | jq -r "[.runs[].id | select(. == $f1 or . == $f2)] | length")" = 2 ] \
+    || fail "fanout's runs on the UI after the restore"
+curl -fsS "$base/runs/$lake/attempts/$count/log" | grep -q "ROWS 3" || fail "lake's count log on the UI after the restore"
+echo "ok   a backup in the bucket, restored into a new Postgres, brought the earlier runs back"
 echo "ok   kind"

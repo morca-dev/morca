@@ -53,6 +53,28 @@ Orphaned clusters are the main cost risk, so cleanup doesn't depend on any one p
 
 morca never creates EC2 instances. Pods ask for CPU and memory; the cluster's node autoscaler (Karpenter, built into EKS Auto Mode) starts nodes for pods that are waiting and removes nodes once they're empty. A pod no node will take, or whose image can't be pulled, holds its run, which says why on its page and alerts once, rather than starting again ([stuck pods](docs/morca-toml.md#stuck-pods)). Private images are pulled with the stack's `MORCA_KUBE_PULL_SECRET`.
 
+## Secrets and backups
+
+The manifests (`deploy/k8s/`) hold no passwords: the Secrets `morca-db` (Postgres's password and URL) and `morca-s3` (the bucket's keys) are made apart from them, as `deploy/k8s/local-secrets.yaml` says, and that file has them with passwords for kind only. Run secrets (`morca register --secret NAME=orca/<id>`) come from the Secret `morca-secrets` in `morca`, mounted in the scheduler, whose `MORCA_SECRET_FETCH` reads the key named by the id with each `/` as a `.` (`orca/github-token` is `orca.github-token`), so they need no AWS:
+
+```sh
+kubectl -n morca create secret generic morca-secrets --from-literal=orca.github-token=...
+```
+
+**Backups.** The CronJob `morca-backup` (`deploy/k8s/postgres-backup.yaml`) makes the dump `morca-stack backup` makes on Hetzner ([docs/hetzner.md](docs/hetzner.md#backups-and-restore)), every night at 02:30 UTC: `pg_dump -n orca -Fc`, checked that it reads back, uploaded to `MORCA_BACKUPS` (`s3://morca/backups/pg/<time>.dump`), the newest `MORCA_BACKUP_KEEP` (14) kept. A failed backup fails the Job and is pushed with `morca notify --kind backup-failed` when alerts are set up on it (`MORCA_NOTIFY_URL`, `MORCA_NOTIFY_SECRET`). `kubectl -n morca create job backup-now --from=cronjob/morca-backup` makes one now.
+
+**Restore.** Into a new, empty Postgres (a lost volume) or over the old one, with the scheduler and the UI stopped so nothing writes or holds a connection meanwhile:
+
+```sh
+kubectl -n morca scale deployment/morca-scheduler deployment/morca-ui --replicas=0
+kubectl -n morca delete job morca-restore --ignore-not-found
+kubectl apply -f deploy/k8s/restore/restore.yaml        # the newest dump
+kubectl -n morca wait --for=condition=complete job/morca-restore --timeout=600s
+kubectl -n morca scale deployment/morca-scheduler deployment/morca-ui --replicas=1
+```
+
+The Job's `DUMP` names another dump (`20261107T023000Z.dump`), and `FORCE=1` drops an existing `orca` schema first; without it a database that has one is left alone and the Job fails (the file says how to set them). The warehouse and the logs are in the bucket and need no restore. Test a restore before you need one: `tests/kind.sh` restores into a new Postgres and checks the runs are back.
+
 ## What it needs on AWS
 
 Everything goes in the project's selected Region; confirm it in AWS Settings > View all projects > Overview > Additional Info > Region. The dista benchmarks ran in us-east-2. The project is on the paid plan.
