@@ -1,1 +1,0 @@
-- **Kubernetes backups and secrets:** a nightly CronJob backs Postgres up to the bucket as on Hetzner, with a restore Job, and run secrets come from the Secret `morca-secrets` with no AWS; the manifests no longer hold the Secrets `morca-db` and `morca-s3`, so apply `deploy/k8s/local-secrets.yaml` on kind or make them yourself. (#570)
