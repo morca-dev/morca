@@ -1,1 +1,0 @@
-- **SQLite:** a cancelled run kept in a SQLite file stops from its heartbeat once its `cancel_at` passes, as on Postgres, not only between attempts. (#556)
