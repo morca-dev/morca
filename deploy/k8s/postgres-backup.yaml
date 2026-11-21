@@ -1,0 +1,155 @@
+# Postgres's nightly backup, as morca-stack backup makes it on Hetzner
+# (docs/hetzner.md#backups-and-restore): pg_dump -n orca -Fc, checked that it
+# reads back, uploaded to MORCA_BACKUPS/<time>.dump (each upload tried three
+# times), keeping the newest MORCA_BACKUP_KEEP. Deleting older ones is best
+# effort: a failed delete only warns, and the next backup deletes it. Only
+# morca's own state (runs, pipelines, users) is in the dump; the warehouse
+# and the logs are in the bucket already.
+#
+# Three containers, one after another, share the dump: pg_dump's image
+# makes it, the AWS CLI's uploads it, and morca's reports. A failure in
+# either of the first two is pushed (morca notify --kind backup-failed, when
+# alerts are set up, below) and fails the Job.
+#
+#     kubectl -n morca create job backup-now --from=cronjob/morca-backup   # a backup now
+#     kubectl -n morca logs job/backup-now --all-containers
+#
+# deploy/k8s/restore/restore.yaml restores one (K8S.md#backups).
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: morca-backup
+  namespace: morca
+spec:
+  schedule: "30 2 * * *"
+  timeZone: Etc/UTC
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 3600
+      template:
+        spec:
+          restartPolicy: Never
+          volumes:
+            - name: b
+              emptyDir: {}
+            - name: secrets
+              secret: {secretName: morca-secrets, optional: true, defaultMode: 0400}
+          initContainers:
+            # A step that fails writes why to /b/failed and exits 0, so the
+            # report still runs.
+            - name: dump
+              image: postgres:17-bookworm
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -u
+                  fail() { echo "morca-backup: $*" | tee -a /b/failed >&2; exit 0; }
+                  stamp=$(date -u +%Y%m%dT%H%M%SZ)
+                  pg_dump -d "$MORCA_DATABASE_URL" -n orca -Fc -f "/b/$stamp.dump" 2> /b/err \
+                      || fail "pg_dump failed: $(tail -n 2 /b/err)"
+                  pg_restore --list "/b/$stamp.dump" > /dev/null 2> /b/err \
+                      || fail "the dump doesn't read back: $(tail -n 2 /b/err)"
+                  echo "$stamp" > /b/stamp
+              env:
+                - name: MORCA_DATABASE_URL
+                  valueFrom: {secretKeyRef: {name: morca-db, key: url}}
+              volumeMounts: [{name: b, mountPath: /b}]
+              resources:
+                requests: {cpu: 100m, memory: 128Mi}
+            - name: upload
+              image: amazon/aws-cli:2.41.0
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -u
+                  fail() { echo "morca-backup: $*" | tee -a /b/failed >&2; exit 0; }
+                  [ ! -f /b/failed ] || exit 0
+                  if [ "${AWS_S3_FORCE_PATH_STYLE:-}" = true ]; then
+                      printf '[default]\ns3 =\n    addressing_style = path\n' > /b/aws.conf
+                      export AWS_CONFIG_FILE=/b/aws.conf
+                  fi
+                  dest=${MORCA_BACKUPS%/}
+                  b=${dest#s3://}
+                  bucket=${b%%/*}
+                  prefix=${b#*/}/
+                  name=$(cat /b/stamp).dump
+                  n=1
+                  until aws s3 cp --only-show-errors "/b/$name" "$dest/$name" 2> /b/err; do
+                      [ "$n" -lt 3 ] || fail "couldn't upload $name to $dest: $(tail -n 1 /b/err)"
+                      echo "morca-backup: uploading $name failed (try $n of 3); trying again" >&2
+                      sleep $((n * 3))
+                      n=$((n + 1))
+                  done
+                  # The names sort by time; keep the newest $MORCA_BACKUP_KEEP,
+                  # and drop the older ones' .paused (Hetzner's) with them.
+                  set -- $(aws s3api list-objects-v2 --bucket "$bucket" --prefix "$prefix" --output text \
+                      --query "sort((Contents || \`[]\`)[?ends_with(Key, '.dump')].Key)" | tr '\t' ' ')
+                  i=0
+                  for old in "$@"; do
+                      i=$((i + 1))
+                      [ $(($# - i)) -ge "$MORCA_BACKUP_KEEP" ] || break
+                      old=${old##*/}
+                      if ! aws s3 rm --only-show-errors "$dest/$old" 2> /b/err; then
+                          echo "morca-backup: warning: couldn't remove old dump $old: $(tail -n 1 /b/err); the next backup tries again" >&2
+                          continue
+                      fi
+                      aws s3 rm --only-show-errors "$dest/${old%.dump}.paused" > /dev/null 2>&1 || true
+                  done
+                  echo "morca-backup: backed up to $dest/$name" > /b/done
+              env:
+                - {name: MORCA_BACKUPS, value: "s3://morca/backups/pg"}
+                - {name: MORCA_BACKUP_KEEP, value: "14"}
+                # The bucket, as morca.yaml's scheduler has it.
+                - {name: AWS_ENDPOINT_URL_S3, value: "http://minio.morca.svc:9000"}
+                - {name: AWS_REGION, value: us-east-1}
+                - {name: AWS_S3_FORCE_PATH_STYLE, value: "true"}
+                - name: AWS_ACCESS_KEY_ID
+                  valueFrom: {secretKeyRef: {name: morca-s3, key: AWS_ACCESS_KEY_ID}}
+                - name: AWS_SECRET_ACCESS_KEY
+                  valueFrom: {secretKeyRef: {name: morca-s3, key: AWS_SECRET_ACCESS_KEY}}
+                # For S3-compatible stores that don't take the newer default
+                # checksums, as morca-stack's.
+                - {name: AWS_REQUEST_CHECKSUM_CALCULATION, value: when_required}
+                - {name: AWS_RESPONSE_CHECKSUM_VALIDATION, value: when_required}
+              volumeMounts: [{name: b, mountPath: /b}]
+              resources:
+                requests: {cpu: 100m, memory: 128Mi}
+          containers:
+            - name: report
+              image: morca:dev
+              imagePullPolicy: IfNotPresent
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  if [ -f /b/failed ]; then
+                      why=$(tail -n 3 /b/failed | tr '\n' ' ' | cut -c1-300)
+                      set -- notify --kind backup-failed --subject nightly --priority high \
+                          --tags rotating_light --title "morca: nightly backup failed" "$why"
+                      # Without the database if it's the database that's down.
+                      morca "$@" > /dev/null 2>&1 || env -u MORCA_DATABASE_URL morca "$@" > /dev/null 2>&1 \
+                          || echo "morca-backup: the failure wasn't pushed (alerts are off, or ntfy didn't answer)"
+                      cat /b/failed
+                      exit 1
+                  fi
+                  cat /b/done
+              env:
+                - name: MORCA_DATABASE_URL
+                  valueFrom: {secretKeyRef: {name: morca-db, key: url}}
+                # Alerts: set MORCA_NOTIFY_URL, and MORCA_NOTIFY_SECRET (an id
+                # in morca-secrets), as on the scheduler (docs/alerts.md).
+                - name: MORCA_SECRET_FETCH
+                  value: >-
+                    sh -c 'exec cat "/etc/morca/secrets/$(printf %s "$0" | tr / .)"'
+              volumeMounts:
+                - {name: b, mountPath: /b}
+                - {name: secrets, mountPath: /etc/morca/secrets, readOnly: true}
+              resources:
+                requests: {cpu: 50m, memory: 64Mi}
