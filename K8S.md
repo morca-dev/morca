@@ -19,6 +19,8 @@ Every pod also gets the bucket: the scheduler's `AWS_REGION`, `AWS_ENDPOINT_URL_
 
 The scheduler watches the Job, and deletes everything labelled with the run when it ends.
 
+Beside the scheduler, in the `morca` namespace, `morca ui` is a Deployment of its own with an Ingress, rolled one pod at a time on `/healthz`, so replacing the scheduler leaves the UI up. A project's apps (`[apps.<name>]`, [docs/morca-toml.md](docs/morca-toml.md#apps)) are a Deployment and a Service each, which `morca config apps --kube` prints from the image's morca.toml for `kubectl apply`, as `morca-stack` reads the image's `morca config apps` on Hetzner. The scheduler doesn't apply them: it has no rights in `morca`, and an app changes only with its image, when the stack's manifests are applied anyway (deploy/k8s/ui.yaml).
+
 The driver and workers ask for the pipeline's `cpus` and `memory_gb`, its minimum as their requests and its maximum as their limits, and the head for the runner's defaults ([docs/morca-toml.md](docs/morca-toml.md#on-kubernetes)). A pod killed for its memory, `OOMKilled` or `Evicted`, fails the run's attempts saying so, and the run starts again on a new cluster whose pods ask for 1.5 times the memory, up to `memory_gb`'s maximum, as a run killed in its cgroup does on Hetzner.
 
 Why the scheduler, and not the driver asking for its own workers:

@@ -16,6 +16,7 @@ from morca._internal.config import (
     resolve,
 )
 from morca._internal.apps_config import apps_text
+from morca._internal.apps_kube import apps_kube
 from morca._internal.dataset_config import read_datasets
 from morca._internal.pool_config import NO_WAIT, read_pools
 
@@ -701,6 +702,77 @@ memory_gb = 1.5
     _refused("[apps.ui]\n", "ui is one of the stack's own containers")
     _refused("[apps.Console]\n", "an app's name is lower-case")
     _refused("apps = 1\n", "is a key at the top")
+
+
+def test_apps_kube() raises:
+    # `morca config apps --kube` (#565): a Deployment and a Service per app,
+    # with what morca-stack gives it on Hetzner.
+    var f = ProjectConfig(
+        """[apps.my_console]
+port = 8080
+check = "/healthz"
+env = { CONSOLE_SEMANTIC = "1" }
+lake = true
+secrets = { POSTHOG_KEY = "orca/posthog-key" }
+memory_gb = 0.5
+
+[apps.bare]
+port = 9000
+""",
+        "morca.toml",
+    )
+    var y = apps_kube(f.apps(), "ghcr.io/o/p:1", "apps", "12345", "pull")
+    for want in [
+        'name: "my-console"\n  namespace: "apps"',
+        'command: ["/opt/morca/bin/my_console"]',
+        '- {name: PORT, value: "8080"}',
+        '- {name: "CONSOLE_SEMANTIC", value: "1"}',
+        '- {name: MORCA_IMAGE_BYTES, value: "12345"}',
+        (
+            'valueFrom: {secretKeyRef: {name: "morca-app-my-console", key:'
+            ' "POSTHOG_KEY"}}'
+        ),
+        "#   POSTHOG_KEY: the value of orca/posthog-key",
+        "- configMapRef: {name: morca-lake}",
+        "- secretRef: {name: morca-s3}",
+        'httpGet: {path: "/healthz", port: 8080}',
+        "limits: {memory: 512Mi}",
+        'imagePullSecrets: [{name: "pull"}]',
+        "maxUnavailable: 0",
+        "kind: Service",
+        "ports: [{port: 9000, targetPort: 9000}]",
+    ]:
+        assert_true(String(want) in y, String(want))
+    # The bare app: no lake, no limit, its check /.
+    var bare = String(y[byte = y.find("[apps.bare]").or_else(-1) :])
+    assert_false("envFrom" in bare)
+    assert_false("resources" in bare)
+    assert_true('httpGet: {path: "/", port: 9000}' in bare)
+    # Without a size, no MORCA_IMAGE_BYTES, never an empty one.
+    assert_false("MORCA_IMAGE_BYTES" in apps_kube(f.apps(), "img:1"))
+    for bad in ["", "img 1"]:
+        try:
+            _ = apps_kube(f.apps(), bad)
+            raise Error("accepted the image ", bad)
+        except e:
+            assert_true("--image is" in String(e))
+    try:
+        _ = apps_kube(f.apps(), "img:1", image_bytes="12k")
+        raise Error("accepted a size that isn't one")
+    except e:
+        assert_true("--image-bytes is a number" in String(e))
+    var noport = ProjectConfig("[apps.web]\n", "morca.toml")
+    try:
+        _ = apps_kube(noport.apps(), "img:1")
+        raise Error("accepted an app without a port")
+    except e:
+        assert_true("app web has no port" in String(e))
+    var taken = ProjectConfig("[apps.minio]\nport = 1\n", "morca.toml")
+    try:
+        _ = apps_kube(taken.apps(), "img:1")
+        raise Error("accepted an app named minio")
+    except e:
+        assert_true("minio is one of deploy/k8s's own" in String(e))
 
 
 def test_datasets() raises:

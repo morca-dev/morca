@@ -1,5 +1,6 @@
 # morca on Kubernetes, in the `morca` namespace: Postgres, MinIO as the
-# object store, and the scheduler with morca ui beside it in one pod. Each
+# object store, and the scheduler (morca ui is ui.yaml's, the project's apps
+# `morca config apps --kube`'s, as ui.yaml says). Each
 # run gets a cluster of its own in the morca-runs namespace (runs.yaml,
 # morca.kube): a driver Job, and a dista head and workers for a pipeline with
 # tasks.
@@ -13,7 +14,7 @@
 #
 #     docker build -f deploy/k8s/minio.Dockerfile -t morca-minio:dev deploy/k8s
 #     kind load docker-image morca-minio:dev   # or push it where the cluster pulls
-#     kubectl apply -f deploy/k8s/morca.yaml -f deploy/k8s/runs.yaml
+#     kubectl apply -f deploy/k8s/morca.yaml -f deploy/k8s/runs.yaml -f deploy/k8s/ui.yaml
 #     kubectl -n morca port-forward svc/morca-ui 8270:8270
 #
 # The passwords in morca-db and morca-s3 are for a local cluster; anywhere
@@ -207,41 +208,3 @@ spec:
             - {name: MORCA_RUNNER, value: kubernetes}
           resources:
             requests: {cpu: 500m, memory: 512Mi}
-        - name: ui
-          image: morca:dev
-          imagePullPolicy: IfNotPresent
-          args: [ui]
-          env:
-            - name: MORCA_DATABASE_URL
-              valueFrom: {secretKeyRef: {name: morca-db, key: url}}
-            - {name: MORCA_LOGS, value: "s3://morca/logs"}
-            - {name: MORCA_WAREHOUSE, value: "s3://morca/warehouse"}
-            - {name: AWS_ENDPOINT_URL_S3, value: "http://minio.morca.svc:9000"}
-            - {name: AWS_REGION, value: us-east-1}
-            - {name: AWS_S3_FORCE_PATH_STYLE, value: "true"}
-            - name: AWS_ACCESS_KEY_ID
-              valueFrom: {secretKeyRef: {name: morca-s3, key: AWS_ACCESS_KEY_ID}}
-            - name: AWS_SECRET_ACCESS_KEY
-              valueFrom: {secretKeyRef: {name: morca-s3, key: AWS_SECRET_ACCESS_KEY}}
-            # Actions need a user (morca user add, in the scheduler's
-            # container); reading doesn't, so nothing should expose the
-            # Service outside the cluster but through a proxy that asks for
-            # a login too. Behind HTTPS, set MORCA_UI_SECURE_COOKIES=1, and
-            # MORCA_UI_TRUST_PROXY=1 if the proxy sets X-Forwarded-Proto.
-            - {name: MORCA_UI_ADDR, value: "0.0.0.0:8270"}
-            - {name: MORCA_UI_LOGIN, value: required}
-          ports: [{containerPort: 8270}]
-          readinessProbe:
-            httpGet: {path: /, port: 8270}
-            periodSeconds: 2
-          resources:
-            requests: {cpu: 50m, memory: 64Mi}
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: morca-ui
-  namespace: morca
-spec:
-  selector: {app: morca-scheduler}
-  ports: [{port: 8270}]

@@ -233,6 +233,11 @@ apps apps.toml --overlay apps-ov.toml > apps.out 2>&1 || fail "config apps: $(ca
     || fail "config apps' lines: $(cat apps.out)"
 [ "$(check apps.toml 2>&1)" = "apps.toml: ok, 0 pipelines, 1 app" ] || fail "config check of an app: $(check apps.toml 2>&1)"
 (cd "$root/build" && [ -z "$(env -u MORCA_DATABASE_URL -u MORCA_CONFIG "$morca" config apps 2>&1)" ]) || fail "config apps without a file"
+# --kube (#565): a Deployment and a Service per app, for kubectl apply.
+apps apps.toml --kube --image img:1 > apps.yaml 2>&1 || fail "config apps --kube: $(cat apps.yaml)"
+[ "$(grep -c '^kind: ' apps.yaml)" = 2 ] && grep -q 'secretKeyRef: {name: "morca-app-console", key: "POSTHOG_KEY"}' apps.yaml \
+    || fail "config apps --kube: $(cat apps.yaml)"
+if apps apps.toml --kube > apps.yaml 2>&1; then fail "config apps --kube without --image"; fi
 echo "ok   config apps prints each app's facts, with no database"
 
 # The env reaches the toy's runs on the local runner: 2024-02 fails as asked,
