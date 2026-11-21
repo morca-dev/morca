@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.41.0 - 2026-11-21
+
+- **Kubernetes:** Postgres backups to the bucket with a restore Job, run secrets from the Secret `morca-secrets` (the manifests no longer hold `morca-db` and `morca-s3`: apply `deploy/k8s/local-secrets.yaml` on kind or make them yourself), `morca config apps --kube`, the UI as its own Deployment (`deploy/k8s/ui.yaml`, which you now apply too), and `deploy/k8s/deploy.sh <tag>` (K8S.md#deploying). (#570, #571, #573)
+- **Tests:** `tests/k3s-hetzner.sh` runs a census pipeline on a throwaway two-node k3s cluster on Hetzner and loses a node mid-run. (#576)
+- **Fixes:** dista pinned at its published 0.6.0 (#574); key ranges `A..B` use a loop newer Mojo 1.3 nightlies compile correctly (modular/modular#7716) (#577).
+
 ## 0.40.0 - 2026-11-21
 
 - **Mojo 1.3 nightly:** morca-mojo is built with Mojo 1.3.0.dev2026111805; projects pin `mojo-compiler = "==1.3.0.dev2026111805"`, and the Rust tests run in the `data` environment. (#550)
