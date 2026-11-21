@@ -1,0 +1,1 @@
+- **Key ranges:** `A..B` is expanded with a loop tested at the top, so newer Mojo 1.3 nightlies compile it correctly (modular/modular#7716). (#577)

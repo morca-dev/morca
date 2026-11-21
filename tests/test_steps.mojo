@@ -155,6 +155,10 @@ def test_day_ranges() raises:
     var ds = parse_partitions[Daily[]]("2024-02-27..2024-03-02")
     assert_equal(len(ds), 5)
     assert_equal(String(ds[2]), "2024-02-29")
+    assert_equal(String(ds[4]), "2024-03-02")
+    var one = parse_partitions[Daily[]]("2024-02-29..2024-02-29")
+    assert_equal(len(one), 1)
+    assert_equal(String(one[0]), "2024-02-29")
     assert_equal(len(parse_partitions[Daily[]]("2011-01-01..2024-12-31")), 5114)
     with assert_raises(contains="given twice"):
         _ = parse_partitions[Daily[]]("2024-01-01..2024-01-03,2024-01-02")

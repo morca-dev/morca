@@ -53,11 +53,12 @@ def parse_keys[
             var last = K.parse(ends[1])
             if last < k:
                 raise Error("range runs backwards: '", part, "'")
-            while True:
-                out.append(k.copy())
-                if k == last:
-                    break
+            # Tested at the top: Mojo 1.3 nightlies miscompile an append
+            # ahead of `if k == last: break` (modular/modular#7716).
+            out.append(k.copy())
+            while k < last:
                 k = k.next()
+                out.append(k.copy())
         else:
             raise Error("not a range: '", part, "'")
     if first:
