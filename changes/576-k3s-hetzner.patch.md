@@ -1,1 +1,1 @@
-- **A k3s test on Hetzner:** `tests/k3s-hetzner.sh` runs a census pipeline on a throwaway two-node CAX k3s cluster, loses a node mid-run, deletes everything and prints the cost (K8S.md#testing-on-a-real-cluster). (#559)
+- **A k3s test on Hetzner:** `tests/k3s-hetzner.sh` runs a census pipeline on a throwaway two-node CAX k3s cluster, loses a node mid-run, deletes everything and prints the cost (K8S.md#testing-on-a-real-cluster). (#576)
