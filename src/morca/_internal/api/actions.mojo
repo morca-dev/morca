@@ -14,11 +14,15 @@ that changes something, through `morca._internal.actions`.
 | `/runs/<id>/cancel` | cancel a run, before its next attempt if it's running |
 | `/runs/bulk` | `do=cancel`, `resume` (or its old name `retry`) or `backfill` the runs picked from a list: each `pick=<id>`, or with `all=1` every run its filters (`view`, `pipeline`, `status`, ...) match, if there are still `expect` of them |
 | `/datasets/<name>/rebuild` | rebuild every pipeline downstream over `partitions` |
+| `/ops/pools/self-hosted/<id>/drain`, `/undrain` | a self-hosted host (its worker token) claims no more runs, or claims again (`morca host drain`) |
+| `/ops/pools/self-hosted/<id>/remove` | revoke its token, refused while it has runs running unless `force=1` (`morca host remove`) |
+| `/api/hosts/<id>/drain`, `/undrain`, `/remove` | the same, for `morca --remote ... host` |
 
 Each answers `303 See Other` to the page of what it made (a script gets
 that page's JSON, with 200), or 409 saying why it wasn't done, with a way
 to confirm when it asks for one. `morca._internal.web.server` checks the session and
-audits each one done as its user's.
+audits each one done as its user's; a host's are audited as `morca host`
+audits them (`host drain`, `id=<id>`), from `ui` or `cli`.
 """
 
 from morca._internal.actions import (
@@ -37,6 +41,7 @@ from morca._internal.actions import (
     start_run,
 )
 from morca._internal.api.pipelines import json_strings
+from morca._internal.hosts import HostDone, remove_host, set_host_draining
 from morca._internal.auth import audit
 from morca._internal.html import Html, query_values, url_encode
 from morca._internal.json import quote
@@ -508,3 +513,76 @@ def _verb(what: String) -> String:
     if what == "resume":
         return String("Resume the failed of")
     return String("Backfill again")
+
+
+# ── a self-hosted host's (morca._internal.hosts) ─────────────────────────────
+
+
+def _host_href(id: Int) -> String:
+    return String("/ops/pools/self-hosted/", id)
+
+
+def _host_acted(d: HostDone, id: Int, var json: String) -> Page:
+    """To the host's page once done, or the 409; a busy host's remove asks
+    to be confirmed with `force=1`. Audited by `morca._internal.hosts`."""
+    var back = _host_href(id)
+    var o = Outcome.done(0)
+    if d.refused:
+        o = Outcome.no(d.refused, confirm=d.busy)
+    var page = _acted(
+        o,
+        back,
+        json^,
+        back,
+        String(back, "/remove"),
+        [(String("force"), String("1"))],
+        String("Remove it anyway, queueing its ", d.running, " runs again"),
+    )
+    page.audited = True
+    return page^
+
+
+def _host_draining(mut db: State, call: Call, on: Bool) raises -> Page:
+    var id = call.int("id")
+    var d = set_host_draining(db, id, on, call.user, call.source)
+    return _host_acted(
+        d,
+        id,
+        String(
+            '{"host": ',
+            id,
+            ', "draining": ',
+            "true" if on else "false",
+            ', "running": ',
+            d.running,
+            "}",
+        ),
+    )
+
+
+def host_drain(mut db: State, call: Call) raises -> Page:
+    """`POST /ops/pools/self-hosted/<id>/drain` (`/api/hosts/<id>/drain`):
+    its worker finishes its runs and claims no more."""
+    return _host_draining(db, call, True)
+
+
+def host_undrain(mut db: State, call: Call) raises -> Page:
+    """`POST /ops/pools/self-hosted/<id>/undrain`: it claims runs again."""
+    return _host_draining(db, call, False)
+
+
+def host_remove(mut db: State, call: Call) raises -> Page:
+    """`POST /ops/pools/self-hosted/<id>/remove`: its token revoked, so its
+    worker exits at its next claim; refused while it has runs running
+    unless `force=1`, which queues them again."""
+    var id = call.int("id")
+    var d = remove_host(
+        db, id, call.field("force") == "1", call.user, call.source
+    )
+    return _host_acted(
+        d,
+        id,
+        String(
+            '{"host": ', id, ', "removed": true, "running": ', d.running, "}"
+        ),
+    )

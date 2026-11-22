@@ -28,7 +28,8 @@ others can read is refused, as ssh refuses a key.
 The commands that can go to a UI are `backfill` (`--rerun`, and
 `--preview`, which queues nothing), `start`, `cancel` (a pipeline's keys,
 or one run), `pause` and `unpause`, `resume` and `rerun` of a run,
-`rebuild`, and the reads `status`, `lineage`, `watchdog status` and
+`rebuild`, `host list|drain|undrain|remove` (`morca._internal.remote_hosts`),
+and the reads `status`, `lineage`, `watchdog status` and
 `alerts`. An action is a `POST` of
 JSON to the path the UI's own button posts to, with `Authorization: Bearer
 <token>`, so it's the same code, the same checks and the same row of
@@ -75,6 +76,7 @@ def is_remote_command(cmd: String) -> Bool:
         or cmd == "lineage"
         or cmd == "watchdog"
         or cmd == "alerts"
+        or cmd == "host"
     )
 
 

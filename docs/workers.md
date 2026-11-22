@@ -211,6 +211,21 @@ morca host remove 3 [--force]    # revokes its token: its worker exits
 - Each is a row of `orca.audit` (`host drain`, `host undrain`, `host
   remove`, source `local`), as `morca worker-token` writes.
 
+The same from anywhere, as a user of a deployed UI (`morca login` first,
+as for the other `--remote` commands):
+
+```sh
+morca --remote orca.example.com host list --pool bgent
+morca --remote orca.example.com host drain 3
+morca --remote orca.example.com host remove 3 --force
+```
+
+`list` reads `/api/workers`, which needs no login (a host is `not seen`
+after this machine's `MORCA_STALE_SECONDS`). The others post to `POST
+/api/hosts/<id>/drain`, `/undrain` and `/remove` (`{"force": "1"}`) with
+the login's token, and are audited as the user's from `cli`. Ops > Pools
+has them as buttons (below).
+
 The `state` is `live`, `draining`, `not seen` (silent for
 `MORCA_STALE_SECONDS`), `revoked` or `expired`.
 
@@ -390,9 +405,18 @@ Ops > Pools (`/ops/pools?kind=self-hosted`, and `/api/pools` as JSON; see
 [ui.md](ui.md#pools)) has a row per worker token, the machine its worker
 runs on, in pool `worker:<pool>`: its name, state (`live`, or `gone` when
 the token is revoked or expired or the worker hasn't been heard from for
-`MORCA_STALE_SECONDS`), image, CPUs, memory, current runs and last
-heartbeat, and the worker's token and label. A host asked to drain
-(`morca host drain`) is `draining`. Its page lists the runs it
+`MORCA_STALE_SECONDS`, `not seen` beside it then), image (with the server's
+tag beside it, `MORCA_WORKER_IMAGE`, when both are known), CPUs, memory,
+current runs and last heartbeat, and the worker's token and label. A host
+asked to drain (`morca host drain`) is `draining`.
+
+A host whose token is still good has **Drain** (**Undrain** while it
+drains) and **Remove** beside its state, on its row and its page. They do
+what `morca host` does, audited the same way as the logged-in user's from
+`ui`. While login is on, a visitor sees "Log in to ..." in their place,
+and a POST without a session is refused. Remove asks first, and while the
+host has runs running the server refuses it with a page that confirms it
+("Remove it anyway"), which queues them again. Its page lists the runs it
 claimed, and draws the machine's samples over its latest run (the
 sampler the worker starts beside each run). `/api/workers` is still each token as JSON, and `/ops/workers`
 redirects to Pools. A run's page says where it ran: the worker's name, and
