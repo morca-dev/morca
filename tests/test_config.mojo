@@ -11,14 +11,19 @@ from morca._internal.config import (
     ProjectConfig,
     RegisterFlags,
     canonical_flag,
-    env_name_problem,
     parse_workers,
     resolve,
 )
 from morca._internal.apps_config import apps_text
 from morca._internal.apps_kube import apps_kube
 from morca._internal.dataset_config import read_datasets
-from morca._internal.pool_config import NO_WAIT, read_pools
+from morca._internal.pool_config import (
+    NO_WAIT,
+    pool_slots,
+    read_pools,
+    under_pool,
+)
+from morca._internal.secrets import env_name_problem
 
 comptime EXAMPLE = """[defaults]
 placement = "ec2"
@@ -457,6 +462,81 @@ def test_pools() raises:
         '[pools.Lab]\nprovider = "ec2"\nmachines = [{ type = "a" }]\n',
         "a-z, 0-9",
     )
+
+
+def test_self_hosted_pools() raises:
+    # A pool without a provider (#220): its machines join by hand, and its
+    # workers are given its max_runs, env and secrets.
+    var f = ProjectConfig(
+        String(
+            "[pools.bgent]\nmax_runs = 3\n",
+            'env = { MOJO_HISTORY_WORKDIR = "/work/clones", N = 4 }\n',
+            'secrets = { GITHUB_TOKEN = "orca/github-token" }\n',
+            '[pipelines.a]\nplacement = "worker:bgent"\n',
+        ),
+        "morca.toml",
+    )
+    var pools = read_pools(f.doc)
+    assert_equal(len(pools), 1)
+    ref p = pools[0]
+    assert_false(p.grown())
+    assert_equal(p.provider, "")
+    assert_equal(p.max_runs, 3)
+    assert_equal(len(p.machines), 0)
+    assert_equal(
+        p.env_json(),
+        String(
+            '[{"name": "MOJO_HISTORY_WORKDIR", "value": "/work/clones"},',
+            ' {"name": "N", "value": "4"}]',
+        ),
+    )
+    assert_equal(
+        p.secrets_json(),
+        '[{"name": "GITHUB_TOKEN", "id": "orca/github-token"}]',
+    )
+    # A bare one is a pool too, with no settings.
+    var bare = read_pools(ProjectConfig("[pools.lab]\n", "morca.toml").doc)
+    assert_equal(bare[0].max_runs, 0)
+    assert_equal(bare[0].env_json(), "[]")
+    # A pool morca grows takes them too.
+    var grown = read_pools(
+        ProjectConfig(
+            String(
+                '[pools.lab]\nprovider = "ec2"\nmachines = [{ type = "a" }]\n',
+                'max_runs = 2\nenv = { X = "1" }\n',
+            ),
+            "morca.toml",
+        ).doc
+    )
+    assert_true(grown[0].grown())
+    assert_equal(grown[0].max_runs, 2)
+    _refused("[pools.lab]\nmax_machines = 2\n", "needs a provider")
+    _refused('[pools.lab]\nlocations = ["hel1"]\n', "join by hand")
+    _refused("[pools.lab]\nmax_runs = 0\n", "max_runs is from 1")
+    _refused('[pools.lab]\nmax_runs = "3"\n', "max_runs is a whole number")
+    _refused('[pools.lab]\nenv = "X=1"\n', "env is a table of names")
+    _refused('[pools.lab]\nenv = { API_TOKEN = "x" }\n', "looks like a secret")
+    _refused('[pools.lab]\nenv = { MORCA_IMAGE = "x" }\n', "set by morca")
+    _refused('[pools.lab]\nsecrets = { A = "b" }\n', "under orca/")
+    _refused('[pools.lab]\nvolumes = ["a:/a"]\n', "has no key volumes")
+
+
+def test_what_a_pool_gives_its_workers() raises:
+    # A pipeline's variable wins over its pool's of the same name (#220).
+    var pool: List[Tuple[String, String]] = [("A", "pool"), ("B", "pool")]
+    var own: List[Tuple[String, String]] = [("B", "own")]
+    var got = under_pool(pool, own)
+    assert_equal(len(got), 2)
+    assert_equal(got[0][0], "A")
+    assert_equal(got[1][0], "B")
+    assert_equal(got[1][1], "own")
+    assert_equal(len(under_pool(List[Tuple[String, String]](), own)), 1)
+    # A pool's max_runs caps a claim, counting what the worker runs.
+    assert_equal(pool_slots(64, 0, "1,2"), 64)
+    assert_equal(pool_slots(64, 3, ""), 3)
+    assert_equal(pool_slots(64, 3, "7,8"), 1)
+    assert_equal(pool_slots(1, 3, "7"), 1)
+    assert_equal(pool_slots(5, 2, "7,8,9"), 0)
 
 
 def test_keys_and_tables_are_checked() raises:

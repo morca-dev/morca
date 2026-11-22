@@ -1,6 +1,9 @@
-"""Worker pools morca grows and shrinks itself (#267): a `[pools.<name>]`
-table in morca.toml, read and checked here, recorded by `morca register` in
-`orca.pools`, and acted on by the scheduler (`morca._internal.pool_scale`).
+"""Worker pools in morca.toml: a `[pools.<name>]` table, read and checked
+here, and recorded by `morca register`. A pool with a `provider` is one
+morca grows and shrinks itself (#267): it's recorded in `orca.pools` too,
+and acted on by the scheduler (`morca._internal.pool_scale`). One without
+is self-hosted (#220): its machines join by hand (`morca worker`), and
+morca only gives them the pool's settings.
 
     [pools.lab]
     provider = "hetzner"
@@ -19,12 +22,29 @@ the first type in each location in turn, retries it until its `wait`
 (seconds) has passed since it started trying, then moves to the next. The
 last type has no `wait`: morca keeps trying it. A machine that's running is
 never replaced by a type higher in the list.
+
+Every pool, with a provider or not, may set what its workers are given
+(`orca.pool_settings`, read by `/api/worker/claim`):
+
+    [pools.bgent]
+    max_runs = 3                                  # runs at once per worker
+    env = { MOJO_HISTORY_WORKDIR = "/work/clones" }
+    secrets = { GITHUB_TOKEN = "orca/github-token" }
+
+`env` and `secrets` go to every run the pool's workers start, under the
+pipeline's own (a pipeline's variable of the same name wins). `secrets`
+are Secrets Manager IDs, which the worker reads with its own
+`MORCA_SECRET_FETCH`: no value is in morca.toml or the database, and `env`
+refuses a name that looks like a secret's.
 """
+
+from json import loads
 
 import morca._internal.db.pools as pools_db
 
 from morca._internal.control import pool_problem
 from morca._internal.json import quote
+from morca._internal.secrets import env_name_problem, secret_problem
 from morca._internal.state import State
 from morca._internal.toml import (
     ARRAY,
@@ -36,13 +56,25 @@ from morca._internal.toml import (
 )
 
 comptime PROVIDERS = ["hetzner", "ec2"]
+comptime GROWN_KEYS = [
+    "machines",
+    "locations",
+    "max_machines",
+    "idle_seconds",
+]
+"""The keys of a pool morca grows, which need a `provider`."""
 comptime POOL_KEYS = [
     "provider",
     "machines",
     "locations",
     "max_machines",
     "idle_seconds",
+    "max_runs",
+    "env",
+    "secrets",
 ]
+comptime MOST_RUNS = 1000
+"""The most a pool's `max_runs` may be."""
 comptime DEFAULT_MAX_MACHINES = 1
 comptime DEFAULT_IDLE_SECONDS = 900
 comptime MAX_MACHINES = 100
@@ -69,6 +101,16 @@ struct PoolConfig(Copyable, Movable):
     var locations: List[String]
     var max_machines: Int
     var idle_seconds: Int
+    var max_runs: Int
+    """Runs at once on each of its workers; 0 when it doesn't say."""
+    var env: List[Tuple[String, String]]
+    """Variables every run of its workers gets, under the pipeline's."""
+    var secrets: List[Tuple[String, String]]
+    """Variables and the secret IDs their workers read them by."""
+
+    def grown(self) -> Bool:
+        """Whether morca makes its machines: it has a provider."""
+        return Bool(self.provider)
 
     def machines_json(self) -> String:
         """`machines` as orca.pools keeps it: `[{"type": .., "wait": ..}]`,
@@ -89,6 +131,30 @@ struct PoolConfig(Copyable, Movable):
             out.write(", " if i > 0 else "", quote(self.locations[i]))
         out.write("]")
         return out^
+
+    def env_json(self) -> String:
+        return pairs_json(self.env, "value")
+
+    def secrets_json(self) -> String:
+        return pairs_json(self.secrets, "id")
+
+
+def pairs_json(pairs: List[Tuple[String, String]], b: String) -> String:
+    """`[{"name": .., <b>: ..}, ...]`, as orca.pool_settings keeps them."""
+    var out = String("[")
+    for i in range(len(pairs)):
+        out.write(
+            ", " if i > 0 else "",
+            '{"name": ',
+            quote(pairs[i][0]),
+            ", ",
+            quote(b),
+            ": ",
+            quote(pairs[i][1]),
+            "}",
+        )
+    out.write("]")
+    return out^
 
 
 def _type_problem(t: String) -> String:
@@ -144,6 +210,43 @@ def _int(
     return n
 
 
+def _pairs(
+    doc: TomlDoc, base: List[String], r: _Reader, key: String
+) raises -> List[Tuple[String, String]]:
+    """`env` or `secrets` of a pool, checked as a pipeline's are."""
+    var p = base.copy()
+    p.append(key)
+    var out = List[Tuple[String, String]]()
+    var v = doc.get(p)
+    if not v:
+        return out^
+    if not doc.has_table(p):
+        r.fail(
+            v.value().line,
+            String(key, ' is a table of names: { NAME = "..." }'),
+        )
+    for name in doc.keys(p):
+        var q = p.copy()
+        q.append(name)
+        var item = doc.get(q).value().copy()
+        var why: String
+        if key == "secrets":
+            if item.kind != STRING:
+                why = String(name, " is a Secrets Manager ID, a string")
+            else:
+                why = secret_problem(String(name, "=", item.text)).replace(
+                    "--secret's ", ""
+                )
+        elif item.kind == TABLE or item.kind == ARRAY:
+            why = String(name, " is a string, a number or a boolean")
+        else:
+            why = env_name_problem(name)
+        if why:
+            r.fail(item.line, String(key, ": ", why))
+        out.append((name, item.text))
+    return out^
+
+
 def read_pool(doc: TomlDoc, name: String) raises -> PoolConfig:
     """`[pools.<name>]` of `doc`, checked; raises `<line>: [pools.<name>]
     <why>`."""
@@ -170,16 +273,47 @@ def read_pool(doc: TomlDoc, name: String) raises -> PoolConfig:
                 String(
                     "has no key ",
                     toml_key(key),
-                    " (it has provider, machines, locations, max_machines",
-                    " and idle_seconds)",
+                    " (it has provider, machines, locations, max_machines,",
+                    " idle_seconds, max_runs, env and secrets)",
                 ),
             )
     # provider
     var pp = base.copy()
     pp.append("provider")
     var pv = doc.get(pp)
+    var max_runs_p = base.copy()
+    max_runs_p.append("max_runs")
+    var max_runs = _int(doc, max_runs_p, r, "max_runs", 1, MOST_RUNS, 0)
+    var env = _pairs(doc, base, r, "env")
+    var secrets = _pairs(doc, base, r, "secrets")
     if not pv:
-        r.fail(0, 'needs a provider: "hetzner" or "ec2"')
+        # Self-hosted (#220): its machines join by hand, and only the
+        # settings above apply.
+        for key in materialize[GROWN_KEYS]():
+            var kp = base.copy()
+            kp.append(key)
+            var kv = doc.get(kp)
+            if kv:
+                r.fail(
+                    kv.value().line,
+                    String(
+                        key,
+                        " is for a pool morca grows, which needs a provider",
+                        ' ("hetzner" or "ec2"); without one, its machines',
+                        " join by hand (morca worker)",
+                    ),
+                )
+        return PoolConfig(
+            name,
+            "",
+            List[MachineChoice](),
+            List[String](),
+            0,
+            0,
+            max_runs,
+            env^,
+            secrets^,
+        )
     if pv.value().kind != STRING:
         r.fail(pv.value().line, "provider is a string")
     var provider = pv.value().text
@@ -276,6 +410,9 @@ def read_pool(doc: TomlDoc, name: String) raises -> PoolConfig:
         locations^,
         _int(doc, xp, r, "max_machines", 1, MAX_MACHINES, DEFAULT_MAX_MACHINES),
         _int(doc, ip, r, "idle_seconds", 10, 86400, DEFAULT_IDLE_SECONDS),
+        max_runs,
+        env^,
+        secrets^,
     )
 
 
@@ -288,13 +425,27 @@ def read_pools(doc: TomlDoc) raises -> List[PoolConfig]:
 
 
 def record_pools(mut db: State, pools: List[PoolConfig]) raises -> List[String]:
-    """Makes `orca.pools` what morca.toml says, `pools`: each upserted, and
-    a pool the file no longer has deleted, so the scheduler stops adding
-    machines to it and removes the ones it has once idle. The pools
-    deleted."""
+    """Makes `orca.pools` and `orca.pool_settings` what morca.toml says,
+    `pools`: each pool's settings upserted, each pool with a provider in
+    `orca.pools` too, and a pool the file no longer has (or that no longer
+    has a provider) deleted there, so the scheduler stops adding machines
+    to it and removes the ones it has once idle. The pools deleted from
+    `orca.pools`."""
     var tx = db.conn.begin()
     var keep = List[String]()
+    var all = List[String]()
     for p in pools:
+        all.append(p.name)
+        pools_db.upsert_settings(
+            tx,
+            p.name,
+            p.provider,
+            p.env_json(),
+            p.secrets_json(),
+            p.max_runs,
+        )
+        if not p.grown():
+            continue
         keep.append(p.name)
         pools_db.upsert_pool(
             tx,
@@ -305,10 +456,79 @@ def record_pools(mut db: State, pools: List[PoolConfig]) raises -> List[String]:
             p.max_machines,
             p.idle_seconds,
         )
-    var names = String("[")
-    for i in range(len(keep)):
-        names.write(", " if i > 0 else "", quote(keep[i]))
-    names.write("]")
-    var gone = pools_db.delete_pools_but(tx, names)
+    var gone = pools_db.delete_pools_but(tx, _names_json(keep))
+    pools_db.delete_settings_but(tx, _names_json(all))
     tx.commit()
     return gone^
+
+
+def _names_json(names: List[String]) -> String:
+    var out = String("[")
+    for i in range(len(names)):
+        out.write(", " if i > 0 else "", quote(names[i]))
+    out.write("]")
+    return out^
+
+
+@fieldwise_init
+struct PoolSettings(Copyable, Movable):
+    """What a pool's workers are given (`orca.pool_settings`): none for a
+    pool morca.toml doesn't declare."""
+
+    var max_runs: Int
+    """Runs at once on each worker; 0 for no limit of the pool's."""
+    var env: List[Tuple[String, String]]
+    var secrets: List[Tuple[String, String]]
+
+    @staticmethod
+    def none() -> PoolSettings:
+        return PoolSettings(
+            0, List[Tuple[String, String]](), List[Tuple[String, String]]()
+        )
+
+
+def _pairs_of(text: String, b: String) raises -> List[Tuple[String, String]]:
+    var out = List[Tuple[String, String]]()
+    for p in loads(text).array_items():
+        out.append((p["name"].string_value(), p[b].string_value()))
+    return out^
+
+
+def pool_settings(mut db: State, pool: String) raises -> PoolSettings:
+    """`pool`'s settings, as `morca register` recorded them."""
+    var got = pools_db.settings(db.conn, pool)
+    if not got:
+        return PoolSettings.none()
+    ref s = got.value()
+    return PoolSettings(
+        s.max_runs, _pairs_of(s.env, "value"), _pairs_of(s.secrets, "id")
+    )
+
+
+def under_pool(
+    pool: List[Tuple[String, String]], own: List[Tuple[String, String]]
+) -> List[Tuple[String, String]]:
+    """`own` (a pipeline's variables) after those of `pool` it doesn't
+    name: a pipeline's variable wins over its pool's."""
+    var out = List[Tuple[String, String]]()
+    for p in pool:
+        var shadowed = False
+        for o in own:
+            shadowed = shadowed or o[0] == p[0]
+        if not shadowed:
+            out.append(p)
+    for o in own:
+        out.append(o)
+    return out^
+
+
+def pool_slots(slots: Int, max_runs: Int, running: String) -> Int:
+    """The runs a worker asking for `slots`, running the comma-separated
+    runs `running`, may claim under its pool's `max_runs` (0: no limit)."""
+    if max_runs <= 0:
+        return slots
+    var n = 0
+    for x in running.split(","):
+        if String(x).strip():
+            n += 1
+    return max(min(slots, max_runs - n), 0)

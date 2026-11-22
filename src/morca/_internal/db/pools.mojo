@@ -1,6 +1,7 @@
-"""`orca.pools`, the worker pools morca.toml declares (`morca._internal.pool_config`),
-and `orca.pool_machines`, the machines the pool autoscaler
-(`morca._internal.pool_scale`) made for them."""
+"""`orca.pools`, the worker pools morca.toml declares that morca grows
+(`morca._internal.pool_config`), `orca.pool_machines`, the machines the pool
+autoscaler (`morca._internal.pool_scale`) made for them, and
+`orca.pool_settings`, what every declared pool's workers are given."""
 
 from postgres import Connection, Params, Transaction
 
@@ -48,6 +49,75 @@ def delete_pools_but(mut tx: Transaction, keep: String) raises -> List[String]:
     ):
         gone.append(r.text("name"))
     return gone^
+
+
+def upsert_settings(
+    mut tx: Transaction,
+    name: String,
+    provider: String,
+    env: String,
+    secrets: String,
+    max_runs: Int,
+) raises:
+    """Records what pool `name`'s workers are given; `env` and `secrets`
+    are JSON, `provider` empty for a self-hosted pool, `max_runs` 0 for
+    none."""
+    _ = tx.execute(
+        (
+            "INSERT INTO orca.pool_settings (name, provider, env, secrets,"
+            " max_runs) VALUES ($1, nullif($2, ''), $3::jsonb, $4::jsonb,"
+            " nullif($5, 0)) ON CONFLICT (name) DO UPDATE SET provider ="
+            " EXCLUDED.provider, env = EXCLUDED.env, secrets ="
+            " EXCLUDED.secrets, max_runs = EXCLUDED.max_runs, updated = now()"
+        ),
+        Params()
+        .text(name)
+        .text(provider)
+        .text(env)
+        .text(secrets)
+        .int32(Int32(max_runs)),
+    )
+
+
+def delete_settings_but(mut tx: Transaction, keep: String) raises:
+    """Deletes the settings of every pool not named in `keep`, a JSON array
+    of names."""
+    _ = tx.execute(
+        (
+            "DELETE FROM orca.pool_settings WHERE NOT name = ANY (SELECT"
+            " jsonb_array_elements_text($1::jsonb))"
+        ),
+        Params().text(keep),
+    )
+
+
+@fieldwise_init
+struct SettingsRow(Copyable, Movable):
+    var max_runs: Int
+    var env: String
+    """JSON: `[{"name": .., "value": ..}, ...]`."""
+    var secrets: String
+    """JSON: `[{"name": .., "id": ..}, ...]`."""
+
+
+def settings(
+    mut conn: Connection, pool: String
+) raises -> Optional[SettingsRow]:
+    """What `pool`'s workers are given; None for a pool morca.toml doesn't
+    declare."""
+    var rows = conn.query(
+        (
+            "SELECT coalesce(max_runs, 0) AS max_runs, env::text AS env,"
+            " secrets::text AS secrets FROM orca.pool_settings WHERE name = $1"
+        ),
+        Params().text(pool),
+    )
+    if len(rows) == 0:
+        return None
+    var r = rows.row(0)
+    return SettingsRow(
+        Int(r.int64("max_runs")), r.text("env"), r.text("secrets")
+    )
 
 
 def booting_machine(
@@ -164,6 +234,9 @@ struct LiveMachine(Copyable, Movable):
     var image: String
     """The worker image it was made to run; empty if its row has none."""
     var draining: Bool
+    var drained: Bool
+    """Its worker was asked to drain (`morca host drain`): it's removed
+    once idle."""
 
 
 def live_machines(
@@ -183,7 +256,8 @@ def live_machines(
             " m.worker AND rm.ended IS NULL)) AS busy, coalesce(extract(epoch"
             " FROM now() - m.idle_since)::float8, -1) AS idle_for,"
             " coalesce(m.image, '') AS image, m.draining IS NOT NULL AS"
-            " draining FROM orca.pool_machines m LEFT JOIN orca.workers w ON"
+            " draining, coalesce(w.draining IS NOT NULL, false) AS drained"
+            " FROM orca.pool_machines m LEFT JOIN orca.workers w ON"
             " w.id = m.worker WHERE m.pool = $1 AND m.ended IS NULL ORDER BY"
             " m.id"
         ),
@@ -202,6 +276,7 @@ def live_machines(
                 r.float64("idle_for"),
                 r.text("image"),
                 r.bool("draining"),
+                r.bool("drained"),
             )
         )
     return out^

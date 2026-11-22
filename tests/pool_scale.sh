@@ -10,6 +10,7 @@
 # - the machine boots, joins as a worker and runs the runs; with plain's
 #   max_runs = 1 one machine is all the demand there is;
 # - idle for idle_seconds, it's removed: token revoked, server deleted;
+#   drained on request (morca host drain), it's removed once idle;
 # - a server with the pool's and the stack's labels that morca doesn't know
 #   is deleted;
 # - /api/worker/boot answers only a token the autoscaler made;
@@ -179,6 +180,16 @@ until_ 10 "the quota refusal isn't said: $(status)" has_status "cax31 refused fo
 has_status ": cpx32 in hel1" || fail "not cpx32: $(status)"
 rm -f "$dir/quota"
 echo "ok   a type refused for the project's quota: the next is made at once, saying why"
+
+# Drained on request (morca host drain, #220): removed once idle, without
+# waiting for idle_seconds.
+until_ 60 "2024-04 didn't succeed: $(q "SELECT id, status, held FROM orca.runs")" \
+    is "SELECT count(*) FROM orca.runs WHERE status = 'succeeded'" 4
+mw=$(q "SELECT worker FROM orca.pool_machines WHERE ended IS NULL")
+./build/morca host drain "$mw" >> "$log" 2>&1 || fail "host drain $mw"
+until_ 8 "the drained machine wasn't removed: $(q "SELECT name, ended, why FROM orca.pool_machines")" \
+    is "SELECT why FROM orca.pool_machines WHERE worker = $mw" "drained on request (morca host drain)"
+echo "ok   a machine drained on request is removed once idle"
 
 # /api/worker/boot only for a token the autoscaler made.
 tok=$(./build/morca worker-token create --pool t --label hand 2>> "$log") || fail "worker-token create"

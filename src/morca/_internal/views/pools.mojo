@@ -11,7 +11,7 @@ The scheduler's own machine (the local runner, and control-placed runs)
 isn't a pool: it is Control (`/ops/control`).
 
 A machine's state is `live`, `draining` (an EC2 worker the scheduler
-drained) or `gone` (an instance that ended; a worker whose token was
+drained, or a worker asked to with `morca host drain`) or `gone` (an instance that ended; a worker whose token was
 revoked or expired, or that hasn't been seen for `MORCA_STALE_SECONDS`),
 with what it's doing in `detail`. Like Fleet, a page view reads
 `orca.instances`, `orca.fleet_samples`, `orca.workers` and `orca.runs`,
@@ -252,11 +252,12 @@ def _workers(mut db: State, mut out: List[Machine], one: Int) raises:
                 kind=SELF_HOSTED,
                 id=String(r.id),
                 name=name if name else r.label,
-                state="live" if s == "live" else "gone",
+                state=s if s == "live" or s == "draining" else String("gone"),
                 detail=(
                     String("running") if len(runs) > 0 else String("idle")
                 ) if s
-                == "live" else s,
+                == "live"
+                or s == "draining" else s,
                 image=r.image,
                 cpus=r.cpus,
                 memory_mb=r.memory_mb,

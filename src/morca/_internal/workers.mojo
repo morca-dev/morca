@@ -110,6 +110,12 @@ from morca._internal.registered import (
     with_cap,
 )
 from morca._internal.handover import RunOutdated, run_outdated
+from morca._internal.pool_config import (
+    PoolSettings,
+    pool_settings,
+    pool_slots,
+    under_pool,
+)
 from morca._internal.state import PgStore, State, beat_run
 from morca._internal.store import FINAL, TableSnapshot
 from morca._internal.tokens import (
@@ -234,6 +240,8 @@ struct WorkerRow(Copyable, Movable):
     var pressure: Optional[PressureRow]
     """Its host's newest memory pressure reading (`morca._internal.admission`), if
     it sent one."""
+    var draining: Bool
+    """Its worker was asked to drain (`morca host drain`)."""
 
 
 def worker_rows(mut db: State) raises -> List[WorkerRow]:
@@ -258,6 +266,7 @@ def worker_rows(mut db: State) raises -> List[WorkerRow]:
                 r.running,
                 r.expires,
                 pressure.get(worker_host(r.id)),
+                r.draining,
             )
         )
     return out^
@@ -443,12 +452,18 @@ def _num(v: Value, key: String) raises -> Int64:
 
 def claim(mut db: State, w: WorkerAuth, v: Value) raises -> String:
     """`/api/worker/claim`'s answer: `{"run": <spec>|null, "refused": ...,
-    "join": <member spec>, "stop": [member, ...]}`. Nothing for a draining
-    pool machine (`morca._internal.pool_scale`). With no run to start,
+    "join": <member spec>, "stop": [member, ...]}`, and `"max_runs"` when
+    its pool's settings (`morca._internal.pool_config`) have one. Nothing
+    for a draining pool machine (`morca._internal.pool_scale`), or a worker
+    asked to drain (`morca host drain`: `"draining"` says so). Its pool's
+    `max_runs` caps what it claims, its `env` and `secrets` go under the
+    pipeline's in the spec. With no run to start,
     room left and an address the pool's machines reach it at
     (`advertise`), a run to join (`morca._internal.run_cluster`); and always the
     members it has whose run has ended, to stop."""
     var stop = members_to_stop(db, w.id)
+    var settings = pool_settings(db, w.pool)
+    var asked = workers_db.is_draining(db.conn, w.id)
     # A pool machine the autoscaler is draining (a deploy changed the
     # worker image, #356) is given nothing new: it finishes what it has
     # and is replaced once idle.
@@ -467,12 +482,28 @@ def claim(mut db: State, w: WorkerAuth, v: Value) raises -> String:
             ),
             "}",
         )
+    elif asked:
+        # Asked to drain (#220): it finishes what it has, claims nothing.
+        _seen(db, w, v)
+        answer = String(
+            '{"run": null, "draining": ',
+            quote(
+                "this worker was asked to drain (morca host drain): it"
+                " finishes its runs and claims no more"
+            ),
+            "}",
+        )
     else:
-        answer = _claim_run(db, w, v)
-    var slots = Int(v["slots"].int_value()) if String("slots") in v else 0
+        answer = _claim_run(db, w, v, settings)
+    var slots = pool_slots(
+        Int(v["slots"].int_value()) if String("slots") in v else 0,
+        settings.max_runs,
+        text_field(v, "running"),
+    )
     var advertise = text_field(v, "advertise")
     if (
         not drained
+        and not asked
         and answer.startswith('{"run": null')
         and slots > 0
         and advertise
@@ -495,15 +526,17 @@ def claim(mut db: State, w: WorkerAuth, v: Value) raises -> String:
             String("worker ", name) if name else w.user(),
         )
         if joined:
+            var m = joined.value().copy()
+            m.env = under_pool(settings.env, m.env)
+            m.secrets = under_pool(settings.secrets, m.secrets)
             var head = String(answer[byte = : answer.byte_length() - 1])
-            answer = String(
-                head,
-                ', "join": ',
-                member_spec_json(joined.value()),
-                "}",
-            )
+            answer = String(head, ', "join": ', member_spec_json(m), "}")
+    var most = String(', "max_runs": ', settings.max_runs) if (
+        settings.max_runs > 0
+    ) else String()
     return String(
         answer[byte = : answer.byte_length() - 1],
+        most,
         ', "stop": ',
         stop_json(stop),
         "}",
@@ -553,11 +586,18 @@ def pool_unmet(
     return text^
 
 
-def _claim_run(mut db: State, w: WorkerAuth, v: Value) raises -> String:
+def _claim_run(
+    mut db: State, w: WorkerAuth, v: Value, settings: PoolSettings
+) raises -> String:
     """A queued run of the pool for the worker to start: `{"run":
-    <spec>|null, "refused": ...}`."""
+    <spec>|null, "refused": ...}`, within its pool's `max_runs`, with its
+    pool's `env` and `secrets` under the pipeline's."""
     _seen(db, w, v)
-    var slots = Int(v["slots"].int_value()) if String("slots") in v else 0
+    var slots = pool_slots(
+        Int(v["slots"].int_value()) if String("slots") in v else 0,
+        settings.max_runs,
+        text_field(v, "running"),
+    )
     if slots <= 0:
         return String('{"run": null}')
     var image = text_field(v, "image")
@@ -694,8 +734,8 @@ def _claim_run(mut db: State, w: WorkerAuth, v: Value) raises -> String:
             r.partitions,
             r.allow_new_code,
             p.image,
-            p.env.copy(),
-            p.secrets.copy(),
+            under_pool(settings.env, p.env),
+            under_pool(settings.secrets, p.secrets),
             grant,
             members_of(db, p.name) if p.workers > 0 else 0,
         )
@@ -1013,6 +1053,7 @@ def workers_json(rows: List[WorkerRow]) -> String:
             .text("running", r.running)
             .text("expires", r.expires)
             .raw("memory_pressure", row_json(r.pressure))
+            .bool("draining", r.draining)
             .finish()
         )
     out.write("]}")

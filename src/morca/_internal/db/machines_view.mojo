@@ -169,7 +169,8 @@ struct WorkerToken(Copyable, Movable):
     var pool: String
     var label: String
     var state: String
-    """`live`, `revoked`, `expired` or `not seen`."""
+    """`live`, `draining` (`morca host drain`), `revoked`, `expired` or
+    `not seen`."""
     var name: String
     var image: String
     var ago: Int
@@ -189,7 +190,8 @@ def worker_tokens(
         "SELECT id, pool, label, CASE WHEN revoked IS NOT NULL THEN",
         " 'revoked' WHEN expires <= now() THEN 'expired' WHEN last_seen IS",
         " NULL OR last_seen <= now() - make_interval(secs => $1::int) THEN",
-        " 'not seen' ELSE 'live' END AS state, coalesce(name, '') AS name,",
+        " 'not seen' WHEN draining IS NOT NULL THEN 'draining' ELSE 'live'",
+        " END AS state, coalesce(name, '') AS name,",
         " coalesce(image, '') AS image, coalesce(extract(epoch FROM now() -",
         " last_seen)::bigint, -1) AS ago, coalesce(cpus, 0) AS cpus,",
         " coalesce(memory_mb, 0) AS mem, coalesce(running, '') AS running,",

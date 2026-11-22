@@ -38,7 +38,9 @@ deleted, then its row ended with why) when:
   silent for `MORCA_POOL_LOST_SECONDS` (300): its runs are queued again as
   any lost worker's are (`morca._internal.pool_runs`);
 - it was made for another worker image than the scheduler's
-  (`MORCA_WORKER_IMAGE`, which a deploy changes), once it's idle (#356).
+  (`MORCA_WORKER_IMAGE`, which a deploy changes), once it's idle (#356);
+- its worker was asked to drain (`morca host drain`, #220), once it's
+  idle.
 
 **Draining.** A machine runs the image it was made for (the boot answer
 gives the one `orca.pool_machines.image` recorded), and its container keeps
@@ -308,6 +310,10 @@ struct PoolScaler(Movable):
             if not p.configured:
                 if _remove(db, provider, m, "its pool left morca.toml"):
                     continue
+            elif m.drained and _remove(
+                db, provider, m, "drained on request (morca host drain)"
+            ):
+                continue
             elif outdated and _remove(
                 db,
                 provider,
