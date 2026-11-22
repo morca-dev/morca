@@ -76,6 +76,11 @@ fail() {
     kubectl -n morca get pods -o wide || true
     kubectl -n morca-runs get pods,jobs,services,secrets -o wide || true
     kubectl -n morca logs deploy/morca-scheduler -c scheduler --tail=40 || true
+    # The runs as Postgres has them, the UI's side and its port-forward:
+    # "no succeeded toy run on the UI" (#582) can be any of the three.
+    q "SELECT id, pipeline, status, starts, error FROM orca.runs ORDER BY id" 2> /dev/null || true
+    kubectl -n morca logs deploy/morca-ui --tail=40 2> /dev/null || true
+    cat build/kind-forward.log 2> /dev/null || true
     exit 1
 }
 q() { kubectl -n morca exec statefulset/postgres -- psql -U orca -d orca -Atc "$1"; }
