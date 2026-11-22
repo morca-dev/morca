@@ -965,6 +965,16 @@ def _migrations() -> List[List[String]]:
                 " NULL DEFAULT '[]'"
             ),
         ],
+        # A hand-joined host following the server's worker image (#220,
+        # `morca._internal.host_follow`): the image its container runs and
+        # what it says of the server's, as its claims report them, and when
+        # it was asked to upgrade (`morca host upgrade`). Additive: nullable
+        # columns the binaries before it neither read nor write.
+        [
+            "ALTER TABLE orca.workers ADD COLUMN host_image text",
+            "ALTER TABLE orca.workers ADD COLUMN host_upgrade text",
+            "ALTER TABLE orca.workers ADD COLUMN upgrade timestamptz",
+        ],
     ]
 
 
@@ -1033,6 +1043,9 @@ def _floor_raisers() -> List[Int]:
     68 (`pool_settings.volumes`, #220) is additive: a column with a
     default the binaries before it neither read nor write; a registration
     they make leaves it as it was.
+    69 (`workers.host_image`, `host_upgrade`, `upgrade`, #220) is additive:
+    nullable columns the binaries before it neither read nor write. Their
+    UI asks no host to upgrade, and the host lists no image of its own.
     """
     return [1, 24]
 

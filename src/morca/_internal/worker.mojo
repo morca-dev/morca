@@ -48,6 +48,13 @@ claim's answer.
 runs: it finishes those it has, keeps beating, and claims again once the
 drain is lifted (`morca host undrain`).
 
+**Following the server's image.** A worker `morca host join` installed
+(`--host-image`, in a container; `--host-service`, as a service) compares
+the image the server's pool workers run, which each claim's answer says,
+with its own: in a container it drains, then exits 4 for its script to
+start it on the server's image; as a service it says so and keeps working
+(`morca._internal.host_follow`).
+
 **Env files.** Each `--env-file` (`morca host join`'s services pass them)
 is read before anything else, as Docker and systemd read one: a
 `NAME=value` a line, the value as written, blank lines and `#` comments
@@ -99,6 +106,7 @@ from morca._internal.control import (
     keep_log_ended,
     pool_problem,
 )
+from morca._internal.host_follow import UPGRADE_EXIT, Follow, image_problem
 from morca._internal.http_store import Body, StateApi
 from morca._internal.logs import run_dir
 from morca._internal.pressure import (
@@ -128,7 +136,8 @@ comptime WORKER_USAGE = """usage:
   morca worker --pool <pool> [--remote <url>] [--token-file <path>]
               [--max-runs N] [--poll-seconds S] [--dir <dir>]
               [--image <image>] [--name <name>] [--advertise <address>]
-              [--env-file <path>]...
+              [--env-file <path>]... [--host-image <image>]
+              [--host-service systemd|launchd]
               (the token: MORCA_WORKER_TOKEN, or --token-file)"""
 
 
@@ -219,6 +228,8 @@ struct Worker(Movable):
     var members: Dict[Int, Int]
     """The dista workers this one runs for other workers' runs: pid to
     `orca.run_members` id."""
+    var follow: Follow
+    """What it does about the server's image (`morca._internal.host_follow`)."""
 
     def __init__(
         out self,
@@ -232,6 +243,8 @@ struct Worker(Movable):
         dir: String,
         advertise: String = "",
         max_runs_given: Bool = True,
+        host_image: String = "",
+        host_service: String = "",
     ) raises:
         self.api = StateApi(url, token)
         self.token = token
@@ -257,6 +270,7 @@ struct Worker(Movable):
         self.room_mb = 0
         self.advertise = advertise
         self.members = Dict[Int, Int]()
+        self.follow = Follow(host_image, host_service, image, dir)
 
     def _running_ids(self) -> String:
         var ids = String()
@@ -656,6 +670,7 @@ struct Worker(Movable):
         )
         print("morca worker: runs' swap:", self.cgroups.swap_text(), flush=True)
         self.unswept = self.cgroups.stale()
+        self.follow.start()
         var said = String()
         while True:
             for done in reap():
@@ -689,6 +704,8 @@ struct Worker(Movable):
                 except:
                     pass
             var slots = self.max_runs - len(self.running) - len(self.members)
+            if self.follow.draining():
+                slots = 0  # to move to the server's image
             # Memory pressure (orca.pressure): no claim while this host is
             # over the limit, but one at a time once a hold has lasted its
             # grace with none of its runs going.
@@ -736,6 +753,8 @@ struct Worker(Movable):
                     .int("room_cpus", Int64(room.cpus))
                     .int("room_memory_mb", Int64(room.memory_mb))
                     .text("advertise", self.advertise)
+                    .text("host_image", self.follow.host_image)
+                    .text("host_upgrade", self.follow.state())
                     .raw(
                         "pressure",
                         Report.of(self.psi, self.admission, now).json(),
@@ -757,6 +776,20 @@ struct Worker(Movable):
                 continue
             said = ""
             self._settings(got)
+            self.follow.observe(got, len(self.running))
+            # Drained: nothing running, nothing just given to start.
+            var given = not got["run"].is_null() or (
+                String("join") in got and not got["join"].is_null()
+            )
+            if (
+                self.follow.draining()
+                and not given
+                and len(self.running) == 0
+                and len(self.members) == 0
+                and len(self.keeping) == 0
+            ):
+                self.follow.leave()
+                return UPGRADE_EXIT
             if String("refused") in got:
                 var why = got["refused"].string_value()
                 print("morca worker: not given a run:", why, flush=True)
@@ -859,6 +892,8 @@ def worker_command(args: List[String], target: String) raises -> Int:
     var image = getenv("MORCA_IMAGE")
     var name = _hostname()
     var advertise = getenv("MORCA_WORKER_ADVERTISE")
+    var host_image = String()
+    var host_service = String()
     var i = 2
     while i < len(args):
         var a = args[i]
@@ -890,6 +925,15 @@ def worker_command(args: List[String], target: String) raises -> Int:
             name = val
         elif a == "--advertise":
             advertise = val
+        elif a == "--host-image":
+            var p = image_problem(val)
+            if p:
+                return _usage(String("--host-image: ", p))
+            host_image = val
+        elif a == "--host-service":
+            if val != "systemd" and val != "launchd":
+                return _usage("--host-service is systemd or launchd")
+            host_service = val
         elif a == "--env-file":
             pass  # read above
         else:
@@ -934,5 +978,7 @@ def worker_command(args: List[String], target: String) raises -> Int:
         dir,
         advertise,
         max_runs_given,
+        host_image,
+        host_service,
     )
     return w.serve()

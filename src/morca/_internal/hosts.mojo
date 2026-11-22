@@ -6,6 +6,7 @@ morca host list [--pool <pool>]     id, pool, name, state, image, CPUs, memory, 
 morca host drain <id>               finishes its runs, claims no more
 morca host undrain <id>             claims again
 morca host remove <id> [--force]    revokes its token: its worker exits
+morca host upgrade <id>             moves it to the server's worker image now
 ```
 
 A host is a worker token's machine (`orca.workers`), whether it joined by
@@ -17,6 +18,17 @@ has and keeps beating; a machine the autoscaler made is removed once idle.
 next claim; a host with runs running is refused unless `--force` (its runs
 are then queued again as any lost worker's are). Each is a row of
 `orca.audit`, as `morca worker-token` writes.
+
+**Images.** A host `morca host join --container` installed follows the
+server's worker image (`MORCA_WORKER_IMAGE`) after a deploy: it drains
+itself, and once idle its container is started on the new image
+(`morca._internal.host_follow`). `host list` shows each host's image, the
+server's as it last heard it, and `upgrade=`: `current`, `draining` (to
+move), `failed` (the pull or the start failed: it runs the old image and
+claims again), or `needs-upgrade` (a service, which can't change its own
+binary); `-` for a worker that doesn't say (one the pool autoscaler made,
+or an older one). **Upgrading** asks a container host to try now, also an
+image it failed to move to; it never stops a run.
 """
 
 from std.os import getenv
@@ -25,6 +37,7 @@ import morca._internal.db.workers as workers_db
 
 from morca._internal.auth import audit
 from morca._internal.db.live import stale_limit
+from morca._internal.pool_boot import WORKER_IMAGE
 from morca._internal.state import State
 from morca._internal.workers import WorkerRow, worker_rows
 
@@ -32,7 +45,8 @@ comptime HOST_USAGE = """usage:
   morca host list [--pool <pool>]
   morca host drain <id>
   morca host undrain <id>
-  morca host remove <id> [--force]"""
+  morca host remove <id> [--force]
+  morca host upgrade <id>"""
 
 
 def host_state(r: WorkerRow, stale: Int) -> String:
@@ -53,8 +67,22 @@ def _runs(running: String) -> Int:
     return n
 
 
-def host_line(r: WorkerRow, stale: Int) -> String:
-    """A host as `morca host list` prints it."""
+def host_upgrade(r: WorkerRow, server: String) -> Tuple[String, String]:
+    """What host `r` says of the server's worker image: its state
+    (`current`, `draining`, `failed`, `needs-upgrade`, or `-` when it
+    says nothing), and that image as it last heard it, else `server`."""
+    var said = r.host_upgrade
+    var sp = said.find(" ").or_else(-1)
+    if sp > 0:
+        return (String(said[byte=:sp]), String(said[byte = sp + 1 :]))
+    return (String("-"), server if server else String("-"))
+
+
+def host_line(r: WorkerRow, stale: Int, server: String = "") -> String:
+    """A host as `morca host list` prints it; `server` is the worker image
+    of the server this runs beside, if it knows it."""
+    var up = host_upgrade(r, server)
+    var image = r.host_image if r.host_image else r.image
     return String(
         r.id,
         " ",
@@ -64,7 +92,11 @@ def host_line(r: WorkerRow, stale: Int) -> String:
         " ",
         host_state(r, stale).replace(" ", "-"),
         " image=",
-        r.image if r.image else String("-"),
+        image if image else String("-"),
+        " server_image=",
+        up[1],
+        " upgrade=",
+        up[0],
         " cpus=",
         r.cpus,
         " memory_mb=",
@@ -96,7 +128,9 @@ def _usage(msg: String) -> Int:
 def host_command(url: String, args: List[String]) raises -> Int:
     """`morca host list|drain|undrain|remove ...`."""
     if len(args) < 3:
-        return _usage("morca host needs list, drain, undrain or remove")
+        return _usage(
+            "morca host needs list, drain, undrain, remove or upgrade"
+        )
     var db = State(url)
     db.migrate()
     var who = getenv("USER", "local")
@@ -108,11 +142,12 @@ def host_command(url: String, args: List[String]) raises -> Int:
         elif len(args) != 3:
             return _usage("host list takes only --pool <pool>")
         var stale = Int(stale_limit())
+        var server = getenv(WORKER_IMAGE)
         var n = 0
         for r in worker_rows(db):
             if pool and r.pool != pool:
                 continue
-            print(host_line(r, stale))
+            print(host_line(r, stale, server))
             n += 1
         if n == 0:
             print("no hosts")
@@ -169,6 +204,45 @@ def host_command(url: String, args: List[String]) raises -> Int:
             "removed host",
             id,
             "- its token is revoked, and its worker exits at its next claim",
+        )
+        return 0
+    if sub == "upgrade" and len(args) == 4:
+        var id = _id(args[3])
+        var row = Optional[WorkerRow]()
+        for r in worker_rows(db):
+            if r.id == id:
+                row = r.copy()
+        if not row or row.value().state != "live":
+            raise Error("morca: host ", id, " is no live worker token's")
+        ref h = row.value()
+        if not h.host_image:
+            var why = String(
+                "it runs as a service, which can't change its own binary:"
+                " install the server's version on it by hand"
+            ) if h.host_upgrade.startswith("needs-upgrade") else String(
+                "it says no image of its own: only a worker morca host join"
+                " --container installed (of this version or newer) moves"
+                " itself; a machine the pool autoscaler made is replaced"
+                " once idle after a deploy"
+            )
+            raise Error("morca: host ", id, " can't upgrade itself: ", why)
+        if not workers_db.ask_upgrade(db.conn, id):
+            raise Error("morca: host ", id, " is no live worker token's")
+        audit(
+            db,
+            who,
+            "host upgrade",
+            0,
+            String("id=", id, " image=", h.host_image),
+            "local",
+        )
+        print(
+            "asked host",
+            id,
+            "to move to the server's worker image at its next claim: it",
+            "finishes its",
+            workers_db.running_runs(db.conn, id),
+            "running runs first, and claims no more until it has",
         )
         return 0
     return _usage(String("unknown: morca host ", sub))

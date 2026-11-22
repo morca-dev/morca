@@ -11,9 +11,10 @@
 #   ExecStart, run as it is, is a worker that runs the pool's runs, with
 #   the --set variables of its env file;
 # - launchd: the plist has the same command line;
-# - --container: the docker run (dry run), on the server's image, with the
-#   token file, the env files and the pool's volumes mounted, --restart
-#   always;
+# - --container: the script's docker run (dry run), on the image the
+#   record names (the server's), with the token file, the env files and the
+#   pool's volumes mounted, and the service that runs the script
+#   (tests/host_follow.sh runs it);
 # - with MORCA_REMOTE set, host join still runs here (never sent to the UI);
 # - --uninstall removes what was installed.
 #
@@ -115,7 +116,7 @@ for f in "$unit" "$envf" "$rec"; do [ -f "$f" ] || fail "no $f: $(cat "$t/system
 [ "$(mode "$rec")" = "-rw-------" ] || fail "the record's mode: $(mode "$rec")"
 [ "$(mode "$unit")" = "-rw-r--r--" ] || fail "the unit's mode: $(mode "$unit")"
 grep -q "^Restart=always$" "$unit" && grep -q "^RestartPreventExitStatus=3$" "$unit" || fail "the unit: $(cat "$unit")"
-grep -q "^ExecStart=$PWD/build/morca worker --pool t --remote $base --token-file $t/token --name lab --dir $r/var/lib/morca/t/stage --env-file $envf --env-file $t/bucket.env$" "$unit" \
+grep -q "^ExecStart=$PWD/build/morca worker --pool t --remote $base --token-file $t/token --name lab --dir $r/var/lib/morca/t/stage --env-file $envf --env-file $t/bucket.env --host-service systemd$" "$unit" \
     || fail "the unit's ExecStart: $(grep ExecStart "$unit")"
 grep -q "^MORCA_REMOTE=$base$" "$envf" && grep -q "^FILLWK_HOLD=$hold$" "$envf" || fail "the env file: $(cat "$envf")"
 jq -e --arg u "$unit" '.service == "systemd" and .pool == "t" and .service_file == $u and .name == "lab"' "$rec" > /dev/null \
@@ -163,18 +164,21 @@ echo "ok   launchd: the plist has the same command line, its log under the root"
 join "$base" --pool t --token-file "$t/token" --container --root "$t/c" --name lab --env-file "$t/bucket.env" --dry-run \
     > "$t/container.out" 2>&1 || fail "join --container: $(cat "$t/container.out")"
 [ ! -e "$t/c" ] || fail "a dry run wrote files"
-grep -q "^exec 'docker' 'run' '-d' '--name' 'morca-worker-t' '--restart' 'always' '--env-file' '$t/c/etc/morca/worker-t.env' '--env-file' '$t/bucket.env' '-v' '$t/token:/etc/morca/token:ro' '-v' '$t/c/var/lib/morca/t/stage:/var/lib/morca/stage' '-v' 'census-work:/work' '-v' '/srv/secrets:/etc/orca/secrets:ro' 'ghcr.io/morca-dev/census:9.9.9' 'worker' '--pool' 't' '--remote' '$base' '--token-file' '/etc/morca/token' '--name' 'lab' '--dir' '/var/lib/morca/stage'$" "$t/container.out" \
+grep -q "^    'docker' 'run' '--rm' '--name' 'morca-worker-t' '--env-file' '$t/c/etc/morca/worker-t.env' '--env-file' '$t/bucket.env' '-v' '$t/token:/etc/morca/token:ro' '-v' '$t/c/var/lib/morca/t/stage:/var/lib/morca/stage' '-v' 'census-work:/work' '-v' '/srv/secrets:/etc/orca/secrets:ro' \"\$image\" 'worker' '--pool' 't' '--remote' '$base' '--token-file' '/etc/morca/token' '--name' 'lab' '--dir' '/var/lib/morca/stage' '--host-image' \"\$image\"$" "$t/container.out" \
     || fail "the container's docker run: $(grep docker "$t/container.out")"
+grep -q '"image": "ghcr.io/morca-dev/census:9.9.9"' "$t/container.out" || fail "the record's image: $(grep image "$t/container.out")"
 grep -q "worker-t-container.sh (mode 700)" "$t/container.out" || fail "the script's mode: $(grep '^==' "$t/container.out")"
+grep -q "^ExecStart=/bin/sh $t/c/etc/morca/worker-t-container.sh$\|<string>$t/c/etc/morca/worker-t-container.sh</string>" "$t/container.out" \
+    || fail "the script's service: $(cat "$t/container.out")"
 grep -q "$tok" "$t/container.out" && fail "the token is in the dry run's output"
 join "$base" --pool t --token-file "$t/token" --container --image my/img:1 --root "$t/c" --dry-run > "$t/container2.out" 2>&1 \
     || fail "join --container --image"
-grep -q "'my/img:1' 'worker'" "$t/container2.out" || fail "--image wasn't used"
+grep -q '"image": "my/img:1"' "$t/container2.out" || fail "--image wasn't used"
 grep -q "would run" "$t/container2.out" && fail "a dry run under a root would run something"
 # Without --root, a dry run only says what it would run.
 join "$base" --pool t --token-file "$t/token" --service systemd --dry-run > "$t/dry.out" 2>&1 || fail "dry run"
 grep -q "^would run: systemctl enable morca-worker-t$" "$t/dry.out" || fail "the dry run: $(cat "$t/dry.out")"
-echo "ok   --container: docker run --restart always of the server's image, with the token, env files and the pool's volumes"
+echo "ok   --container: a script, run by a service, that runs the server's image with the token, env files and the pool's volumes"
 
 # With MORCA_REMOTE set (as `morca --remote` commands use it), host join
 # still runs here, and takes the UI from it.

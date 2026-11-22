@@ -89,7 +89,7 @@ one of:
 |---|---|---|
 | systemd (Linux, the default there) | `/etc/systemd/system/morca-worker-<pool>.service`, running this `morca worker` | always, but not after exit 3 (its token refused: `morca host remove`) |
 | launchd (macOS, the default there) | `/Library/LaunchDaemons/dev.morca.worker.<pool>.plist`, its log in `/var/log/morca-worker-<pool>.log` | `KeepAlive`, at most every 30 s |
-| `--container` | `/etc/morca/worker-<pool>-container.sh`, which runs `docker run -d --restart always` of the image (`--image`, else the server's) with the token file mounted read-only, the env files given and the pool's volumes mounted | `--restart always` |
+| `--container` | `/etc/morca/worker-<pool>-container.sh`, which runs `docker run --rm` of the image `host-<pool>.json` names (`--image`, else the server's) with the token file mounted read-only, the env files given and the pool's volumes mounted, and moves it to the server's image after a deploy ([below](#following-the-servers-image)); the systemd unit or launchd job above runs the script (`--service` picks which) | the script starts the container again; its service restarts the script, but not after exit 3 |
 
 Beside it, `/etc/morca/worker-<pool>.env` (mode 600) has the worker's own
 settings: `MORCA_REMOTE` and each `--set NAME=value` (`MORCA_RESERVE_CPUS=2`,
@@ -110,7 +110,7 @@ The join is a row of `orca.audit` (user `worker:<label>`, action
 | `--token-file` | (required) | the token, on its first line; mode 600 |
 | `--name` | the host name | how Ops names it |
 | `--service` | systemd on Linux, launchd on macOS | |
-| `--container` | | Docker instead of a service |
+| `--container` | | Docker, its script run by the service |
 | `--image` | the server's `MORCA_WORKER_IMAGE` | the container's image |
 | `--env-file` | none | the user's env files, read in place; mode 600 (repeat it) |
 | `--set NAME=value` | none | written to its own env file (repeat it) |
@@ -125,8 +125,39 @@ Run it again to change any of it: the files are written again and the
 service restarted. `morca host join --uninstall --pool bgent` stops the
 service (or removes the container) and deletes what `host-<pool>.json`
 lists. The token stays live on the server until `morca host remove`.
-Keeping a joined machine on the server's tag after a deploy is still by
-hand (`--container`: run `morca host join` again, or its script).
+
+### Following the server's image
+
+Each claim's answer has the server's worker image (`worker_image`, its
+`MORCA_WORKER_IMAGE`), and the worker says what it makes of it
+(`morca._internal.host_follow`):
+
+- **In a container** (its worker runs with `--host-image <image>`): when
+  the server's image isn't the one it runs, it **drains itself**: it claims
+  nothing new and finishes the runs it has (a deploy never stops a run).
+  Once idle it writes the image to `.host-upgrade` in its stage directory
+  and exits 4. The script then `docker pull`s that image, writes it into
+  `host-<pool>.json` and starts the container on it.
+- **If the pull fails** (the registry wants a login the machine hasn't:
+  `docker login` there, which keeps it as docker always does; morca writes
+  no credential anywhere), or the new container exits within 60 s (an image
+  whose morca doesn't know `--host-image`, say), the script writes why to
+  `.host-upgrade-failed` and starts the old image again. Its worker logs
+  why, claims runs again, and doesn't try that image again until `morca
+  host upgrade` asks it to or the server's image moves on. A worker started
+  again on its old image with `.host-upgrade` still there (nothing
+  replaced it) counts that as a failure too, so a host never drains in a
+  loop.
+- **As a service** (systemd or launchd, `--host-service`): a binary can't
+  swap itself. When the server's image isn't its own (`MORCA_IMAGE`, none
+  for a plain binary) it logs that once, reports `needs-upgrade`, and keeps
+  claiming runs; install the server's version and restart the service by
+  hand.
+
+A worker of a version before this, or a UI with no `MORCA_WORKER_IMAGE`
+(or of a version before this), changes nothing: the host keeps its image
+and claims runs. A worker the pool autoscaler made doesn't follow either:
+the autoscaler replaces it ([Deploying](#a-worker-on-another-machine)).
 
 ## Fills on a pool
 
@@ -256,10 +287,11 @@ On the server, a host is a worker token's machine, whether it joined by
 hand or the pool autoscaler made it:
 
 ```sh
-morca host list [--pool bgent]   # id, pool, name, state, image, CPUs, memory, runs, last seen
+morca host list [--pool bgent]   # id, pool, name, state, image, server_image, upgrade, CPUs, memory, runs, last seen
 morca host drain 3               # finishes its runs, claims no more
 morca host undrain 3             # claims again
 morca host remove 3 [--force]    # revokes its token: its worker exits
+morca host upgrade 3             # a --container host moves to the server's image now
 ```
 
 - **Drain** (maintenance, a laptop going to sleep, before a restart): the
@@ -271,11 +303,22 @@ morca host remove 3 [--force]    # revokes its token: its worker exits
   claim and exits (code 3). A host with runs running is refused, saying to
   drain it first; with `--force` its runs are queued again for the pool as
   any lost worker's are.
+- **Upgrade** asks a host `morca host join --container` installed to move
+  to the server's image at its next claim, also one it failed to move to
+  before ([Following the server's image](#following-the-servers-image)): it
+  drains and is replaced once idle, as after a deploy. A service, or a
+  worker that reports no image of its own, is refused, saying why.
 - Each is a row of `orca.audit` (`host drain`, `host undrain`, `host
-  remove`, source `local`), as `morca worker-token` writes.
+  remove`, `host upgrade`, source `local`), as `morca worker-token` writes.
 
 The `state` is `live`, `draining`, `not seen` (silent for
-`MORCA_STALE_SECONDS`), `revoked` or `expired`.
+`MORCA_STALE_SECONDS`), `revoked` or `expired`. `image` is the image its
+container runs, else the worker's `MORCA_IMAGE`; `server_image` the
+server's worker image as the host last heard it (else this shell's
+`MORCA_WORKER_IMAGE`); `upgrade` what the host says of it: `current`,
+`draining` (to move), `failed` (it runs the old image and claims runs), or
+`needs-upgrade` (a service); `-` for a worker that doesn't say. `/api/workers`
+has them as `host_image` and `host_upgrade` (`orca.workers`, migration 69).
 
 ## Running a worker
 
@@ -296,6 +339,8 @@ MORCA_WAREHOUSE=s3://... MORCA_LOGS=s3://... MORCA_SECRET_FETCH=/etc/orca/fetch-
 | `--image` | `MORCA_IMAGE` | the worker's version (below) |
 | `--name` | the host name | how Ops and the run's page name it |
 | `--env-file` | none | `NAME=value` lines (as Docker's `--env-file`), read first; a variable already set wins (repeat it) |
+| `--host-image` | none | the image its container runs: it follows the server's ([`morca host join --container`](#following-the-servers-image) passes it) |
+| `--host-service` | none | `systemd` or `launchd`: it reports when the server's image moves on (`morca host join` passes it) |
 
 A worker with `MORCA_DATABASE_URL` set refuses to start.
 
@@ -381,11 +426,16 @@ docker run -d --name orca-worker --restart always --env-file worker.env \
   Ops > Pools shows its heartbeat.
 
 **Deploying.** The worker runs the code of its own image, so keep it on
-the server's tag: deploy the server first (`deploy.sh <tag>`), then
-restart the worker on the same tag (`docker rm -f orca-worker`, then the
-`docker run` above with the new tag). In between, a worker on the old tag
-runs the old code, unless the pipelines are registered with `--image`: then
-it is given nothing until it matches.
+the server's tag. A machine the pool autoscaler made is drained and
+replaced once idle, and one joined with `morca host join --container`
+follows by itself: after `deploy.sh <tag>` it finishes its runs, then its
+script starts it on the server's new image
+([Following the server's image](#following-the-servers-image)); `morca host
+list` shows where each host is. A worker started by hand, as above, is
+restarted by hand: `docker rm -f orca-worker`, then the `docker run` with
+the new tag (or join it with `morca host join --container` instead). In
+between, a worker on the old tag runs the old code, unless the pipelines
+are registered with `--image`: then it is given nothing until it matches.
 
 ## The run's state over HTTPS
 
