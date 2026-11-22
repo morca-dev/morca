@@ -1031,6 +1031,7 @@ def _floor_raisers() -> List[Int]:
     binaries before it neither read nor write. A registration one of them
     makes leaves `learn_from` and `probe_every` as they were.
     68 (`pool_settings.volumes`, #220) is additive: a column with a
+    68 (`pool_settings.volumes`, #220) is additive: a column with a
     default the binaries before it neither read nor write; a registration
     they make leaves it as it was.
     """
