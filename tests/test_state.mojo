@@ -23,6 +23,7 @@ from morca._internal.pool_config import (
     record_pools,
 )
 from morca._internal.recommend import LEARN_RUNS, expire_raised
+import morca._internal.db.recommend as recommend_db
 from morca._internal.migrations import migration_floor, schema_ahead
 from store_suite import (
     Touching,
@@ -59,9 +60,9 @@ def test_migrate_is_idempotent() raises:
     var db = _db()
     db.migrate()
     assert_equal(
-        _count("SELECT max(version) AS n FROM orca.schema_version"), 65
+        _count("SELECT max(version) AS n FROM orca.schema_version"), 66
     )
-    assert_equal(_count("SELECT count(*) AS n FROM orca.schema_version"), 65)
+    assert_equal(_count("SELECT count(*) AS n FROM orca.schema_version"), 66)
 
 
 def test_each_version_records_its_floor() raises:
@@ -87,7 +88,8 @@ def test_each_version_records_its_floor() raises:
     # (run_members), 55 (fill_max_runs_auto), 56 (runs.batch), 57
     # (orca.dataset_settings), 58 (pool_machines.image, draining), 59
     # (pipelines.retired), 60 (pipelines.priority), 61 (workers' rooms),
-    # 62 (orca.fill_requests) and 63 (concurrency keys) are additive.
+    # 62 (orca.fill_requests), 63 (concurrency keys), 64 (pod_memory_mb), 65
+    # (pool settings) and 66 (offload peaks) are additive.
     assert_equal(migration_floor(41), 24)
     assert_equal(migration_floor(42), 24)
     assert_equal(migration_floor(43), 24)
@@ -111,6 +113,9 @@ def test_each_version_records_its_floor() raises:
     assert_equal(migration_floor(61), 24)
     assert_equal(migration_floor(62), 24)
     assert_equal(migration_floor(63), 24)
+    assert_equal(migration_floor(64), 24)
+    assert_equal(migration_floor(65), 24)
+    assert_equal(migration_floor(66), 24)
 
 
 def test_the_schema_check() raises:
@@ -126,7 +131,7 @@ def test_the_schema_check() raises:
 
 def test_an_older_binary_runs_on_additive_migrations() raises:
     _ = _db()
-    # A binary that knows 30 migrations: 31..65 are additive.
+    # A binary that knows 30 migrations: 31..66 are additive.
     _ = setenv("MORCA_TEST_MIGRATIONS", "30", True)
     try:
         var old = State(getenv("MORCA_DATABASE_URL"))
@@ -134,7 +139,7 @@ def test_an_older_binary_runs_on_additive_migrations() raises:
         # It runs on the schema, and doesn't touch the versions.
         _ = _new_run(old, "a:1")
         assert_equal(
-            _count("SELECT max(version) AS n FROM orca.schema_version"), 65
+            _count("SELECT max(version) AS n FROM orca.schema_version"), 66
         )
         # One that knows 23 doesn't: 24 raised the floor.
         _ = setenv("MORCA_TEST_MIGRATIONS", "23", True)
@@ -165,7 +170,7 @@ def test_floors_are_filled_in_for_an_older_database() raises:
             "SELECT count(*) AS n FROM orca.schema_version WHERE min_binary ="
             " 24"
         ),
-        42,
+        43,
     )
     assert_equal(
         _count(
@@ -214,6 +219,47 @@ def test_an_oom_raise_expires_after_the_learning_window() raises:
     assert_equal(gone[0], "floor")
     assert_equal(_count(floor), 0)
     assert_equal(len(expire_raised(db)), 0)
+
+
+def test_learned_peaks_count_offload() raises:
+    """A run that fit with some of its memory in swap (#282) learns from its
+    peak plus that swap peak, so offload never shrinks its request; one
+    without (null, MORCA_RUN_SWAP_PCT 0) from its peak alone."""
+    var db = _db()
+    db.register("offload", "0x1", "{}")
+    var mb = 1024 * 1024
+    var runs = List[Int]()
+    for i in range(2):
+        var run = db.create_run("offload", "0x1", "2024-01", "manual", "a:1")
+        runs.append(run)
+        _ = db.conn.execute(
+            "UPDATE orca.runs SET status = 'succeeded' WHERE id = $1",
+            Params().int64(Int64(run)),
+        )
+        var step = db.conn.query(
+            (
+                "INSERT INTO orca.steps (run, step, partition, ord, status)"
+                " VALUES ($1, 's', '2024-01', 0, 'succeeded') RETURNING id"
+            ),
+            Params().int64(Int64(run)),
+        )
+        _ = db.conn.execute(
+            (
+                "INSERT INTO orca.attempts (step, attempt, status, host,"
+                " registry_hash, peak_rss_bytes, memory_swap_peak_bytes)"
+                " VALUES ($1, 1, 'succeeded', 'h:1', '0x1', $2, nullif($3,"
+                " -1))"
+            ),
+            Params()
+            .int64(step.row(0).int64("id"))
+            .int64(Int64(512 * mb))
+            .int64(Int64(100 * mb if i == 1 else -1)),
+        )
+    var got = recommend_db.peaks(db.conn, "offload", LEARN_RUNS)
+    assert_equal(len(got), 2)
+    # Newest first: the one that offloaded 100 MB, then the one that didn't.
+    assert_equal(Int(got[0].peak_rss_bytes), 612 * mb)
+    assert_equal(Int(got[1].peak_rss_bytes), 512 * mb)
 
 
 def test_pools_are_recorded_from_the_file() raises:

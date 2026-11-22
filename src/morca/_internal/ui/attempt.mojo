@@ -10,7 +10,12 @@ from morca._internal.logs import read_location
 from morca._internal.state import State
 from morca._internal.ui.layout import LIVE_EVERY, act_button, page_html
 from morca._internal.ui.errors import not_found
-from morca._internal.ui.parts import code_link, limit_facts, usage_facts
+from morca._internal.ui.parts import (
+    code_link,
+    limit_facts,
+    offload_facts,
+    usage_facts,
+)
 from morca._internal.usage import bytes_text, usage_json
 from morca._internal.views.code import CodeLinks, code_of
 from morca._internal.views.runs import (
@@ -77,6 +82,7 @@ def _attempt_facts(
     h.raw("</dd>")
     usage_facts(h, a.usage, live_status(a.status))
     limit_facts(h, a.limit_mb, 0, a.grant_mb)
+    offload_facts(h, a.swap_bytes, a.zswapped_bytes)
     h.raw("<dt>Log file</dt><dd><code>")
     h.text(a.log)
     h.raw("</code></dd>")
@@ -161,6 +167,10 @@ def attempt(mut db: State, run: Int, id: Int) raises -> Page:
         String(a.limit_mb) if a.limit_mb > 0 else String("null"),
         ', "grant_memory_mb": ',
         String(a.grant_mb) if a.grant_mb > 0 else String("null"),
+        ', "memory_swap_peak_bytes": ',
+        String(a.swap_bytes) if a.swap_bytes >= 0 else String("null"),
+        ', "memory_zswapped_peak_bytes": ',
+        String(a.zswapped_bytes) if a.zswapped_bytes >= 0 else String("null"),
         '}, "text": ',
         quote(log[0]),
         ', "truncated": ',

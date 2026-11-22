@@ -198,6 +198,11 @@ struct StepRow(Copyable, Movable):
     """The latest attempt's memory limit (`morca._internal.cgroup`); 0 for none."""
     var grant_mb: Int
     """Its start's memory grant (`morca._internal.resources`); 0 for none."""
+    var swap_bytes: Int
+    """The latest attempt's swap peak (`morca._internal.offload`); -1 for
+    unknown."""
+    var zswapped_bytes: Int
+    """Of it, the most in zswap at once; -1 for unknown."""
 
 
 def int_or_zero(s: String) -> Int:
@@ -334,6 +339,8 @@ def step_rows(mut db: State, run: Int) raises -> List[StepRow]:
                 Usage(s.peak, s.cpu, s.cpus),
                 s.limit_mb,
                 s.grant_mb,
+                s.swap,
+                s.zswapped,
             )
         )
     return out^
@@ -837,6 +844,10 @@ struct AttemptRow(Copyable, Movable):
     """Its memory limit (`morca._internal.cgroup`); 0 for none."""
     var grant_mb: Int
     """Its start's memory grant (`morca._internal.resources`); 0 for none."""
+    var swap_bytes: Int
+    """Its swap peak (`morca._internal.offload`); -1 for unknown."""
+    var zswapped_bytes: Int
+    """Of it, the most in zswap at once; -1 for unknown."""
 
 
 def _attempt_rows(run: Int, rs: List[AttemptRecord]) -> List[AttemptRow]:
@@ -859,6 +870,8 @@ def _attempt_rows(run: Int, rs: List[AttemptRecord]) -> List[AttemptRow]:
                 Usage(r.peak, r.cpu, r.cpus),
                 r.limit_mb,
                 r.grant_mb,
+                r.swap,
+                r.zswapped,
             )
         )
     return out^

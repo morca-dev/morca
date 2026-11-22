@@ -10,6 +10,7 @@ struct RunPeaks(Copyable, Movable):
     cores; -1 for what wasn't measured."""
 
     var peak_rss_bytes: Float64
+    """With its swap peak added (`peaks`)."""
     var peak_cpus: Float64
 
 
@@ -36,11 +37,15 @@ def peaks(
     mut conn: Connection, pipeline: String, runs: Int
 ) raises -> List[RunPeaks]:
     """The peaks of `pipeline`'s last `runs` succeeded runs that measured
-    memory, newest first."""
+    memory, newest first. An attempt's memory is its peak plus the most of
+    it that was in swap at once (#282, `morca._internal.offload`): what it
+    needed without offload, at most, so offload never shrinks a learned
+    request."""
     var out = List[RunPeaks]()
     for r in conn.query(
         (
-            "SELECT max(a.peak_rss_bytes)::float8 AS peak,"
+            "SELECT max(a.peak_rss_bytes + coalesce(a.memory_swap_peak_bytes,"
+            " 0))::float8 AS peak,"
             " coalesce(max(a.peak_cpus), -1)::float8 AS cpus FROM orca.runs r"
             " JOIN orca.steps s ON s.run = r.id JOIN orca.attempts a ON a.step"
             " = s.id WHERE r.pipeline = $1 AND r.status = 'succeeded' GROUP BY"

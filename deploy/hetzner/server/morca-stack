@@ -156,6 +156,11 @@ OVERLAY=/etc/orca/overlay/morca.overlay.toml
 # gives its own.
 HOST_CGROUP=${MORCA_HOST_CGROUP:-/sys/fs/cgroup}
 MEMINFO=${MORCA_MEMINFO:-/proc/meminfo}
+# The host's zswap, its swap and where a setting is kept for each boot
+# (zswap_host); a trial run gives its own.
+ZSWAP_SYS=${MORCA_ZSWAP_SYS:-/sys/module/zswap/parameters}
+PROC_SWAPS=${MORCA_PROC_SWAPS:-/proc/swaps}
+TMPFILES=${MORCA_TMPFILES:-/etc/tmpfiles.d}
 
 die() {
     echo "morca-stack: $*" >&2
@@ -309,7 +314,7 @@ cmd_configure() {
         k=${kv%%=*}
         v=${kv#*=}
         case "$k" in
-            MORCA_IMAGE | MORCA_TAG | CLOUDFLARED_IMAGE | BUCKET | BACKUP_KEEP | GHCR_USER | CGROUPS | HEALTH_TIMEOUT | OVERLAP | DRAIN_SECONDS | HANDOVER_WAIT_SECONDS) ;;
+            MORCA_IMAGE | MORCA_TAG | CLOUDFLARED_IMAGE | BUCKET | BACKUP_KEEP | GHCR_USER | CGROUPS | HEALTH_TIMEOUT | OVERLAP | DRAIN_SECONDS | HANDOVER_WAIT_SECONDS | ZSWAP) ;;
             *) die "unknown setting $k" ;;
         esac
         case "$k=$v" in
@@ -318,8 +323,10 @@ cmd_configure() {
             DRAIN_SECONDS=*) drain_ok "$v" || die "DRAIN_SECONDS is a whole number of seconds above 0, not '$v'" ;;
             HANDOVER_WAIT_SECONDS=) ;;
             HANDOVER_WAIT_SECONDS=*) drain_ok "$v" || die "HANDOVER_WAIT_SECONDS is a whole number of seconds above 0, not '$v'" ;;
+            ZSWAP=) ;;
+            ZSWAP=*) zswap_ok "$v" || die "ZSWAP is a whole percent of the server's memory from 0 to 50 (0: zswap off), not '$v'" ;;
         esac
-        [ "$k=" = "$kv" ] && { [ "$k" = GHCR_USER ] || [ "$k" = HANDOVER_WAIT_SECONDS ]; } || safe "$v"
+        [ "$k=" = "$kv" ] && { [ "$k" = GHCR_USER ] || [ "$k" = HANDOVER_WAIT_SECONDS ] || [ "$k" = ZSWAP ]; } || safe "$v"
         [ "$k" != CGROUPS ] || [ "$v" = 0 ] || [ "$v" = 1 ] || die "CGROUPS is 1 (the default) or 0, not $v"
         old=$(conf_get "$k")
         if [ "$keep" = 1 ] && [ -n "$old" ]; then
@@ -801,6 +808,57 @@ cgroups_mode() {
     fi
 }
 
+zswap_ok() { # VALUE: a whole percent from 0 to 50
+    case "$1" in "" | *[!0-9]* | ???*) return 1 ;; esac
+    [ "$1" -le 50 ]
+}
+
+# zswap_host: the host's zswap as stack.conf's ZSWAP says (#282,
+# docs/hetzner.md#offload-to-zswap), for the runs that offload to it
+# (MORCA_RUN_SWAP_PCT): N (1 to 50) turns it on, its compressed pool at
+# most N% of memory (max_pool_percent), now and at each boot (a
+# systemd-tmpfiles file); 0 turns it off. Unset, a zswap this turned on
+# is turned off, and a host it never touched is left as it is. Says what
+# it changes; warns, without stopping the apply, where the kernel has no
+# zswap or the host no swap for it to front.
+zswap_host() {
+    z=$(conf_get ZSWAP)
+    zf=$TMPFILES/morca-zswap.conf
+    if [ -z "$z" ]; then
+        [ -f "$zf" ] || return 0
+        z=0
+    fi
+    if [ ! -f "$ZSWAP_SYS/enabled" ]; then
+        echo "morca-stack: warning: ZSWAP=$z, but this kernel has no zswap ($ZSWAP_SYS)"
+        return 0
+    fi
+    z_on=$(cat "$ZSWAP_SYS/enabled" 2> /dev/null) || z_on=
+    if [ "$z" = 0 ]; then
+        rm -f "$zf"
+        [ "$z_on" = Y ] || return 0
+        if echo N > "$ZSWAP_SYS/enabled"; then
+            echo "morca-stack: zswap off (ZSWAP=$(conf_get ZSWAP))"
+        else
+            echo "morca-stack: warning: can't turn zswap off ($ZSWAP_SYS/enabled)"
+        fi
+        return 0
+    fi
+    mkdir -p "$TMPFILES"
+    printf '# morca-stack (ZSWAP in stack.conf, docs/hetzner.md#offload-to-zswap)\nw %s/max_pool_percent - - - - %s\nw %s/enabled - - - - Y\n' \
+        "$ZSWAP_SYS" "$z" "$ZSWAP_SYS" > "$zf.new"
+    if cmp -s "$zf.new" "$zf"; then rm -f "$zf.new"; else mv "$zf.new" "$zf"; fi
+    z_pool=$(cat "$ZSWAP_SYS/max_pool_percent" 2> /dev/null) || z_pool=
+    if [ "$z_on" != Y ] || [ "$z_pool" != "$z" ]; then
+        if echo "$z" > "$ZSWAP_SYS/max_pool_percent" && echo Y > "$ZSWAP_SYS/enabled"; then
+            echo "morca-stack: zswap on, its pool at most $z% of memory (ZSWAP=$z; it was ${z_on:-?}, ${z_pool:-?}%)"
+        else
+            echo "morca-stack: warning: can't turn zswap on ($ZSWAP_SYS)"
+        fi
+    fi
+    [ -n "$(awk 'NR > 1' "$PROC_SWAPS" 2> /dev/null)" ] \
+        || echo "morca-stack: warning: ZSWAP=$z, but this host has no swap ($PROC_SWAPS), which zswap needs behind it: nothing is offloaded"
+}
+
 # The pipelines whose runs here peak at more than a cgroup would let them
 # have: the 95th percentile of the peaks of their last 20 successful runs
 # placed here (at least 3, as morca.recommend counts them), in MB, and
@@ -1273,6 +1331,7 @@ cmd_apply() {
         : > "$PLAN"
         containers plan_one
         cgroup_notes
+        zswap_host
         # Only the scheduler's restart kills runs (not an overlap's).
         if grep -q '^scheduler replace ' "$PLAN" && [ "$force" = 0 ] && [ "$overlap" = 0 ] && [ "$(running_runs)" -gt 0 ]; then
             why=$(plan_why scheduler)

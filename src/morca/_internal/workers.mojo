@@ -800,6 +800,17 @@ def _contained_exit(mut db: State, w: WorkerAuth, v: Value) raises:
         _num(v, "memory_stall_full_ms") if String("memory_stall_full_ms")
         in v else -1
     )
+    # Offload peaks (#282) from a worker that measures them.
+    var swap = (
+        _num(v, "memory_swap_peak_bytes") if String("memory_swap_peak_bytes")
+        in v else -1
+    )
+    var zswapped = (
+        _num(v, "memory_zswapped_peak_bytes") if String(
+            "memory_zswapped_peak_bytes"
+        )
+        in v else -1
+    )
     workers_db.set_attempt_limits(
         db.conn,
         run,
@@ -808,6 +819,8 @@ def _contained_exit(mut db: State, w: WorkerAuth, v: Value) raises:
         r.grant_mb,
         stall,
         stall_full,
+        swap,
+        zswapped,
     )
     if _num(v, "oom") != 1 or not r.running:
         return

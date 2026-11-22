@@ -302,6 +302,21 @@ env = { DISTA_WORKER_SLOTS = "auto", GHARCHIVE_PARALLEL = "auto" }
   request is limited to `MORCA_RUN_MEMORY_MB` (default what the host can
   grant). Set the scheduler's and the worker's environment; the UI reads
   `MORCA_RUN_MEMORY_GROWTH` for workers' runs.
+- **Offload to swap** (#282, `MORCA_RUN_SWAP_PCT`, a whole percent from 0
+  to 100; default 0, no swap): each run's cgroup may keep that percent of
+  its limit in swap (`memory.swap.max`). A run a little past its grant
+  whose memory is anonymous then pushes its coldest pages out, to zswap's
+  compressed memory first where the host has it on
+  ([docs/hetzner.md](hetzner.md#offload-to-zswap)), and slows down instead
+  of being held at its limit and killed; one that needs more than that is
+  held, or killed at `memory.max`, as before. A value that isn't a whole
+  number from 0 to 100 stops the scheduler (or worker) at its start. Each
+  attempt records the most of its memory in swap at once and of that in
+  zswap (`memory_swap_peak_bytes`, `memory_zswapped_peak_bytes`), and a
+  [learned request](#learned-requests) counts that swap peak on top of the
+  memory peak, so offload never makes a learned request smaller. Offload
+  needs swap on the host: without any, the setting does nothing, and the
+  scheduler says so on its log (`morca: runs' swap: ...`).
 
 ### On Kubernetes
 
@@ -384,7 +399,10 @@ run uses](ui.md#what-a-run-uses)), morca works out the request they suggest
 peak memory plus 15%, rounded up to a quarter GB and never below what an
 out-of-memory kill raised the pipeline to; CPUs are the 90th percentile of
 their peak cores, rounded up, at least 1 (none on macOS, which doesn't
-measure peak cores). Both are clamped to the declared `cpus` and
+measure peak cores). A run that offloaded some of its memory to swap
+([Offload to swap](#requests-and-grants), `MORCA_RUN_SWAP_PCT`) counts its
+peak plus the most it had in swap at once: what it needed without offload,
+at most, so offload never makes a learned request smaller. Both are clamped to the declared `cpus` and
 `memory_gb`, saying so, and with fewer than 3 such runs there's none. The
 pipeline's Resources card shows it beside **Requested**, `morca config show`
 prints it after the settings (`learned from 20 runs: 3.25 GB, 2 CPUs`), and

@@ -535,15 +535,19 @@ def set_attempt_limits(
     grant_mb: Int64,
     stall_ms: Int64,
     stall_full_ms: Int64,
+    swap_peak_bytes: Int64 = -1,
+    zswapped_peak_bytes: Int64 = -1,
 ) raises:
     """Keeps, on `run`'s attempts by process `pid` that have none yet, the
-    cgroup's memory limit, the grant, and the stall times (-1 for
-    unmeasured)."""
+    cgroup's memory limit, the grant, the stall times and the offload peaks
+    (#282; -1 for unmeasured)."""
     _ = conn.execute(
         (
             "UPDATE orca.attempts a SET memory_limit_mb = $3, grant_memory_mb"
             " = nullif($4, 0), memory_stall_ms = nullif($5, -1),"
-            " memory_stall_full_ms = nullif($6, -1) FROM orca.steps st WHERE"
+            " memory_stall_full_ms = nullif($6, -1), memory_swap_peak_bytes ="
+            " nullif($7, -1), memory_zswapped_peak_bytes = nullif($8, -1)"
+            " FROM orca.steps st WHERE"
             " st.id = a.step AND st.run = $1 AND a.host LIKE '%:' || $2 AND"
             " a.memory_limit_mb IS NULL"
         ),
@@ -553,7 +557,9 @@ def set_attempt_limits(
         .int64(Int64(limit_mb))
         .int64(grant_mb)
         .int64(stall_ms)
-        .int64(stall_full_ms),
+        .int64(stall_full_ms)
+        .int64(swap_peak_bytes)
+        .int64(zswapped_peak_bytes),
     )
 
 

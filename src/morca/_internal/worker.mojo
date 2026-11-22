@@ -86,6 +86,7 @@ from morca._internal.cgroup import (
     own_limit_pressure,
 )
 from morca._internal.cgroup import put as put_cgroup
+from morca._internal.offload import OffloadWatch
 from morca._internal.cgroup import start_limit_mb
 from morca._internal.run_cpu import CpuKnobs
 from morca._internal.control import (
@@ -196,6 +197,8 @@ struct Worker(Movable):
     """The runs' processes' cgroups, by pid."""
     var held: HeldWatch
     """Since when they have been held at their memory limit."""
+    var offload: OffloadWatch
+    """The most of each one's memory in swap so far (#282)."""
     var stalled: Dict[Int, Bool]
     """Those killed for being held there: out of memory at the reap."""
     var unswept: List[String]
@@ -242,6 +245,7 @@ struct Worker(Movable):
         self.cgroups = Cgroups.off("off: not serving")
         self.contained = Dict[Int, Contained]()
         self.held = HeldWatch()
+        self.offload = OffloadWatch()
         self.stalled = Dict[Int, Bool]()
         self.unswept = List[String]()
         self.room_mb = 0
@@ -531,6 +535,12 @@ struct Worker(Movable):
             body = body^.int("memory_stall_ms", Int64(stall[0])).int(
                 "memory_stall_full_ms", Int64(stall[1])
             )
+            var off = self.offload.take(
+                pid, cg.path, self.cgroups.knobs.swap_pct
+            )
+            body = body^.int(
+                "memory_swap_peak_bytes", Int64(off.swap_bytes)
+            ).int("memory_zswapped_peak_bytes", Int64(off.zswapped_bytes))
             body = body^.int("memory_limit_mb", Int64(cg.limit_mb)).int(
                 "memory_max_mb", Int64(cg.kill_mb)
             ).int("oom", Int64(1 if oom else 0)).int(
@@ -638,6 +648,7 @@ struct Worker(Movable):
             self.cgroups.cpu_text(),
             flush=True,
         )
+        print("morca worker: runs' swap:", self.cgroups.swap_text(), flush=True)
         self.unswept = self.cgroups.stale()
         var said = String()
         while True:
@@ -653,6 +664,7 @@ struct Worker(Movable):
                         left.append(path)
                 self.unswept = left^
             self._sample()
+            self.offload.sample(self.contained, self.cgroups.knobs.swap_pct)
             var held_s = self.cgroups.knobs.held_s
             for pid in self.held.due(self.contained, held_s):
                 self.stalled[pid] = True

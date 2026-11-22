@@ -930,6 +930,21 @@ def _migrations() -> List[List[String]]:
             ),
             "ALTER TABLE orca.workers ADD COLUMN draining timestamptz",
         ],
+        # How much of an attempt's run's memory went to swap (#282,
+        # `morca._internal.offload`): the most in swap at once, and of it in
+        # zswap, in bytes; null where it had no cgroup or MORCA_RUN_SWAP_PCT
+        # was 0. Additive: nullable columns an older binary neither reads
+        # nor writes.
+        [
+            (
+                "ALTER TABLE orca.attempts ADD COLUMN memory_swap_peak_bytes"
+                " bigint"
+            ),
+            (
+                "ALTER TABLE orca.attempts ADD COLUMN"
+                " memory_zswapped_peak_bytes bigint"
+            ),
+        ],
     ]
 
 
@@ -988,6 +1003,10 @@ def _floor_raisers() -> List[Int]:
     table and a nullable column the binaries before it neither read nor
     write. A worker one of them answers isn't given its pool's settings,
     and claims runs though it was asked to drain.
+    66 (`attempts.memory_swap_peak_bytes`, `memory_zswapped_peak_bytes`,
+    #282) is additive: nullable columns the binaries before it neither read
+    nor write. An attempt one of them reaps records no offload, and a
+    learned request counts its memory peak alone, as before.
     """
     return [1, 24]
 

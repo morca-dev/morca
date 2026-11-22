@@ -16,8 +16,14 @@ run starts is in it from its first instruction.
   reclaims its memory before anything dies.
 - `memory.max` is the limit plus `MORCA_RUN_MEMORY_MARGIN` percent (25):
   past it the kernel kills the run's processes, all of them
-  (`memory.oom.group`), and none of anything else's. `memory.swap.max` is 0,
-  so the limit is one of memory, not of memory and swap.
+  (`memory.oom.group`), and none of anything else's.
+- `memory.swap.max` is `MORCA_RUN_SWAP_PCT` (0) percent of the limit
+  (#282): at 0 the limit is one of memory, not of memory and swap. Over 0,
+  a run past its limit whose memory is anonymous pushes its coldest pages
+  to swap (zswap's compressed pool first, where the host has it on) and
+  slows down, instead of being held there until it's killed; one that
+  needs more than that is held, or killed at `memory.max`, as before.
+  The peak it offloaded goes on its attempts (`morca._internal.offload`).
 - **Held at the limit.** A run past `memory.high` whose memory the kernel
   can't reclaim (anonymous, and no swap) is throttled, not killed: each
   allocation waits, so it may creep towards `memory.max` for hours.
@@ -81,6 +87,14 @@ def max_mb(limit_mb: Int, margin_pct: Int) -> Int:
     """`memory.max` for a limit of `limit_mb`: the margin above it, rounded
     up to a whole MB."""
     return limit_mb + (limit_mb * margin_pct + 99) // 100
+
+
+def swap_max_mb(limit_mb: Int, swap_pct: Int) -> Int:
+    """`memory.swap.max` for a limit of `limit_mb`: `swap_pct` percent of
+    it, rounded up to a whole MB; 0 for none."""
+    if swap_pct <= 0:
+        return 0
+    return (limit_mb * swap_pct + 99) // 100
 
 
 def raised_mb(limit_mb: Int, growth_pct: Int, ceiling_mb: Int) -> Int:
@@ -290,6 +304,28 @@ def owner_of(name: String) -> Int:
         return -1
 
 
+def swap_note(pct: Int, proc_swaps: String, zswap: String) -> String:
+    """What `MORCA_RUN_SWAP_PCT` (`pct`, over 0) gives runs on a host whose
+    `/proc/swaps` and zswap's `enabled` (`Y`, `N`, empty: unknown) are
+    these."""
+    var t = String(
+        "memory.swap.max at ",
+        pct,
+        "% of each run's limit (MORCA_RUN_SWAP_PCT)",
+    )
+    var devices = 0
+    for line in proc_swaps.splitlines():
+        if line.strip() and not line.startswith("Filename"):
+            devices += 1
+    if devices == 0:
+        t.write("; this host has no swap, so nothing is offloaded")
+    elif zswap == "Y":
+        t.write(", zswap on")
+    elif zswap == "N":
+        t.write(", zswap off: offloaded pages go to swap uncompressed")
+    return t^
+
+
 def _cstr(s: String) -> List[UInt8]:
     var b = List[UInt8](capacity=s.byte_length() + 1)
     for c in s.as_bytes():
@@ -352,6 +388,20 @@ def growth_pct_of(s: String) raises -> Int:
     )
 
 
+def swap_pct_of(s: String) raises -> Int:
+    """`MORCA_RUN_SWAP_PCT`: a whole percent of a run's limit, 0 to 100."""
+    try:
+        var n = Int(s)
+        if n >= 0 and n <= 100:
+            return n
+    except:
+        pass
+    raise Error(
+        "morca: MORCA_RUN_SWAP_PCT must be a whole percent from 0 to 100, not ",
+        s,
+    )
+
+
 @fieldwise_init
 struct MemoryKnobs(ImplicitlyCopyable, Movable):
     """The scheduler's (or worker's) settings for its runs' limits."""
@@ -368,15 +418,20 @@ struct MemoryKnobs(ImplicitlyCopyable, Movable):
     var held_s: Int
     """`MORCA_RUN_MEMORY_HELD_SECONDS` (120): how long a run may be held at
     its limit (`held`) before it's killed as out of memory; 0: never."""
+    var swap_pct: Int
+    """`MORCA_RUN_SWAP_PCT` (0): `memory.swap.max` this many percent of the
+    limit (#282); 0: no swap."""
 
     @staticmethod
     def from_env() raises -> MemoryKnobs:
         var g = getenv("MORCA_RUN_MEMORY_GROWTH")
+        var sw = getenv("MORCA_RUN_SWAP_PCT")
         return MemoryKnobs(
             _env_int("MORCA_RUN_MEMORY_MB", 0, 0),
             _env_int("MORCA_RUN_MEMORY_MARGIN", 25, 0),
             growth_pct_of(g) if g else 150,
             _env_int("MORCA_RUN_MEMORY_HELD_SECONDS", 120, 0),
+            swap_pct_of(sw) if sw else 0,
         )
 
 
@@ -483,7 +538,7 @@ struct Cgroups(Copyable, Movable):
 
     @staticmethod
     def off(why: String) -> Cgroups:
-        return Cgroups(String(), why, MemoryKnobs(0, 25, 150, 120))
+        return Cgroups(String(), why, MemoryKnobs(0, 25, 150, 120, 0))
 
     def on(self) -> Bool:
         return self.base != ""
@@ -526,6 +581,22 @@ struct Cgroups(Copyable, Movable):
                 "nice ", self.cpu_knobs.nice, " (MORCA_RUN_NICE)", why
             )
         return String("not lowered: MORCA_RUN_NICE=0", why)
+
+    def swap_text(self) -> String:
+        """How much of this process's runs' memory may go to swap, and
+        whether this host has swap and zswap to take it, for the log."""
+        if not self.on():
+            return "none (no run cgroups)"
+        if self.knobs.swap_pct <= 0:
+            return (
+                "none: memory.swap.max 0 in each run's cgroup"
+                " (MORCA_RUN_SWAP_PCT=0)"
+            )
+        return swap_note(
+            self.knobs.swap_pct,
+            _read("/proc/swaps"),
+            String(_read("/sys/module/zswap/parameters/enabled").strip()),
+        )
 
     @staticmethod
     def _setup() -> Cgroups:
@@ -629,7 +700,7 @@ struct Cgroups(Copyable, Movable):
         return Cgroups(
             base,
             String("on: runs' cgroups go in ", base),
-            MemoryKnobs(0, 25, 150, 120),
+            MemoryKnobs(0, 25, 150, 120, 0),
             cpu,
         )
 
@@ -656,7 +727,10 @@ struct Cgroups(Copyable, Movable):
             raise Error("can't set memory.high in ", path)
         _ = put(String(path, "/memory.oom.group"), "1")
         if exists(String(path, "/memory.swap.max")):
-            _ = put(String(path, "/memory.swap.max"), "0")
+            var swap = swap_max_mb(limit_mb, self.knobs.swap_pct)
+            if not put(String(path, "/memory.swap.max"), String(swap * mb)):
+                if swap > 0:
+                    raise Error("can't set memory.swap.max in ", path)
         if self.cpu:
             if not put(
                 String(path, "/cpu.weight"), String(self.cpu_knobs.weight)
