@@ -1,1 +1,0 @@
-- **Self-hosted pools**: a `[pools.<name>]` without a `provider` is a pool whose machines join by hand, any pool can give its workers `max_runs`, `env` and `secrets`, and `morca host list|drain|undrain|remove` drains and removes a pool's machines. (#587)
