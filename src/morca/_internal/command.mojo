@@ -435,6 +435,11 @@ def _notify(args: List[String]) raises -> Int:
 
 
 def _command(args: List[String], target: String) raises -> Int:
+    if args[1] == "host" and len(args) >= 3 and args[2] == "join":
+        # On the machine joining, with no database (morca.host_join), and
+        # first: with --remote or MORCA_REMOTE set it's still this
+        # machine's, never a `morca host` sent to the UI.
+        return host_join_command(args)
     if args[1] == "login":
         return login_command(args, target)
     if args[1] == "logout":
@@ -462,9 +467,6 @@ def _command(args: List[String], target: String) raises -> Int:
     if args[1] == "worker":
         # Talks only to the UI's API, with no database (morca.worker).
         return worker_command(args, target)
-    if args[1] == "host" and len(args) >= 3 and args[2] == "join":
-        # On the machine joining, with no database (morca.host_join).
-        return host_join_command(args)
     if args[1] == "config" and len(args) >= 3 and args[2] == "check":
         # A file only, for a project's CI: no database.
         return _config_check(args)

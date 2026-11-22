@@ -14,6 +14,7 @@
 # - --container: the docker run (dry run), on the server's image, with the
 #   token file, the env files and the pool's volumes mounted, --restart
 #   always;
+# - with MORCA_REMOTE set, host join still runs here (never sent to the UI);
 # - --uninstall removes what was installed.
 #
 # Needs MORCA_DATABASE_URL (pixi run test-host-join starts a throwaway
@@ -174,6 +175,13 @@ grep -q "would run" "$t/container2.out" && fail "a dry run under a root would ru
 join "$base" --pool t --token-file "$t/token" --service systemd --dry-run > "$t/dry.out" 2>&1 || fail "dry run"
 grep -q "^would run: systemctl enable morca-worker-t$" "$t/dry.out" || fail "the dry run: $(cat "$t/dry.out")"
 echo "ok   --container: docker run --restart always of the server's image, with the token, env files and the pool's volumes"
+
+# With MORCA_REMOTE set (as `morca --remote` commands use it), host join
+# still runs here, and takes the UI from it.
+MORCA_REMOTE="$base" join --pool t --token-file "$t/token" --service systemd --dry-run > "$t/remote.out" 2>&1 \
+    || fail "host join with MORCA_REMOTE set: $(cat "$t/remote.out")"
+grep -q "^ExecStart=.* worker --pool t --remote $base " "$t/remote.out" || fail "with MORCA_REMOTE: $(cat "$t/remote.out")"
+echo "ok   with MORCA_REMOTE set, host join --dry-run runs on this machine"
 
 # --- --uninstall ---
 join --uninstall --pool t --root "$r" > "$t/un.out" 2>&1 || fail "uninstall: $(cat "$t/un.out")"
