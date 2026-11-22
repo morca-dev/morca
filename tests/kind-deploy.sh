@@ -183,6 +183,9 @@ has "deploy.sh: check: all ok"
 ! grep -q "deploy.sh: paused" "$log" || fail "the overlapping deploy paused pipelines"
 until_true "SELECT status = 'succeeded' FROM orca.runs WHERE id = $run1" 120
 until_true "SELECT status IN ('running', 'succeeded') FROM orca.runs WHERE id = $run2" 120
+# Its version is written by the run itself once its pod is up, after the
+# scheduler has marked it running (#582).
+until_true "SELECT version IS NOT NULL FROM orca.runs WHERE id = $run2" 120
 [ "$(q "SELECT a.version <> b.version AND b.started >= a.ended FROM orca.runs a, orca.runs b WHERE a.id = $run1 AND b.id = $run2")" = t ] \
     || fail "run $run2 didn't start on new code after run $run1 handed over: $(q "SELECT id, version, started, ended FROM orca.runs ORDER BY id")"
 [ "$(q "SELECT count(*) || ' ' || max(image) FROM orca.schedulers WHERE ended IS NULL")" = "1 morca-proj:1.1.0" ] \
