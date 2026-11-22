@@ -43,7 +43,7 @@ hostname = "orca.mlake.dev"
 |---|---|
 | `[defaults]` | Values for every pipeline the file names. It doesn't apply to pipelines the file leaves out. |
 | `[pipelines.<name>]` | One pipeline's own values, by the name its `describe` gives. An empty table is allowed: the pipeline is then "in the file" and gets `[defaults]`. |
-| `[pools.<name>]` | A pool of workers morca grows and shrinks itself: [Worker pools](#worker-pools). |
+| `[pools.<name>]` | A pool of workers: one morca grows and shrinks itself, or, without a `provider`, machines that join by hand. [Worker pools](#worker-pools). |
 | `[apps.<name>]` | An app beside the UI and what it gets: [Apps](#apps). |
 | `[datasets."<name>"]` | A dataset's settings: whether visitors see its data. [Datasets](#datasets). |
 | `[stack]` | Reserved for `morca aws up`, which doesn't read it yet. It is accepted and not checked. |
@@ -728,11 +728,26 @@ idle_seconds = 900
 
 | Key | Type | Default | |
 |---|---|---|---|
-| `provider` | `"hetzner"` or `"ec2"` | (required) | Where the machines are made. |
-| `machines` | list of `{ type, wait }` | (required) | Machine types in order of preference. `wait` is how many seconds morca keeps trying a type before moving to the next; every entry but the last needs one. |
+| `provider` | `"hetzner"` or `"ec2"` | none | Where the machines are made; none for a self-hosted pool (below). |
+| `machines` | list of `{ type, wait }` | (required with a provider) | Machine types in order of preference. `wait` is how many seconds morca keeps trying a type before moving to the next; every entry but the last needs one. |
 | `locations` | list of strings | none | Where to try each type, in order: Hetzner locations (required there), or EC2 subnet IDs (none: the default subnet, or `MORCA_EC2_SUBNET`). |
 | `max_machines` | 1 to 100 | 1 | The most machines the pool has at once. |
 | `idle_seconds` | 10 to 86400 | 900 | How long a machine may sit idle, with nothing queued for the pool, before it's removed. |
+| `max_runs` | 1 to 1000 | none | Runs at once on each worker of the pool ([workers.md](workers.md#a-pools-settings)). |
+| `env` | table | none | Variables every run on the pool's workers gets, under the pipeline's. |
+| `secrets` | table | none | Secrets by ID, read on each worker, under the pipeline's. |
+
+A pool without a `provider` is self-hosted (#220): its machines join by
+hand (`morca worker-token create`, then `morca worker` on each), and only
+`max_runs`, `env` and `secrets` apply; `machines`, `locations`,
+`max_machines` and `idle_seconds` are refused there. It's recorded in
+`orca.pool_settings`, not `orca.pools`, so the autoscaler leaves it alone.
+
+```toml
+[pools.bgent]
+max_runs = 3
+env = { MOJO_HISTORY_WORKDIR = "/work/clones" }
+```
 
 `morca register` with the file records its pools in `orca.pools`. A pool the
 file no longer has is deleted there, and its machines are removed once

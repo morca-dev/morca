@@ -88,6 +88,7 @@ from morca._internal.resources import (
     canonical_memory_gb,
 )
 from morca._internal.secrets import (
+    env_name_problem,
     parse_secrets,
     secret_problem,
 )
@@ -150,20 +151,6 @@ comptime SCALAR_KEYS = [
 flag sets them."""
 comptime MAP_KEYS = ["secrets", "env"]
 """The keys whose value is a table of names."""
-
-comptime _RESERVED_ENV = [
-    "MORCA_DATABASE_URL",
-    "MORCA_IMAGE",
-    "MORCA_SECRETS",
-    "MORCA_WORKERS",
-    "DISTA_ROLE",
-    "DISTA_HEAD",
-    "DISTA_ADVERTISE",
-    "MORCA_GRANT_CPUS",
-    "MORCA_GRANT_MEMORY_MB",
-    "MORCA_MEMORY_PRESSURE_FILE",
-]
-"""Variables morca gives a run itself, which `env` can't set."""
 
 
 def flag_of(key: String) -> String:
@@ -404,38 +391,6 @@ def _canonical_toml(key: String, v: TomlValue) raises -> String:
     if key == "max_runs":
         raise Error('is a count, "auto" or "auto..N", not ', v.kind)
     raise Error("is a string, not ", v.kind)
-
-
-def env_name_problem(name: String) -> String:
-    """Why `name` can't be a variable in `env`, or empty if it can."""
-    var i = 0
-    for b in name.as_bytes():
-        var c = Int(b)
-        var ok = (
-            (c >= ord("A") and c <= ord("Z"))
-            or (c >= ord("a") and c <= ord("z"))
-            or c == ord("_")
-            or (i > 0 and c >= ord("0") and c <= ord("9"))
-        )
-        if not ok:
-            return String(
-                "a variable's name is letters, digits and _, not ", name
-            )
-        i += 1
-    if i == 0:
-        return "a variable's name can't be empty"
-    for r in materialize[_RESERVED_ENV]():
-        if name == r:
-            return String(name, " is set by morca itself")
-    var upper = name.upper()
-    for word in ["PASSWORD", "SECRET", "TOKEN", "DATABASE_URL"]:
-        if word in upper:
-            return String(
-                name,
-                " looks like a secret: put its Secrets Manager ID in",
-                " secrets, not its value in env",
-            )
-    return ""
 
 
 struct Setting(Copyable, Movable):

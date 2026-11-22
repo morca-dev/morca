@@ -100,6 +100,7 @@ from morca._internal.pool_config import read_pools, record_pools
 from morca._internal.registering import register_pipeline
 from morca._internal.registered import Registered, registered
 from morca._internal.fill_requesting import cancel_fill, request_fill
+from morca._internal.hosts import host_command
 from morca._internal.scheduler import Scheduler
 from morca._internal.tick import tick
 from morca._internal.control import fetch_secret
@@ -230,6 +231,10 @@ comptime USAGE = """usage:
   morca worker-token create --pool <pool> [--days N] [--label L]
   morca worker-token list
   morca worker-token revoke <id>
+  morca host list [--pool <pool>]    (the machines of worker pools: morca.hosts)
+  morca host drain|undrain <id>      (it finishes its runs, claims no more)
+  morca host remove <id> [--force]   (revokes its token; refused while it
+                                    runs unless --force)
   morca worker --pool <pool> [--remote <url>] [--token-file <path>]
               [--max-runs N] [--poll-seconds S] [--dir <dir>]
               [--image <image>] [--name <name>] [--advertise <address>]
@@ -753,6 +758,8 @@ def _command(args: List[String], target: String) raises -> Int:
             return 0
     if cmd == "worker-token" and len(args) >= 3:
         return _worker_token(url, args)
+    if cmd == "host":
+        return host_command(url, args)
     if cmd == "ui" and len(args) == 2:
         var db = State(url)
         db.migrate()
@@ -1124,7 +1131,11 @@ def _register(url: String, args: List[String]) raises -> Int:
         var pools = read_pools(file.doc)
         var gone = record_pools(s.db, pools)
         for p in pools:
-            print("pool", p.name, String("(", p.provider, ")"))
+            print(
+                "pool",
+                p.name,
+                String("(", p.provider if p.grown() else "self-hosted", ")"),
+            )
         for g in gone:
             print("pool", g, "removed: its machines go once idle")
         # Its datasets' settings (morca.dataset_config): the file's only.

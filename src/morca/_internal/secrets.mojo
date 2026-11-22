@@ -92,3 +92,50 @@ def parse_secrets(text: String) raises -> List[Tuple[String, String]]:
     for kv in loads(text).object_items():
         out.append((String(kv[0]), kv[1].string_value()))
     return out^
+
+
+comptime _RESERVED_ENV = [
+    "MORCA_DATABASE_URL",
+    "MORCA_IMAGE",
+    "MORCA_SECRETS",
+    "MORCA_WORKERS",
+    "DISTA_ROLE",
+    "DISTA_HEAD",
+    "DISTA_ADVERTISE",
+    "MORCA_GRANT_CPUS",
+    "MORCA_GRANT_MEMORY_MB",
+    "MORCA_MEMORY_PRESSURE_FILE",
+]
+"""Variables morca gives a run itself, which `env` can't set."""
+
+
+def env_name_problem(name: String) -> String:
+    """Why `name` can't be a variable in `env`, or empty if it can."""
+    var i = 0
+    for b in name.as_bytes():
+        var c = Int(b)
+        var ok = (
+            (c >= ord("A") and c <= ord("Z"))
+            or (c >= ord("a") and c <= ord("z"))
+            or c == ord("_")
+            or (i > 0 and c >= ord("0") and c <= ord("9"))
+        )
+        if not ok:
+            return String(
+                "a variable's name is letters, digits and _, not ", name
+            )
+        i += 1
+    if i == 0:
+        return "a variable's name can't be empty"
+    for r in materialize[_RESERVED_ENV]():
+        if name == r:
+            return String(name, " is set by morca itself")
+    var upper = name.upper()
+    for word in ["PASSWORD", "SECRET", "TOKEN", "DATABASE_URL"]:
+        if word in upper:
+            return String(
+                name,
+                " looks like a secret: put its Secrets Manager ID in",
+                " secrets, not its value in env",
+            )
+    return ""

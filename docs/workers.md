@@ -34,6 +34,37 @@ says so. `max_runs` and `morca pause` apply as for any pipeline: a worker is
 given a run only while its pipeline isn't paused and has fewer than
 `max_runs` live runs.
 
+## A pool's settings
+
+A `[pools.<name>]` table in morca.toml declares a pool. With a `provider`,
+morca makes and removes its machines ([morca.toml](morca-toml.md#worker-pools));
+without one it is self-hosted: its machines join by hand, each with its own
+token and `morca worker` (below), and morca gives their workers the pool's
+settings:
+
+```toml
+[pools.bgent]
+max_runs = 3                                       # runs at once on each worker
+env = { MOJO_HISTORY_WORKDIR = "/work/clones" }
+secrets = { GITHUB_TOKEN = "orca/github-token" }   # IDs, read on the worker
+```
+
+| Key | | |
+|---|---|---|
+| `max_runs` | 1 to 1000 | Runs at once on each worker of the pool. The UI never gives a worker more; a worker started without `--max-runs` takes it as its own. Unset: each worker's `--max-runs` (1). |
+| `env` | table of names | Variables every run on the pool's workers gets, under the pipeline's own: a pipeline's `env` of the same name wins. A name that looks like a secret's (`TOKEN`, `PASSWORD`, ...) is refused. |
+| `secrets` | table of names to IDs | Secrets every run gets, read on the worker with its own `MORCA_SECRET_FETCH`, as a pipeline's are: morca.toml, the database and the claim hold only the IDs. |
+
+`morca register` with the file records every pool in `orca.pool_settings`
+(and those with a provider in `orca.pools` too); a pool the file no longer
+has loses its settings. They travel in each claim's answer, over the
+worker API's TLS: the run's spec has the pool's `env` and secret IDs merged
+under the pipeline's, and the answer has the pool's `max_runs`. A worker
+from before this gets the variables (they are in the spec) but keeps its
+own `--max-runs`, which the UI caps at the pool's. A pool's `volumes` (the
+container's mounts) need the host agent that starts the container
+(#220), which isn't there yet: mount them in the `docker run` below.
+
 ## Fills on a pool
 
 A pool-placed pipeline with `fills = "all"` fills its range as a local one
@@ -156,6 +187,33 @@ from the worker API. It lasts `--days`, by default and at most
 the worker using it is refused and exits. Each claim is a row of
 `orca.audit`, user `worker:<label>`, source `worker`.
 
+## Hosts: list, drain, remove
+
+On the server, a host is a worker token's machine, whether it joined by
+hand or the pool autoscaler made it:
+
+```sh
+morca host list [--pool bgent]   # id, pool, name, state, image, CPUs, memory, runs, last seen
+morca host drain 3               # finishes its runs, claims no more
+morca host undrain 3             # claims again
+morca host remove 3 [--force]    # revokes its token: its worker exits
+```
+
+- **Drain** (maintenance, a laptop going to sleep, before a restart): the
+  worker is given no new runs, finishes the ones it has, and keeps beating,
+  so its runs aren't taken for lost. Its log says it drains, and Ops >
+  Pools and `/api/workers` (`draining`) show it. A machine the autoscaler
+  made is removed once it's idle. `undrain` lets it claim again.
+- **Remove** revokes the host's token: its worker is refused at its next
+  claim and exits (code 3). A host with runs running is refused, saying to
+  drain it first; with `--force` its runs are queued again for the pool as
+  any lost worker's are.
+- Each is a row of `orca.audit` (`host drain`, `host undrain`, `host
+  remove`, source `local`), as `morca worker-token` writes.
+
+The `state` is `live`, `draining`, `not seen` (silent for
+`MORCA_STALE_SECONDS`), `revoked` or `expired`.
+
 ## Running a worker
 
 ```sh
@@ -169,7 +227,7 @@ MORCA_WAREHOUSE=s3://... MORCA_LOGS=s3://... MORCA_SECRET_FETCH=/etc/orca/fetch-
 | `--pool` | (required) | the pool, which must be the token's |
 | `--remote` | `MORCA_REMOTE` | the UI; `https`, or `http` to this machine only |
 | `--token-file` | `MORCA_WORKER_TOKEN` | the token, the file's first line |
-| `--max-runs` | 1 | runs at once on this worker |
+| `--max-runs` | its pool's `max_runs`, else 1 | runs at once on this worker, at most its pool's `max_runs` |
 | `--poll-seconds` | 2 | how often it asks for a run, and beats |
 | `--dir` | `$TMPDIR/morca-worker` | where a run's output is staged |
 | `--image` | `MORCA_IMAGE` | the worker's version (below) |
@@ -333,7 +391,8 @@ Ops > Pools (`/ops/pools?kind=self-hosted`, and `/api/pools` as JSON; see
 runs on, in pool `worker:<pool>`: its name, state (`live`, or `gone` when
 the token is revoked or expired or the worker hasn't been heard from for
 `MORCA_STALE_SECONDS`), image, CPUs, memory, current runs and last
-heartbeat, and the worker's token and label. Its page lists the runs it
+heartbeat, and the worker's token and label. A host asked to drain
+(`morca host drain`) is `draining`. Its page lists the runs it
 claimed, and draws the machine's samples over its latest run (the
 sampler the worker starts beside each run). `/api/workers` is still each token as JSON, and `/ops/workers`
 redirects to Pools. A run's page says where it ran: the worker's name, and

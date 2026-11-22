@@ -56,6 +56,49 @@ def revoke(mut conn: Connection, id: Int) raises -> Bool:
     )
 
 
+def set_draining(mut conn: Connection, id: Int, on: Bool) raises -> Bool:
+    """Asks the worker of live token `id` to drain (it claims no more runs)
+    or to stop draining; False if `id` is no live token, or already so."""
+    return (
+        conn.execute(
+            (
+                "UPDATE orca.workers SET draining = CASE WHEN $2 THEN now()"
+                " END WHERE id = $1 AND revoked IS NULL AND expires > now()"
+                " AND (draining IS NULL) = $2"
+            ),
+            Params().int64(Int64(id)).bool(on),
+        )
+        == 1
+    )
+
+
+def is_draining(mut conn: Connection, id: Int) raises -> Bool:
+    """Whether the worker of token `id` was asked to drain."""
+    var rows = conn.query(
+        (
+            "SELECT 1 AS n FROM orca.workers WHERE id = $1 AND draining IS NOT"
+            " NULL"
+        ),
+        Params().int64(Int64(id)),
+    )
+    return len(rows) > 0
+
+
+def running_runs(mut conn: Connection, id: Int) raises -> Int:
+    """How many runs the worker of token `id` has running."""
+    return Int(
+        conn.query(
+            (
+                "SELECT count(*) AS n FROM orca.runs WHERE worker = $1 AND"
+                " status = 'running'"
+            ),
+            Params().int64(Int64(id)),
+        )
+        .row(0)
+        .int64("n")
+    )
+
+
 @fieldwise_init
 struct Seen(Copyable, Movable):
     """A live worker token, as a request presents it."""
@@ -99,6 +142,8 @@ struct Token(Copyable, Movable):
     var memory_mb: Int
     var running: String
     var expires: String
+    var draining: Bool
+    """Its worker was asked to drain (`morca host drain`)."""
 
 
 def tokens(mut conn: Connection) raises -> List[Token]:
@@ -117,7 +162,8 @@ def tokens(mut conn: Connection) raises -> List[Token]:
             " coalesce(memory_mb, 0) AS mem, coalesce(running, '') AS running,",
             " to_char(expires AT TIME ZONE 'UTC', ",
             ts,
-            ") AS expires FROM orca.workers ORDER BY id DESC",
+            ") AS expires, draining IS NOT NULL AS draining FROM",
+            " orca.workers ORDER BY id DESC",
         )
     ):
         out.append(
@@ -134,6 +180,7 @@ def tokens(mut conn: Connection) raises -> List[Token]:
                 Int(r.int64("mem")),
                 r.text("running"),
                 r.text("expires"),
+                r.bool("draining"),
             )
         )
     return out^

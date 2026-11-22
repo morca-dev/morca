@@ -37,6 +37,17 @@ nothing on a worker holds database credentials. Its token is
 revoked, expired or for another pool than `--pool` is refused, and the
 worker exits (code 3).
 
+**Its pool's settings.** A pool morca.toml declares may set `max_runs`,
+`env` and `secrets` for its workers (`morca._internal.pool_config`). The UI
+caps each claim at the pool's `max_runs` and puts the pool's `env` and
+secret IDs in each run's spec, under the pipeline's; a worker started
+without `--max-runs` takes the pool's `max_runs` as its own, from the
+claim's answer.
+
+**Draining.** A worker asked to drain (`morca host drain`) is given no new
+runs: it finishes those it has, keeps beating, and claims again once the
+drain is lifted (`morca host undrain`).
+
 **Versions.** The worker's image is `--image`, else `MORCA_IMAGE`. A run it's
 given whose pipeline's image isn't that is put back (`/api/worker/release`)
 rather than started, though the UI shouldn't hand it one
@@ -162,6 +173,10 @@ struct Worker(Movable):
     var name: String
     var image: String
     var max_runs: Int
+    var max_runs_given: Bool
+    """`--max-runs` was given: the pool's `max_runs` doesn't replace it."""
+    var draining: Bool
+    """The UI last said this worker drains (`morca host drain`)."""
     var poll: Float64
     var dir: String
     var running: Dict[Int, _Running]
@@ -207,6 +222,7 @@ struct Worker(Movable):
         poll: Float64,
         dir: String,
         advertise: String = "",
+        max_runs_given: Bool = True,
     ) raises:
         self.api = StateApi(url, token)
         self.token = token
@@ -214,6 +230,8 @@ struct Worker(Movable):
         self.name = name
         self.image = image
         self.max_runs = max_runs
+        self.max_runs_given = max_runs_given
+        self.draining = False
         self.poll = poll
         self.dir = dir
         self.running = Dict[Int, _Running]()
@@ -551,6 +569,26 @@ struct Worker(Movable):
                 r.stage,
             )
 
+    def _settings(mut self, got: Value) raises:
+        """What the claim's answer says of this worker: its pool's
+        `max_runs`, and whether it drains."""
+        if String("max_runs") in got and not self.max_runs_given:
+            var n = Int(got["max_runs"].int_value())
+            if n >= 1 and n != self.max_runs:
+                print(
+                    "morca worker: up to",
+                    n,
+                    "runs at once (the pool's max_runs)",
+                    flush=True,
+                )
+                self.max_runs = n
+        var draining = String("draining") in got
+        if draining and not self.draining:
+            print("morca worker:", got["draining"].string_value(), flush=True)
+        elif self.draining and not draining:
+            print("morca worker: no longer draining", flush=True)
+        self.draining = draining
+
     def serve(mut self) raises -> Int:
         print(
             "morca worker",
@@ -700,6 +738,7 @@ struct Worker(Movable):
                 sleep(self.poll)
                 continue
             said = ""
+            self._settings(got)
             if String("refused") in got:
                 var why = got["refused"].string_value()
                 print("morca worker: not given a run:", why, flush=True)
@@ -750,6 +789,7 @@ def worker_command(args: List[String], target: String) raises -> Int:
     var pool = String()
     var token_file = String()
     var max_runs = 1
+    var max_runs_given = False
     var poll = 2.0
     var dir = String(getenv("TMPDIR", "/tmp").rstrip("/"), "/morca-worker")
     var image = getenv("MORCA_IMAGE")
@@ -770,6 +810,7 @@ def worker_command(args: List[String], target: String) raises -> Int:
         elif a == "--max-runs":
             try:
                 max_runs = Int(val)
+                max_runs_given = True
             except:
                 return _usage("--max-runs is a count")
         elif a == "--poll-seconds":
@@ -817,6 +858,15 @@ def worker_command(args: List[String], target: String) raises -> Int:
             "morca worker needs a token: MORCA_WORKER_TOKEN, or --token-file"
         )
     var w = Worker(
-        url, token, pool, name, image, max_runs, poll, dir, advertise
+        url,
+        token,
+        pool,
+        name,
+        image,
+        max_runs,
+        poll,
+        dir,
+        advertise,
+        max_runs_given,
     )
     return w.serve()

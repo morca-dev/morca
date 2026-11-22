@@ -915,6 +915,21 @@ def _migrations() -> List[List[String]]:
         # Additive: a nullable column an older binary neither reads nor
         # writes.
         ["ALTER TABLE orca.runs ADD COLUMN pod_memory_mb bigint"],
+        # Self-hosted pools (#220, morca._internal.pool_config): every
+        # pool morca.toml declares, with or without a provider, and the
+        # settings its workers are given (`env`, secrets by ID, `max_runs`);
+        # and when a worker was asked to drain (`morca host drain`), so it
+        # claims no more runs. Additive: a new table and a nullable column
+        # the binaries before it neither read nor write.
+        [
+            (
+                "CREATE TABLE orca.pool_settings (name text PRIMARY KEY,"
+                " provider text, env jsonb NOT NULL DEFAULT '[]', secrets"
+                " jsonb NOT NULL DEFAULT '[]', max_runs integer, updated"
+                " timestamptz NOT NULL DEFAULT now())"
+            ),
+            "ALTER TABLE orca.workers ADD COLUMN draining timestamptz",
+        ],
     ]
 
 
@@ -969,6 +984,10 @@ def _floor_raisers() -> List[Int]:
     64 (`runs.pod_memory_mb`, #564) is additive: a nullable column the
     binaries before it neither read nor write. A Kubernetes run one of them
     starts records no memory, and is priced by its CPU alone.
+    65 (`orca.pool_settings`, `workers.draining`, #220) is additive: a new
+    table and a nullable column the binaries before it neither read nor
+    write. A worker one of them answers isn't given its pool's settings,
+    and claims runs though it was asked to drain.
     """
     return [1, 24]
 

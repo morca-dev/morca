@@ -15,7 +15,13 @@ from postgres import Connection, Params
 
 from morca import PgStore, RunResult, State, parse_months
 from morca._internal.config import ProjectConfig
-from morca._internal.pool_config import PoolConfig, read_pools, record_pools
+import morca._internal.db.workers as workers_db
+from morca._internal.pool_config import (
+    PoolConfig,
+    pool_settings,
+    read_pools,
+    record_pools,
+)
 from morca._internal.recommend import LEARN_RUNS, expire_raised
 from morca._internal.migrations import migration_floor, schema_ahead
 from store_suite import (
@@ -53,9 +59,9 @@ def test_migrate_is_idempotent() raises:
     var db = _db()
     db.migrate()
     assert_equal(
-        _count("SELECT max(version) AS n FROM orca.schema_version"), 64
+        _count("SELECT max(version) AS n FROM orca.schema_version"), 65
     )
-    assert_equal(_count("SELECT count(*) AS n FROM orca.schema_version"), 64)
+    assert_equal(_count("SELECT count(*) AS n FROM orca.schema_version"), 65)
 
 
 def test_each_version_records_its_floor() raises:
@@ -120,7 +126,7 @@ def test_the_schema_check() raises:
 
 def test_an_older_binary_runs_on_additive_migrations() raises:
     _ = _db()
-    # A binary that knows 30 migrations: 31..64 are additive.
+    # A binary that knows 30 migrations: 31..65 are additive.
     _ = setenv("MORCA_TEST_MIGRATIONS", "30", True)
     try:
         var old = State(getenv("MORCA_DATABASE_URL"))
@@ -128,7 +134,7 @@ def test_an_older_binary_runs_on_additive_migrations() raises:
         # It runs on the schema, and doesn't touch the versions.
         _ = _new_run(old, "a:1")
         assert_equal(
-            _count("SELECT max(version) AS n FROM orca.schema_version"), 64
+            _count("SELECT max(version) AS n FROM orca.schema_version"), 65
         )
         # One that knows 23 doesn't: 24 raised the floor.
         _ = setenv("MORCA_TEST_MIGRATIONS", "23", True)
@@ -159,7 +165,7 @@ def test_floors_are_filled_in_for_an_older_database() raises:
             "SELECT count(*) AS n FROM orca.schema_version WHERE min_binary ="
             " 24"
         ),
-        41,
+        42,
     )
     assert_equal(
         _count(
@@ -251,6 +257,72 @@ def test_pools_are_recorded_from_the_file() raises:
     )
     _ = record_pools(db, List[PoolConfig]())
     assert_equal(_count("SELECT count(*) AS n FROM orca.pools"), 0)
+
+
+def test_self_hosted_pools_are_recorded() raises:
+    """A pool without a provider (#220) is in orca.pool_settings with what
+    its workers are given, not in orca.pools; one that loses its provider
+    leaves orca.pools, and one the file drops leaves both."""
+    var db = _db()
+    var f = ProjectConfig(
+        String(
+            '[pools.bgent]\nmax_runs = 3\nenv = { W = "/work" }\n',
+            'secrets = { GH = "orca/gh" }\n',
+            '[pools.lab]\nprovider = "ec2"\nmachines = [{ type = "a" }]\n',
+            "max_runs = 2\n",
+        ),
+        "morca.toml",
+    )
+    assert_equal(len(record_pools(db, read_pools(f.doc))), 0)
+    assert_equal(_count("SELECT count(*) AS n FROM orca.pools"), 1)
+    assert_equal(
+        _count(
+            "SELECT count(*) AS n FROM orca.pool_settings WHERE name = 'bgent'"
+            " AND provider IS NULL AND max_runs = 3 AND env->0->>'value' ="
+            " '/work' AND secrets->0->>'id' = 'orca/gh'"
+        ),
+        1,
+    )
+    var s = pool_settings(db, "bgent")
+    assert_equal(s.max_runs, 3)
+    assert_equal(s.env[0][0], "W")
+    assert_equal(s.secrets[0][1], "orca/gh")
+    assert_equal(pool_settings(db, "lab").max_runs, 2)
+    assert_equal(pool_settings(db, "nowhere").max_runs, 0)
+    var hand = ProjectConfig("[pools.lab]\n", "morca.toml")
+    assert_equal(record_pools(db, read_pools(hand.doc)), ["lab"])
+    assert_equal(_count("SELECT count(*) AS n FROM orca.pools"), 0)
+    assert_equal(_count("SELECT count(*) AS n FROM orca.pool_settings"), 1)
+    assert_equal(len(pool_settings(db, "bgent").env), 0)
+    _ = record_pools(db, List[PoolConfig]())
+    assert_equal(_count("SELECT count(*) AS n FROM orca.pool_settings"), 0)
+
+
+def test_a_host_drains_on_request() raises:
+    """`morca host drain` (#220): a drained worker token is draining until
+    undrained; a revoked one can't be drained."""
+    var db = _db()
+    var id = Int(
+        db.conn.query(
+            "INSERT INTO orca.workers (token_hash, pool, label, created_by,"
+            " expires) VALUES ('drain-test', 'p', 'h', 't', now() + interval"
+            " '1 day') RETURNING id"
+        )
+        .row(0)
+        .int64("id")
+    )
+    assert_false(workers_db.is_draining(db.conn, id))
+    assert_true(workers_db.set_draining(db.conn, id, True))
+    assert_false(workers_db.set_draining(db.conn, id, True))
+    assert_true(workers_db.is_draining(db.conn, id))
+    assert_true(workers_db.set_draining(db.conn, id, False))
+    assert_false(workers_db.is_draining(db.conn, id))
+    assert_equal(workers_db.running_runs(db.conn, id), 0)
+    assert_true(workers_db.revoke(db.conn, id))
+    assert_false(workers_db.set_draining(db.conn, id, True))
+    _ = db.conn.execute(
+        "DELETE FROM orca.workers WHERE id = $1", Params().int64(Int64(id))
+    )
 
 
 def test_a_queued_run_can_be_claimed() raises:
