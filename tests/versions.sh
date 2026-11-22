@@ -187,6 +187,22 @@ echo "$page" | grep -qF 'document.addEventListener("morca:swap", () => { if (cur
     || fail "the peek doesn't follow a refresh"
 echo "$page" | grep -qF 'function morcaLead(doc)' || fail "the cards have no lead sentence"
 echo "$page" | grep -qF 'const doc = own || (isDef ? null : moduleDoc(src.lines));' || fail "a pipeline's card doesn't fall back to its module's docstring"
+# A run in another image than the one registered is another version row,
+# which morca locate's map wasn't put on: it has the map of the same code
+# at the same commit, on the run's page and, now the newest, on the
+# pipeline's (#583).
+MORCA_IMAGE=morca:other ./build/toy-c1 run --partitions 2024-04 >> "$log" 2>&1 || fail "run c1 in another image"
+r4=$(q "SELECT max(id) FROM orca.runs WHERE pipeline = 'toy'")
+[ "$(q "SELECT v.image, v.locations IS NULL FROM orca.runs r JOIN orca.pipeline_versions v ON v.id = r.version WHERE r.id = $r4")" = "morca:other|t" ] \
+    || fail "run $r4's version row isn't a new one without locations"
+json "/runs/$r4" | jq -e '.version.image == "morca:other" and (.version.locations["toy::measure"] | startswith("examples/toy.mojo#L"))' > /dev/null \
+    || fail "run $r4, in another image, has no locations: $(json "/runs/$r4" | jq -c .version)"
+html "/runs/$r4" | grep -qF "tabindex=\"0\">days</span> $(code_link "$repo/blob/$c1/examples/toy.mojo#L$line" $c1)" \
+    || fail "run $r4's page, in another image, doesn't link its steps' code"
+page=$(html /pipelines/toy)
+echo "$page" | grep -qF "No links to the code" && fail "the pipeline's page has no links once a run started in another image"
+echo "$page" | grep -qF "$(code_link "$repo/blob/$c1/examples/toy.mojo#L$line" $c1)" \
+    || fail "the pipeline's page doesn't link days' code"
 kill "$pid"
 
 # The morca a pipeline was built with (#455): describe says it, `morca
