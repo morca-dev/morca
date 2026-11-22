@@ -239,7 +239,9 @@ if [ -n "$(awk 'NR > 1' /proc/swaps)" ] && [ -f "$cgbase/memory.swap.max" ]; the
     q "UPDATE orca.pipelines SET memory_raised_mb = NULL WHERE name = 'grower'" > /dev/null
     export MORCA_RUN_SWAP_PCT=100
     start_scheduler
-    said "morca: runs' swap: memory.swap.max at 100% of each run's limit" || fail "the scheduler didn't say runs may swap: $(grep "runs' swap" build/cgroups-sched.out)"
+    # (start_scheduler returns on the first scheduler's lines: the file is appended to.)
+    until_ 20 "the scheduler didn't say runs may swap: $(grep "runs' swap" build/cgroups-sched.out)" \
+        said "morca: runs' swap: memory.swap.max at 100% of each run's limit"
     ./build/morca backfill grower 2024-06 >> "$log" 2>&1 || fail "backfill 2024-06"
     r6=$(q "SELECT max(id) FROM orca.runs")
     until_ 120 "run $r6 didn't succeed: $(q "SELECT id, status, starts, error FROM orca.runs WHERE id = $r6")" \
