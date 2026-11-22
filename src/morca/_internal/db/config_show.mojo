@@ -20,7 +20,8 @@ comptime _SHOWN_SQL = (
     " '') AS fill_window, coalesce(fill_lag, '') AS fill_lag, coalesce(cpus,"
     " '') AS cpus, coalesce(memory_gb, '') AS memory_gb, learn, priority,"
     " coalesce(concurrency_key, '') AS concurrency_key,"
-    " coalesce(concurrency_limit, 0)::bigint AS concurrency_limit FROM"
+    " coalesce(concurrency_limit, 0)::bigint AS concurrency_limit,"
+    " coalesce(learn_from, '') AS learn_from, probe_every FROM"
     " orca.pipelines WHERE binary_path IS NOT NULL AND ($1 = '' OR name = $1)"
     " ORDER BY name"
 )
@@ -66,6 +67,9 @@ struct Settings(Copyable, Movable):
     var concurrency_key: String
     """Its concurrency key (#397), or empty."""
     var concurrency_limit: Int64
+    var learn_from: String
+    """`working_set` for `learn = "working_set"` (#281), or empty."""
+    var probe_every: Optional[Int64]
 
 
 def _text(r: Row, c: String) raises -> Optional[String]:
@@ -125,6 +129,8 @@ def settings(mut conn: Connection, only: String) raises -> List[Settings]:
                 r.int64("priority"),
                 r.text("concurrency_key"),
                 r.int64("concurrency_limit"),
+                r.text("learn_from"),
+                _int(r, "probe_every"),
             )
         )
     return out^

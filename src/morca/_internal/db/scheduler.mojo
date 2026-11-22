@@ -108,6 +108,24 @@ def attempts_memory(
     )
 
 
+def attempts_working_set(
+    mut conn: Connection, run: Int, pid: Int, working_set_mb: Int
+) raises:
+    """Gives `run`'s attempts made by process `pid` the working set its
+    probe measured (#281, `morca._internal.working_set`)."""
+    _ = conn.execute(
+        (
+            "UPDATE orca.attempts a SET working_set_mb = $3 FROM orca.steps"
+            " st WHERE st.id = a.step AND st.run = $1 AND a.host LIKE '%:'"
+            " || $2 AND a.working_set_mb IS NULL"
+        ),
+        Params()
+        .int64(Int64(run))
+        .text(String(pid))
+        .int64(Int64(working_set_mb)),
+    )
+
+
 def clear_memory_bytes(mut conn: Connection, run: Int, start: Int) raises:
     _ = conn.execute(
         (

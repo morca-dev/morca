@@ -203,6 +203,9 @@ struct StepRow(Copyable, Movable):
     unknown."""
     var zswapped_bytes: Int
     """Of it, the most in zswap at once; -1 for unknown."""
+    var working_set_mb: Int
+    """The latest attempt's probed working set
+    (`morca._internal.working_set`); 0 for none."""
 
 
 def int_or_zero(s: String) -> Int:
@@ -341,6 +344,7 @@ def step_rows(mut db: State, run: Int) raises -> List[StepRow]:
                 s.grant_mb,
                 s.swap,
                 s.zswapped,
+                s.working_set_mb,
             )
         )
     return out^
@@ -848,6 +852,8 @@ struct AttemptRow(Copyable, Movable):
     """Its swap peak (`morca._internal.offload`); -1 for unknown."""
     var zswapped_bytes: Int
     """Of it, the most in zswap at once; -1 for unknown."""
+    var working_set_mb: Int
+    """Its probed working set (`morca._internal.working_set`); 0 for none."""
 
 
 def _attempt_rows(run: Int, rs: List[AttemptRecord]) -> List[AttemptRow]:
@@ -872,6 +878,7 @@ def _attempt_rows(run: Int, rs: List[AttemptRecord]) -> List[AttemptRow]:
                 r.grant_mb,
                 r.swap,
                 r.zswapped,
+                r.working_set_mb,
             )
         )
     return out^

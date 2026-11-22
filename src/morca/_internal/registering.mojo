@@ -15,6 +15,7 @@ from morca._internal.config import (
     parse_keys_per_run,
     parse_max_runs,
     parse_priority,
+    parse_probe_every,
     parse_worker_procs,
     parse_workers,
     resolve,
@@ -133,6 +134,9 @@ def register_pipeline(
     var priority = 0
     if r.text("priority"):
         priority = parse_priority(r.text("priority"))
+    var probe_every = -1
+    if r.text("probe_every"):
+        probe_every = parse_probe_every(r.text("probe_every"))
     # A concurrency key (#397) needs the wait limit, as the scheduler
     # does: refused before anything is registered.
     var ckey = String()
@@ -200,6 +204,7 @@ def register_pipeline(
             keys_per_run,
             fill_auto,
             priority,
+            probe_every,
         ),
     )
     var name = res[0]

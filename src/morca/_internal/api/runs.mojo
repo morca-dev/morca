@@ -341,6 +341,9 @@ def run_json(v: RunView) -> String:
             ', "memory_zswapped_peak_bytes": ',
             String(s.zswapped_bytes) if s.zswapped_bytes
             >= 0 else String("null"),
+            ', "working_set_mb": ',
+            String(s.working_set_mb) if s.working_set_mb
+            > 0 else String("null"),
             "}",
         )
     j.write('], "tables": [')

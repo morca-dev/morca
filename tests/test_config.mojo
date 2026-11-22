@@ -331,8 +331,43 @@ def test_learned_requests() raises:
     _refused('[pipelines.a]\nmemory_gb = "auto.."\n', "auto..MAX")
     _refused('[pipelines.a]\ncpus = "auto..0"\n', "auto..MAX")
     _refused('[pipelines.a]\ncpus = "automatic"\n', "auto")
-    _refused('[pipelines.a]\nlearn = "no"\n', "true or false")
-    _refused("[pipelines.a]\nlearn = 0\n", "true or false")
+    _refused('[pipelines.a]\nlearn = "no"\n', "true, false or")
+    _refused("[pipelines.a]\nlearn = 0\n", "true, false or")
+
+
+def test_learn_working_set() raises:
+    # `learn = "working_set"` and `probe_every` (#281, morca.working_set).
+    var f = ProjectConfig(
+        String(
+            "[defaults]\nprobe_every = 4\n",
+            '[pipelines.a]\nmemory_gb = "auto"\nlearn = "working_set"\n',
+            '[pipelines.b]\nlearn = "working_set"\nprobe_every = 2\n',
+            "[pipelines.c]\n",
+        ),
+        "morca.toml",
+    )
+    var a = resolve("a", RegisterFlags(), f)
+    assert_equal(a.text("learn"), "working_set")
+    assert_equal(a.text("probe_every"), "4")
+    var b = resolve("b", RegisterFlags(), f)
+    assert_equal(b.text("probe_every"), "2")
+    # [defaults]' probe_every is for those that probe; c doesn't.
+    assert_equal(resolve("c", RegisterFlags(), f).text("learn"), "")
+    _refused('[pipelines.a]\nlearn = "peak"\n', "working_set")
+    _refused(
+        '[pipelines.a]\nlearn = "working_set"\nprobe_every = 0\n',
+        "from 1 to 1000",
+    )
+    _refused(
+        '[pipelines.a]\nlearn = "working_set"\nprobe_every = "4"\n',
+        "is a count",
+    )
+    # Its own probe_every with nothing to probe.
+    _refused("[pipelines.a]\nprobe_every = 4\n", 'needs learn = "working_set"')
+    _refused(
+        "[pipelines.a]\nlearn = false\nprobe_every = 4\n",
+        'needs learn = "working_set"',
+    )
 
 
 def test_auto_max_runs() raises:

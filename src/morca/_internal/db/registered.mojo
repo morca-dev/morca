@@ -65,6 +65,9 @@ struct Registration(Copyable, Movable):
     var concurrency_key: String
     """Its concurrency key (#397), or empty."""
     var concurrency_limit: Int
+    var working_set: Bool
+    """`learn = "working_set"` (#281)."""
+    var probe_every: Int
 
 
 def registrations(
@@ -112,11 +115,15 @@ def registrations(
             " memory_gb LIKE 'auto%' THEN concat_ws('/', coalesce((SELECT"
             " r.id::text || CASE WHEN EXISTS (SELECT 1 FROM orca.steps s JOIN"
             " orca.attempts a ON a.step = s.id WHERE s.run = r.id AND"
-            " a.peak_rss_bytes IS NOT NULL) THEN 'm' ELSE '' END FROM orca.runs"
-            " r WHERE r.pipeline = orca.pipelines.name AND r.status ="
-            " 'succeeded' ORDER BY r.id DESC LIMIT 1), ''),"
+            " a.peak_rss_bytes IS NOT NULL) THEN 'm' ELSE '' END || CASE WHEN"
+            " learn_from IS NOT NULL AND EXISTS (SELECT 1 FROM orca.steps s"
+            " JOIN orca.attempts a ON a.step = s.id WHERE s.run = r.id AND"
+            " a.working_set_mb IS NOT NULL) THEN 'w' ELSE '' END FROM"
+            " orca.runs r WHERE r.pipeline = orca.pipelines.name AND r.status"
+            " = 'succeeded' ORDER BY r.id DESC LIMIT 1), ''),"
             " coalesce(memory_raised_mb, 0), coalesce(cpus, ''),"
-            " coalesce(memory_gb, '')) ELSE '' END AS learn_key,"
+            " coalesce(memory_gb, ''), coalesce(learn_from, '')) ELSE '' END"
+            " AS learn_key,"
             " coalesce(learned->>'key', '') AS learned_key,"
             " coalesce((learned->>'runs')::bigint, 0) AS learned_runs,"
             " coalesce((learned->>'memory_mb')::bigint, 0) AS"
@@ -124,7 +131,9 @@ def registrations(
             " learned_cpus, coalesce(learned->>'capped', '') AS"
             " learned_capped, priority, coalesce(concurrency_key, '') AS"
             " concurrency_key, coalesce(concurrency_limit, 0)::bigint AS"
-            " concurrency_limit FROM orca.pipelines WHERE binary_path IS"
+            " concurrency_limit, learn_from IS NOT DISTINCT FROM"
+            " 'working_set' AS working_set, coalesce(probe_every, 1)::bigint"
+            " AS probe_every FROM orca.pipelines WHERE binary_path IS"
             " NOT NULL AND retired IS NULL AND ($1 = '' OR name = $1) ORDER BY"
             " priority DESC, name"
         ),
@@ -183,6 +192,8 @@ def registrations(
                 Int(r.int64("priority")),
                 r.text("concurrency_key"),
                 Int(r.int64("concurrency_limit")),
+                r.bool("working_set"),
+                Int(r.int64("probe_every")),
             )
         )
     return out^

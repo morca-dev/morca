@@ -69,6 +69,7 @@ executor-core:tests/test_usage.mojo:test-usage
 executor-core:tests/test_resources.mojo:test-resources
 executor-core:tests/test_recommend.mojo:test-recommend
 executor-core:tests/test_cgroup.mojo:test-cgroup
+executor-core:tests/test_working_set.mojo:test-working-set
 executor-core:tests/test_highlight.mojo:test-highlight
 executor-core:tests/test_step_cards.mojo:test-step-cards
 executor-core:tests/test_graph.mojo:test-graph

@@ -92,6 +92,30 @@ def test_margin_and_rounding() raises:
     assert_equal(recommend(_runs([1, 1, 1]), 0, _none()).memory_mb, 256)
 
 
+def test_working_set() raises:
+    # learn = "working_set" (#281): from the probed runs' working sets once
+    # MIN_RUNS have one; 600 MB × 1.15 = 690, up to 768.
+    var p = List[RunPeaks]()
+    for ws in [500, 600, 400]:
+        p.append(RunPeaks(2000 * MB, 2.0, Float64(ws)))
+    p.append(RunPeaks(2000 * MB, 2.0))
+    var r = recommend(p, 0, _none(), True)
+    assert_equal(r.memory_mb, 768)
+    assert_equal(r.runs, 3)
+    assert_true("probed working set × 1.15" in r.source, r.source)
+    # Without it, the peaks.
+    assert_equal(recommend(p, 0, _none()).memory_mb, 2304)
+    # Too few probed runs: the peaks, saying how many it has.
+    var few = _runs([2000, 2000, 2000])
+    few.append(RunPeaks(2000 * MB, 2.0, 500.0))
+    var f = recommend(few, 0, _none(), True)
+    assert_equal(f.memory_mb, 2304)
+    assert_true("peak memory" in f.source, f.source)
+    assert_true("1 of the 3 probed runs" in f.source, f.source)
+    # An out-of-memory raise still floors it.
+    assert_equal(recommend(p, 1024, _none(), True).memory_mb, 1024)
+
+
 def test_cpus() raises:
     # Rounded up, less the sampling's slack, at least 1.
     assert_equal(recommend(_runs([100, 100, 100], 2.05), 0, _none()).cpus, 2)

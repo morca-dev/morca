@@ -7,8 +7,10 @@
 # scheduler that starts removes an empty cgroup a dead one left; and a run
 # held at memory.high short of memory.max is killed as out of memory; and
 # one killed at its memory_gb's maximum fails, unretried; and one let offload
-# to swap (MORCA_RUN_SWAP_PCT) instead succeeds and records it; and, with the
-# cpu controller, a run's cgroup has its cpu.weight.
+# to swap (MORCA_RUN_SWAP_PCT) instead succeeds and records it; and a run
+# probed for its working set (#281) has its memory.high lowered, isn't
+# harmed, and records one; and, with the cpu controller, a run's cgroup has
+# its cpu.weight.
 #
 # The scheduler makes the cgroups under its own cgroup, which it has to be
 # able to write (delegated). Where it isn't, and `sudo -n` works (GitHub's
@@ -281,6 +283,47 @@ if [ -n "$(awk 'NR > 1' /proc/swaps)" ] && [ -f "$cgbase/memory.swap.max" ]; the
     start_scheduler
 else
     echo "cgroups: no swap on this host, or no memory.swap.max in $cgbase: the offload case is skipped"
+fi
+
+# The working-set probe (#281, morca.working_set): a grower with learn =
+# "working_set" holding 300 MiB, every page of it hot, for 20 s at a 600 MB
+# limit. Its memory.high goes under 600 and comes back up when the pressure
+# shows (no swap: the 300 can't be reclaimed), it isn't held-killed though
+# the held check is at 3 s, it succeeds at its first start, and its attempt
+# has a working set between what it holds and its limit.
+if [ -f "$cgbase/memory.pressure" ]; then
+    kill "$sched"
+    wait "$sched" 2> /dev/null || true
+    q "UPDATE orca.pipelines SET memory_raised_mb = NULL WHERE name = 'grower'" > /dev/null
+    printf '[pipelines.grower]\nlearn = "working_set"\n' > build/cgroups-probe.toml
+    ./build/morca register --config build/cgroups-probe.toml ./build/grower >> "$log" 2>&1 || fail "register learn = working_set"
+    export MORCA_RUN_MEMORY_MB=600 MORCA_RUN_MEMORY_HELD_SECONDS=3 GROW_SECONDS=20
+    export MORCA_RUN_PROBE_SECONDS=1 MORCA_RUN_PROBE_STEP=10 MORCA_RUN_PROBE_FLOOR=10
+    start_scheduler
+    ./build/morca backfill grower 2024-07 >> "$log" 2>&1 || fail "backfill 2024-07"
+    r7=$(q "SELECT max(id) FROM orca.runs")
+    until_ 30 "run $r7 didn't start" is "SELECT status FROM orca.runs WHERE id = $r7" running
+    low=$((600 * 1048576))
+    while [ "$(q "SELECT status FROM orca.runs WHERE id = $r7")" = running ]; do
+        h=$(cat "$cgbase"/orca-run-"$r7"-*/memory.high 2> /dev/null | head -1)
+        case "$h" in '' | max) ;; *) [ "$h" -lt "$low" ] && low=$h ;; esac
+        sleep 0.3
+    done
+    is "SELECT status || ' ' || starts FROM orca.runs WHERE id = $r7" "succeeded 1" \
+        || fail "the probed run $r7: $(q "SELECT status, starts, error FROM orca.runs WHERE id = $r7")"
+    said "probing run $r7 of grower" || fail "the probe wasn't said"
+    [ "$low" -lt $((600 * 1048576)) ] || fail "run $r7's memory.high never went under its limit"
+    echo "cgroups: run $r7's memory.high went down to $((low / 1048576)) MB" >> "$log"
+    until_ 10 "run $r7's attempt has no working set" \
+        is "SELECT count(*) FROM orca.attempts a JOIN orca.steps s ON s.id = a.step WHERE s.run = $r7 AND a.working_set_mb IS NOT NULL" 1
+    ws=$(q "SELECT a.working_set_mb FROM orca.attempts a JOIN orca.steps s ON s.id = a.step WHERE s.run = $r7")
+    echo "cgroups: run $r7's working set: $ws MB" >> "$log"
+    [ "$ws" -ge 300 ] && [ "$ws" -le 600 ] || fail "run $r7's working set: $ws MB"
+    curl -fs -H 'Accept: application/json' "$base/runs/$r7" | jq -e ".steps[0].working_set_mb == $ws" > /dev/null \
+        || fail "the run's JSON has no working set"
+    q "UPDATE orca.pipelines SET learn_from = NULL WHERE name = 'grower'" > /dev/null
+    export MORCA_RUN_MEMORY_MB=200
+    unset MORCA_RUN_MEMORY_HELD_SECONDS GROW_SECONDS MORCA_RUN_PROBE_SECONDS MORCA_RUN_PROBE_STEP MORCA_RUN_PROBE_FLOOR
 fi
 
 # Killed at the most it may ask for (memory_gb = 0.25: 256 MB, under the

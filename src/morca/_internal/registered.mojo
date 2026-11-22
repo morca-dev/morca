@@ -125,6 +125,12 @@ struct Registered(Copyable, Movable):
     or empty: its runs and those of every pipeline of the key hold at most
     `concurrency_limit` of it at once."""
     var concurrency_limit: Int
+    var working_set: Bool
+    """`learn = "working_set"` (#281): some of its runs are probed for
+    their working set (`morca._internal.working_set`), and its learned
+    memory comes from it."""
+    var probe_every: Int
+    """`probe_every`: about one run in this many is probed (1)."""
 
     def request(self) raises -> Request:
         """As declared: `auto` not resolved (`run_request` does)."""
@@ -165,7 +171,7 @@ def run_request(
         return resolve_request(
             declared, p.learned, True, most_cpus, most_mb, most_of
         )
-    var rec = learned(db, p.name, p.cpus, p.memory_gb)
+    var rec = learned(db, p.name, p.cpus, p.memory_gb, p.working_set)
     registered_db.keep_learned(
         db.conn, p.name, p.learn_key, rec.runs, rec.memory_mb, rec.cpus
     )
@@ -329,6 +335,8 @@ def registered(mut db: State, only: String = "") raises -> List[Registered]:
                 r.priority,
                 r.concurrency_key,
                 r.concurrency_limit,
+                r.working_set,
+                r.probe_every,
             )
         )
     # A fixed count, or no tasks: no scaling.
