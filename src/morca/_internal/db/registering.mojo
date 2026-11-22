@@ -94,6 +94,8 @@ struct Registration(Copyable, Movable):
     var fill_max_runs_auto: Bool
     var priority: Int
     """0 when not given: kept for a pipeline the file doesn't name."""
+    var probe_every: Int
+    """`probe_every` (#281); -1: not given."""
 
 
 def register(
@@ -109,7 +111,7 @@ def register(
             " worker_procs, placement, max_runs, env, config, fills,"
             " fill_order, fill_max_runs, fill_budget_per_day, fill_window,"
             " cpus, memory_gb, fill_lag, learn, max_runs_auto, keys_per_run,"
-            " fill_max_runs_auto, priority)"
+            " fill_max_runs_auto, priority, learn_from, probe_every)"
             " SELECT"
             " d->>'pipeline',"
             " d->>'registry_hash',"
@@ -120,9 +122,11 @@ def register(
             " nullif($16, '')::jsonb, $17::jsonb, nullif($18, ''),"
             " nullif($19, ''), nullif($20, -1), nullif($21, -1::float8),"
             " nullif($22, ''), nullif($23, ''), nullif($24, ''),"
-            " nullif($25, ''), nullif($26, '')::boolean, CASE WHEN $15 > 0"
+            " nullif($25, ''), CASE WHEN $26 = 'working_set' THEN true ELSE"
+            " nullif($26, '')::boolean END, CASE WHEN $15 > 0"
             " THEN $27 END, nullif($28, -1), CASE WHEN $20 > 0 THEN $29 END,"
-            " $30"
+            " $30, CASE WHEN $26 = 'working_set' THEN $26 END,"
+            " nullif($31, -1)"
             " FROM"
             " (SELECT $1::jsonb AS d) AS x ON CONFLICT (name) DO UPDATE SET"
             " registry_hash = EXCLUDED.registry_hash, describe ="
@@ -170,7 +174,10 @@ def register(
             " orca.pipelines.fill_window END, fill_lag = CASE WHEN $14 THEN"
             " EXCLUDED.fill_lag ELSE orca.pipelines.fill_lag END, learn ="
             " CASE WHEN $14 THEN EXCLUDED.learn ELSE orca.pipelines.learn"
-            " END, keys_per_run = CASE WHEN $14 THEN EXCLUDED.keys_per_run"
+            " END, learn_from = CASE WHEN $14 THEN EXCLUDED.learn_from ELSE"
+            " orca.pipelines.learn_from END, probe_every = CASE WHEN $14"
+            " THEN EXCLUDED.probe_every ELSE orca.pipelines.probe_every END,"
+            " keys_per_run = CASE WHEN $14 THEN EXCLUDED.keys_per_run"
             " ELSE orca.pipelines.keys_per_run END, priority = CASE WHEN"
             " $14 THEN EXCLUDED.priority ELSE orca.pipelines.priority END,"
             " cpus ="
@@ -216,7 +223,8 @@ def register(
         .bool(r.max_runs_auto)
         .int64(Int64(r.keys_per_run))
         .bool(r.fill_max_runs_auto)
-        .int64(Int64(r.priority)),
+        .int64(Int64(r.priority))
+        .int64(Int64(r.probe_every)),
     )
     var row = res.row(0)
     return (row.text("name"), row.text("registry_hash"), row.text("image"))

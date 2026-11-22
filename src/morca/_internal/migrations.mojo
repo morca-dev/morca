@@ -945,6 +945,17 @@ def _migrations() -> List[List[String]]:
                 " memory_zswapped_peak_bytes bigint"
             ),
         ],
+        # The working-set probe (#281, `morca._internal.working_set`): a
+        # pipeline's `learn = "working_set"` (`learn` stays true for it) and
+        # `probe_every`, and the working set a probed run's attempts were
+        # measured at. Additive: nullable columns an older binary neither
+        # reads nor writes; it learns such a pipeline's memory from its
+        # peaks, and probes nothing.
+        [
+            "ALTER TABLE orca.pipelines ADD COLUMN learn_from text",
+            "ALTER TABLE orca.pipelines ADD COLUMN probe_every integer",
+            "ALTER TABLE orca.attempts ADD COLUMN working_set_mb bigint",
+        ],
     ]
 
 
@@ -1007,6 +1018,9 @@ def _floor_raisers() -> List[Int]:
     #282) is additive: nullable columns the binaries before it neither read
     nor write. An attempt one of them reaps records no offload, and a
     learned request counts its memory peak alone, as before.
+    67 (the working-set probe, #281) is additive: nullable columns the
+    binaries before it neither read nor write. A registration one of them
+    makes leaves `learn_from` and `probe_every` as they were.
     """
     return [1, 24]
 

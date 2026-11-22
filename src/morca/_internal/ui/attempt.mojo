@@ -15,6 +15,7 @@ from morca._internal.ui.parts import (
     limit_facts,
     offload_facts,
     usage_facts,
+    working_set_facts,
 )
 from morca._internal.usage import bytes_text, usage_json
 from morca._internal.views.code import CodeLinks, code_of
@@ -81,6 +82,7 @@ def _attempt_facts(
     h.text(a.ended)
     h.raw("</dd>")
     usage_facts(h, a.usage, live_status(a.status))
+    working_set_facts(h, a.working_set_mb)
     limit_facts(h, a.limit_mb, 0, a.grant_mb)
     offload_facts(h, a.swap_bytes, a.zswapped_bytes)
     h.raw("<dt>Log file</dt><dd><code>")
@@ -171,6 +173,8 @@ def attempt(mut db: State, run: Int, id: Int) raises -> Page:
         String(a.swap_bytes) if a.swap_bytes >= 0 else String("null"),
         ', "memory_zswapped_peak_bytes": ',
         String(a.zswapped_bytes) if a.zswapped_bytes >= 0 else String("null"),
+        ', "working_set_mb": ',
+        String(a.working_set_mb) if a.working_set_mb > 0 else String("null"),
         '}, "text": ',
         quote(log[0]),
         ', "truncated": ',

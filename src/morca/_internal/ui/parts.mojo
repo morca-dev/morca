@@ -457,9 +457,11 @@ def usage_cell(
     limit_mb: Int = 0,
     grant_mb: Int = 0,
     swap_bytes: Int = -1,
+    working_set_mb: Int = 0,
 ):
-    """A `<td>` of a peak in memory, with the CPU in its title, and after
-    it the attempt's memory limit (`morca._internal.cgroup`) when it had one,
+    """A `<td>` of a peak in memory, with the CPU in its title, after it
+    the probed working set (`morca._internal.working_set`) when there's one,
+    the attempt's memory limit (`morca._internal.cgroup`) when it had one,
     and what of it went to swap (`morca._internal.offload`) when any did."""
     if u.peak_rss_bytes < 0 and limit_mb <= 0:
         h.raw('<td class="num"></td>')
@@ -471,11 +473,17 @@ def usage_cell(
             title.write(", granted ", mb_text(grant_mb))
     if swap_bytes > 0:
         title.write("; up to ", bytes_text(swap_bytes), " in swap")
+    if working_set_mb > 0:
+        title.write("; probed working set ", mb_text(working_set_mb))
     h.raw('<td class="num" title="')
     h.text(title)
     h.raw('">')
     if u.peak_rss_bytes >= 0:
         h.text(bytes_text(u.peak_rss_bytes))
+    if working_set_mb > 0:
+        h.raw('<span class="muted"> · ws ')
+        h.text(mb_text(working_set_mb))
+        h.raw("</span>")
     if limit_mb > 0:
         h.raw('<span class="muted"> / ')
         h.text(mb_text(limit_mb))
@@ -528,6 +536,24 @@ def request_text(cpus: String, memory_gb: String) -> String:
         else:
             text.write(memory_gb, " GB")
     return text^
+
+
+comptime WORKING_SET_HELP = (
+    "The lowest memory.high its cgroup held it at while morca probed it"
+    ' (learn = "working_set" in morca.toml) with its memory pressure at the'
+    " target: what it needed to go at full speed, where the peak counts"
+    " every page it touched. Learned requests come from it."
+)
+
+
+def working_set_facts(mut h: Html, working_set_mb: Int):
+    """A Working set fact (`morca._internal.working_set`), when a probe
+    measured one."""
+    if working_set_mb <= 0:
+        return
+    fact_item(h, "Working set", "working-set", WORKING_SET_HELP, "runners")
+    h.text(mb_text(working_set_mb))
+    h.raw("</dd>")
 
 
 comptime LIMIT_HELP = (

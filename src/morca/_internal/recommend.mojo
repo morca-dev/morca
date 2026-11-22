@@ -18,7 +18,13 @@ the request they suggest:
   `LEARN_RUNS` it learns from: once that many of the pipeline's runs after it
   have succeeded, `expire_raised` forgets it, and the peaks alone decide.
   Without that one unusual run would hold every later run at its size;
-- with fewer than `MIN_RUNS` runs there's none.
+- with fewer than `MIN_RUNS` runs there's none;
+- **working set** (#281): for a pipeline with `learn = "working_set"`,
+  memory is the same percentile and margin of the working sets its probed
+  runs were measured at (`orca.attempts.working_set_mb`,
+  `morca._internal.working_set`) instead of their peaks, once `MIN_RUNS` of
+  the `LEARN_RUNS` have one; until then, the peaks, saying how many probed
+  runs it has.
 
 This is the simplest rule that can work: a percentile over a fixed window,
 over all of a pipeline's runs alike (fill, manual or scheduled), with no
@@ -175,11 +181,16 @@ def percentile(var xs: List[Float64], p: Float64) -> Float64:
 
 
 def recommend(
-    peaks: List[RunPeaks], raised_mb: Int, request: Request
+    peaks: List[RunPeaks],
+    raised_mb: Int,
+    request: Request,
+    working_set: Bool = False,
 ) -> Recommendation:
     """The request `peaks` (the latest runs first, at most `LEARN_RUNS`)
     suggest, at least `raised_mb` (what an out-of-memory raised the pipeline
-    to, 0 for nothing) and within `request`'s range."""
+    to, 0 for nothing) and within `request`'s range. With `working_set`
+    (`learn = "working_set"`), memory is from the runs' probed working sets
+    once `MIN_RUNS` of them have one, and from their peaks until then."""
     var mem = List[Float64]()
     var cores = List[Float64]()
     for p in peaks:
@@ -197,15 +208,36 @@ def recommend(
             " successful measured runs it learns from",
         )
         return r^
-    var mb = percentile(mem^, MEMORY_PERCENTILE) / 1048576.0 * MEMORY_MARGIN
+    var probed = List[Float64]()
+    if working_set:
+        for p in peaks:
+            if p.peak_rss_bytes >= 0 and p.working_set_mb > 0:
+                probed.append(p.working_set_mb * 1048576.0)
+    var n_probed = len(probed)
+    var from_probes = n_probed >= MIN_RUNS
+    var of = mem^
+    if from_probes:
+        r.runs = n_probed
+        of = probed^
+    var mb = percentile(of^, MEMORY_PERCENTILE) / 1048576.0 * MEMORY_MARGIN
     r.memory_mb = Int(ceil(mb / Float64(MEMORY_STEP_MB))) * MEMORY_STEP_MB
     r.memory_mb = max(r.memory_mb, MEMORY_STEP_MB)
     r.source = String(
         "p",
         Int(MEMORY_PERCENTILE * 100 + 0.5),
-        " of the runs' peak memory × ",
+        " of the runs' probed working set × " if from_probes else (
+            " of the runs' peak memory × "
+        ),
         MEMORY_MARGIN,
     )
+    if working_set and not from_probes:
+        r.source.write(
+            " (",
+            n_probed,
+            " of the ",
+            MIN_RUNS,
+            " probed runs it learns working sets from)",
+        )
     if raised_mb > r.memory_mb:
         r.memory_mb = raised_mb
         r.source = String("what an out-of-memory raised it to")
@@ -244,14 +276,21 @@ def expire_raised(mut db: State) raises -> List[String]:
 
 
 def learned(
-    mut db: State, name: String, cpus: String, memory_gb: String
+    mut db: State,
+    name: String,
+    cpus: String,
+    memory_gb: String,
+    working_set: Bool = False,
 ) raises -> Recommendation:
     """What pipeline `name`'s latest successful measured runs suggest it
     asks for, within its declared `cpus` and `memory_gb` (as registered,
-    each empty for none)."""
+    each empty for none); with `working_set`, from their probed working
+    sets (`recommend`)."""
     var peaks = recommend_db.peaks(db.conn, name, LEARN_RUNS)
     var raised_mb = recommend_db.raised_mb(db.conn, name)
-    var r = recommend(peaks, raised_mb, Request.of(cpus, memory_gb))
+    var r = recommend(
+        peaks, raised_mb, Request.of(cpus, memory_gb), working_set
+    )
     r.capped = recommend_db.capped(db.conn, name)
     return r^
 

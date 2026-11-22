@@ -4,7 +4,6 @@ peaks, and its out-of-memory raise."""
 from postgres import Connection, Params
 
 
-@fieldwise_init
 struct RunPeaks(Copyable, Movable):
     """One run's peaks: its attempts' largest memory, in bytes, and peak
     cores; -1 for what wasn't measured."""
@@ -12,6 +11,18 @@ struct RunPeaks(Copyable, Movable):
     var peak_rss_bytes: Float64
     """With its swap peak added (`peaks`)."""
     var peak_cpus: Float64
+    var working_set_mb: Float64
+    """The working set a probe measured (#281), in MB; -1 for none."""
+
+    def __init__(
+        out self,
+        peak_rss_bytes: Float64,
+        peak_cpus: Float64,
+        working_set_mb: Float64 = -1,
+    ):
+        self.peak_rss_bytes = peak_rss_bytes
+        self.peak_cpus = peak_cpus
+        self.working_set_mb = working_set_mb
 
 
 def expire_raised(mut conn: Connection, runs: Int) raises -> List[String]:
@@ -46,15 +57,18 @@ def peaks(
         (
             "SELECT max(a.peak_rss_bytes + coalesce(a.memory_swap_peak_bytes,"
             " 0))::float8 AS peak,"
-            " coalesce(max(a.peak_cpus), -1)::float8 AS cpus FROM orca.runs r"
-            " JOIN orca.steps s ON s.run = r.id JOIN orca.attempts a ON a.step"
-            " = s.id WHERE r.pipeline = $1 AND r.status = 'succeeded' GROUP BY"
-            " r.id HAVING max(a.peak_rss_bytes) IS NOT NULL ORDER BY r.id DESC"
-            " LIMIT $2"
+            " coalesce(max(a.peak_cpus), -1)::float8 AS cpus,"
+            " coalesce(max(a.working_set_mb), -1)::float8 AS ws FROM orca.runs"
+            " r JOIN orca.steps s ON s.run = r.id JOIN orca.attempts a ON"
+            " a.step = s.id WHERE r.pipeline = $1 AND r.status = 'succeeded'"
+            " GROUP BY r.id HAVING max(a.peak_rss_bytes) IS NOT NULL ORDER BY"
+            " r.id DESC LIMIT $2"
         ),
         Params().text(pipeline).int64(Int64(runs)),
     ):
-        out.append(RunPeaks(r.float64("peak"), r.float64("cpus")))
+        out.append(
+            RunPeaks(r.float64("peak"), r.float64("cpus"), r.float64("ws"))
+        )
     return out^
 
 

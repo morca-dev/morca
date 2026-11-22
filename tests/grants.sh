@@ -93,7 +93,7 @@ bad 'cpus = 1.5' "cpus: is a count or a string"
 bad 'cpus = "many"' "cpus: is CPUs, N, MIN..MAX, auto or auto..MAX, not many"
 bad 'memory_gb = "2..auto"' "memory_gb: is GB with auto as a range's lower end only"
 bad 'cpus = "auto..0"' "cpus: is CPUs, auto..MAX with MAX from 1"
-bad 'learn = "no"' "learn: is true or false"
+bad 'learn = "no"' 'learn: is true, false or "working_set"'
 if ./build/morca register --no-config --cpus 0 ./build/plain >> "$log" 2>&1; then
     fail "registered --cpus 0"
 fi

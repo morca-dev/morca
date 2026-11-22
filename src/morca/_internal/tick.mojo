@@ -97,6 +97,7 @@ def tick(mut self: Scheduler, now: Int64) raises:
     var readings = self._sample()
     self._kill_held()
     self._offload.sample(self._contained, self.cgroups.knobs.swap_pct)
+    self._probe_runs()
     try:
         self._kill_wedged()
     except e:

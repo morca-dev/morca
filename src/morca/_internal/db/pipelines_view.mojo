@@ -231,6 +231,11 @@ struct UsageSummary(Copyable, Movable):
     var cpu_max: Float64
     var cpus_p50: Float64
     var cpus_max: Float64
+    var ws_runs: Int
+    """How many of them a probe measured the working set of (#281)."""
+    var ws_p50: Float64
+    """Their working sets' median and most, in MB; -1 for none."""
+    var ws_max: Float64
 
     def json(self) -> String:
         """`{"runs": n, "peak_rss_bytes": {"p50": .., "max": ..}, ...}`."""
@@ -239,11 +244,12 @@ struct UsageSummary(Copyable, Movable):
             ("peak_rss_bytes", self.peak_p50, self.peak_max),
             ("cpu_seconds", self.cpu_p50, self.cpu_max),
             ("peak_cpus", self.cpus_p50, self.cpus_max),
+            ("working_set_mb", self.ws_p50, self.ws_max),
         ]
         for p in parts:
             out.write(', "', p[0], '": {"p50": ')
             out.write(_json_num(p[1]), ', "max": ', _json_num(p[2]), "}")
-        out.write("}")
+        out.write(', "working_set_runs": ', self.ws_runs, "}")
         return out^
 
 
@@ -266,9 +272,12 @@ def usage_summary(
             " AS peak_max, coalesce(percentile_cont(0.5) WITHIN GROUP (ORDER BY"
             " cpu), -1) AS cpu_p50, coalesce(max(cpu), -1) AS cpu_max,"
             " coalesce(percentile_cont(0.5) WITHIN GROUP (ORDER BY cpus), -1)"
-            " AS cpus_p50, coalesce(max(cpus), -1) AS cpus_max FROM (SELECT"
-            " max(a.peak_rss_bytes) AS peak, sum(a.cpu_seconds) AS cpu,"
-            " max(a.peak_cpus) AS cpus FROM orca.runs r JOIN orca.steps s ON"
+            " AS cpus_p50, coalesce(max(cpus), -1) AS cpus_max, count(ws) AS"
+            " ws_n, coalesce(percentile_cont(0.5) WITHIN GROUP (ORDER BY ws),"
+            " -1) AS ws_p50, coalesce(max(ws), -1)::float8 AS ws_max FROM"
+            " (SELECT max(a.peak_rss_bytes) AS peak, sum(a.cpu_seconds) AS cpu,"
+            " max(a.peak_cpus) AS cpus, max(a.working_set_mb) AS ws FROM"
+            " orca.runs r JOIN orca.steps s ON"
             " s.run = r.id JOIN orca.attempts a ON a.step = s.id WHERE"
             " r.pipeline = $1 GROUP BY r.id HAVING max(a.peak_rss_bytes) IS"
             " NOT NULL OR sum(a.cpu_seconds) IS NOT NULL ORDER BY r.id DESC"
@@ -284,6 +293,9 @@ def usage_summary(
         r.float64("cpu_max"),
         r.float64("cpus_p50"),
         r.float64("cpus_max"),
+        Int(r.int64("ws_n")),
+        r.float64("ws_p50"),
+        r.float64("ws_max"),
     )
 
 

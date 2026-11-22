@@ -40,7 +40,9 @@ from morca._internal.ui.pipeline_data import pipeline_data_html
 from morca._internal.ui.parts import (
     CPU_HELP,
     PEAK_HELP,
+    WORKING_SET_HELP,
     datasets_with_data,
+    mb_text,
     named_code_link,
     pause_button,
     request_text,
@@ -1049,6 +1051,20 @@ def _usage_card(mut h: Html, u: UsageSummary):
     else:
         h.raw('<span class="muted">not measured</span>')
     h.raw("</dd>")
+    if u.ws_runs > 0:
+        fact_item(
+            h, "Working set", "usage-working-set", WORKING_SET_HELP, "runners"
+        )
+        h.text(
+            "p50 ", mb_text(Int(u.ws_p50)), " · max ", mb_text(Int(u.ws_max))
+        )
+        h.raw('<span class="muted">')
+        h.text(
+            " · ",
+            u.ws_runs,
+            " probed run" if u.ws_runs == 1 else " probed runs",
+        )
+        h.raw("</span></dd>")
     fact_item(h, "CPU used", "usage-cpu", CPU_HELP, "runners")
     if u.cpu_max >= 0:
         h.text("p50 ", cpu_text(u.cpu_p50), " · max ", cpu_text(u.cpu_max))

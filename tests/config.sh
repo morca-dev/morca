@@ -304,6 +304,24 @@ daily_before=$(row daily)
     || fail "the export registered otherwise: $(row toy) / $(row daily)"
 echo "ok   config export writes a file that registers the same"
 
+# learn = "working_set" (#281): registered, shown and exported; taken out of
+# the file, gone.
+cp morca.toml ws.bak
+perl -pi -e 's/^max_runs = 1$/max_runs = 1\nlearn = "working_set"\nprobe_every = 4/' morca.toml
+"$morca" register "$root/build/toy" >> "$log" 2>&1 || fail "register learn = working_set"
+learnrow() { q "SELECT concat_ws(' ', coalesce(learn::text, '-'), coalesce(learn_from, '-'), coalesce(probe_every::text, '-')) FROM orca.pipelines WHERE name = 'toy'"; }
+[ "$(learnrow)" = "true working_set 4" ] || fail "learn = working_set registered as: $(learnrow)"
+"$morca" config show toy > show.out 2>> "$log" || fail "config show learn"
+grep -Eq '^  learn +working_set +morca.toml \[pipelines.toy\]$' show.out || fail "show's learn: $(cat show.out)"
+grep -Eq '^  probe_every +4 +morca.toml \[pipelines.toy\]$' show.out || fail "show's probe_every"
+"$morca" config export --out - > ws-export.toml 2>> "$log" || fail "export learn"
+grep -q '^learn = "working_set"$' ws-export.toml && grep -q '^probe_every = 4$' ws-export.toml \
+    || fail "export's learn: $(cat ws-export.toml)"
+cp ws.bak morca.toml
+"$morca" register "$root/build/toy" >> "$log" 2>&1 || fail "register without learn"
+[ "$(learnrow)" = "- - -" ] || fail "learn = working_set stayed: $(learnrow)"
+echo "ok   learn = \"working_set\" and probe_every are registered, shown and exported"
+
 # morca aws register sends the file and its commit to the control instance's
 # morca register, which reads it back.
 b64=$(base64 < morca.toml | tr -d '\n')

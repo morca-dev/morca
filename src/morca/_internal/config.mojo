@@ -16,6 +16,8 @@ runs (#145), read by `morca register` and `morca aws register`.
     cpus = "1..16"               # a request: MIN..MAX (morca.resources)
     memory_gb = "2..24"          # or "auto", "auto..24" (morca.recommend)
     learn = false                # don't: "auto" is then no request
+                                 # or "working_set": probe it (morca.working_set)
+    probe_every = 4              # with it, probe about one run in 4
     env = { DISTA_WORKER_SLOTS = "4", GHARCHIVE_PARALLEL = "16" }
     secrets = { GITHUB_TOKEN = "orca/github-token" }   # Secrets Manager IDs
     fills = "all"                # fill the range by itself (morca.fill)
@@ -138,6 +140,7 @@ comptime SCALAR_KEYS = [
     "cpus",
     "memory_gb",
     "learn",
+    "probe_every",
     "fills",
     "fill_order",
     "fill_max_runs",
@@ -232,6 +235,26 @@ def parse_keys_per_run(v: String) raises -> Int:
     )
 
 
+comptime WORKING_SET = "working_set"
+"""`learn`'s value for a pipeline whose runs are probed for their working
+set (`morca._internal.working_set`), which its learned memory comes from."""
+comptime MAX_PROBE_EVERY = 1000
+
+
+def parse_probe_every(v: String) raises -> Int:
+    """`probe_every` (#281): probe about one run in this many, from 1 (every
+    run) to `MAX_PROBE_EVERY`; 1 by default."""
+    try:
+        var n = Int(v)
+        if n >= 1 and n <= MAX_PROBE_EVERY:
+            return n
+    except:
+        pass
+    raise Error(
+        "probe_every is a count from 1 to ", MAX_PROBE_EVERY, ", not ", v
+    )
+
+
 comptime MAX_PRIORITY = 1000
 """`priority`'s largest value; its smallest is the negative."""
 
@@ -310,9 +333,11 @@ def _canonical(key: String, text: String) raises -> String:
     if key == "memory_gb":
         return canonical_memory_gb(text)
     if key == "learn":
-        if text != "true" and text != "false":
-            raise Error("is true or false, not ", text)
+        if text != "true" and text != "false" and text != WORKING_SET:
+            raise Error('is true, false or "working_set", not ', text)
         return text
+    if key == "probe_every":
+        return String(parse_probe_every(text))
     if key == "fills":
         return parse_fills(text)
     if key == "fill_order":
@@ -349,8 +374,14 @@ def _canonical_toml(key: String, v: TomlValue) raises -> String:
             raise Error('is GB, a number or a string "MIN..MAX", not ', v.kind)
         return _canonical(key, v.text)
     if key == "learn":
-        if v.kind != BOOLEAN:
-            raise Error("is true or false, not ", v.kind)
+        if v.kind != BOOLEAN and not (
+            v.kind == STRING and v.text == WORKING_SET
+        ):
+            raise Error('is true, false or "working_set", not ', v.text)
+        return _canonical(key, v.text)
+    if key == "probe_every":
+        if v.kind != INTEGER:
+            raise Error("is a count, not ", v.kind)
         return _canonical(key, v.text)
     if key == "fill_max_runs" and v.kind == STRING:
         if not fill_max_runs_auto(v.text):
@@ -751,6 +782,7 @@ struct ProjectConfig(Movable):
                     self._check_table(
                         q, String("[pipelines.", toml_key(name), "]")
                     )
+                    self._check_probe(name)
             elif top == "pools":
                 # Worker pools morca grows itself (morca.pool_config).
                 try:
@@ -782,6 +814,22 @@ struct ProjectConfig(Movable):
                         " [datasets.<name>] or [stack]"
                     ),
                 )
+
+    def _check_probe(self, name: String) raises:
+        """A pipeline's own `probe_every` needs its `learn` (or
+        `[defaults]`') to be `"working_set"`: nothing else probes."""
+        var p: List[String] = ["pipelines", name, "probe_every"]
+        if not self.doc.get(p):
+            return
+        var learn = self.doc.get(["pipelines", name, "learn"])
+        if not learn:
+            learn = self.doc.get(["defaults", "learn"])
+        if not learn or learn.value().text != WORKING_SET:
+            self._fail(
+                p,
+                String("[pipelines.", toml_key(name), "]"),
+                'probe_every needs learn = "working_set"',
+            )
 
     def _check_table(self, path: List[String], table: String) raises:
         for key in self.doc.keys(path):

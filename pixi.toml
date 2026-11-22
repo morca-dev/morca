@@ -302,7 +302,7 @@ test-usage = { cmd = "scripts/unit-tests.sh build executor-core && scripts/unit-
 # Containment (morca.cgroup): the arithmetic, then on Linux a run killed for
 # its memory and retried bigger (skipped, saying why, without cgroups); then a
 # run at a lower nice with MORCA_CGROUPS=0 (tests/run_nice.sh, #229).
-test-cgroups = { cmd = "scripts/unit-tests.sh build executor-core && scripts/unit-tests.sh run test-cgroup && scripts/with-postgres.sh tests/cgroups.sh && scripts/with-postgres.sh tests/run_nice.sh" }
+test-cgroups = { cmd = "scripts/unit-tests.sh build executor-core && scripts/unit-tests.sh run test-cgroup && scripts/unit-tests.sh run test-working-set && scripts/with-postgres.sh tests/cgroups.sh && scripts/with-postgres.sh tests/run_nice.sh" }
 test-aws = { cmd = "tests/aws.sh && tests/replace_control.sh" }
 test-lost-workers = { cmd = "scripts/with-postgres.sh tests/lost_workers.sh" }
 test-datasets = { cmd = "scripts/with-postgres.sh tests/datasets.sh" }

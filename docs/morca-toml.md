@@ -64,7 +64,8 @@ Each key can go in `[defaults]` or in `[pipelines.<name>]`.
 | `max_runs` | integer from 1 to 10000, or string `"auto"` or `"auto..N"` | the code's `Pipeline[..., max_runs=]`, else 1 | `--max-runs` (new) | Overrides the code's value. `auto`: [How many at once](#how-many-at-once). |
 | `cpus` | integer `N` from 1 to 1024, or string `"MIN..MAX"`, `"auto"` or `"auto..MAX"` | none: no request | `--cpus` | Whole CPUs the run asks for. See [Requests and grants](#requests-and-grants); `auto`: [Learned requests](#learned-requests). |
 | `memory_gb` | number `N` (decimals allowed), or string `"MIN..MAX"`, `"auto"` or `"auto..MAX"`, over 0 and up to 65536 | none: no request | `--memory-gb` | GB of memory the run asks for. |
-| `learn` | boolean | `true` | none | `false`: `auto` asks for nothing instead of what its runs suggest. See [Learned requests](#learned-requests). |
+| `learn` | boolean, or string `"working_set"` | `true` | none | `false`: `auto` asks for nothing instead of what its runs suggest. `"working_set"`: its runs are probed for their working set, which its learned memory comes from. See [Learned requests](#learned-requests) and [The working set](#the-working-set). |
+| `probe_every` | integer from 1 to 1000 | 1 | none | With `learn = "working_set"`, probe about one run in this many. Refused in a pipeline's table without `learn = "working_set"`. See [The working set](#the-working-set). |
 | `secrets` | table of `NAME = "orca/<id>"` | none | `--secret NAME=ID` | Secrets Manager IDs only, never values. A `--secret` flag replaces the whole set. |
 | `env` | table of `NAME = "value"` (numbers and booleans become text) | none | none (it replaces `MORCA_RUN_ENV` for pipeline settings) | See [env](#env-morca_run_env-and-the-warm-pool) below. |
 | `fills` | string: `"all"` or `"since_registration"` | `since_registration` | none | `all`: the scheduler fills the pipeline's whole range by itself. See [Fills](#fills). |
@@ -79,7 +80,7 @@ Each key can go in `[defaults]` or in `[pipelines.<name>]`.
 | `fill_lag` | string, a duration: a whole number of `s`, `m`, `h` or `d`, up to `31d`; or `0` | `0`, none | none | How long after its end a partition is filled. See [The lag](#the-lag). |
 
 `image` (`--image`) and `--spot` stay flags only. The `fill*` keys,
-`learn`, `priority`, `concurrency` and `enabled` are the file's only: no flag sets them.
+`learn`, `probe_every`, `priority`, `concurrency` and `enabled` are the file's only: no flag sets them.
 
 ### What is refused
 
@@ -445,6 +446,63 @@ and where it came from (`request_source`: `declared`, `learned` or
 44). Its page shows it beside the grant (**Requested** `3.25 GB · learned
 from 20 runs`), and its JSON has `request_source`. Before rolling morca back
 past this, register without `auto`: an older morca refuses it.
+
+### The working set
+
+A run's peak counts every page it touched, cold ones and page cache
+included, so a request learned from peaks can be more than the run needs to
+go at full speed. `learn = "working_set"` (#281, after Meta's Senpai and
+TMO; `src/morca/_internal/working_set.mojo`) probes the pipeline's runs
+instead:
+
+```toml
+[pipelines.census]
+memory_gb = "auto"
+learn = "working_set"
+probe_every = 4        # about one run in 4; 1 (every run) by default
+```
+
+While a probed run goes, the scheduler lowers its cgroup's `memory.high`
+step by step below its limit and watches the cgroup's memory pressure
+(`memory.pressure`, `some`): over each interval, the share of the time some
+of its tasks waited on memory. At or under a small target it goes down
+another step; over it, it goes back up (to the limit at once when the
+pressure is ten times the target) and never comes down that far again. The
+run's **working set** is the lowest `memory.high` it held at the target,
+at least a step over the highest at which the pressure passed it. It goes
+on the run's attempts (`orca.attempts.working_set_mb`, migration 67) when
+its process is reaped, and shows beside the peak: on the attempt's page
+(**Working set**), in the run's steps table (`1.2 GB · ws 800 MB / 2 GB`),
+on the pipeline's Resources card, and in their JSONs (`working_set_mb`).
+
+Once 3 of the pipeline's last 20 successful runs have one, its learned
+memory is the 95th percentile of their working sets plus 15%, as for peaks;
+until then it's learned from the peaks, and `morca config show` says how
+many probed runs it has. An out-of-memory raise still floors it.
+
+**Only some runs.** Only a run's first start is probed, never a retry,
+and with `probe_every = N` about one run in N (by a hash of its number).
+Only local and control-placed runs are probed, where the scheduler makes
+their cgroups; runs on remote workers, EC2 and Kubernetes aren't.
+
+**Safety.** Each run's cgroup has `memory.swap.max = 0`, so memory the
+kernel can't reclaim (anonymous, without swap) stalls the run under a
+`memory.high` below it. The probe never lowers `memory.high` under half the
+limit (`MORCA_RUN_PROBE_FLOOR`), nor more than a step under what the run
+uses now, nor below where the pressure passed the target before; gives the
+run its limit back as soon as the pressure shows, when the run uses 95% of
+its limit, or when it can't read the cgroup; and never changes
+`memory.max`. A run under a lowered `memory.high` is under 95% of its
+limit, so the held check (`MORCA_RUN_MEMORY_HELD_SECONDS`) doesn't count it
+held. A scheduler that starts (or starts again after a tick failed) gives
+every run cgroup it finds its limit back. Without swap the probe can only
+find memory that is reclaimable (page cache, mapped files); paired with
+offload (#282) it can find cold anonymous memory too.
+
+The scheduler's knobs: `MORCA_RUN_PROBE_SECONDS` (5, the interval),
+`MORCA_RUN_PROBE_TARGET` (0.1, percent of the interval), `MORCA_RUN_PROBE_STEP`
+(2, percent of the limit) and `MORCA_RUN_PROBE_FLOOR` (50, percent of the
+limit).
 
 ### How many at once
 

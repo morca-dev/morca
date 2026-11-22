@@ -24,6 +24,7 @@ from morca._internal.fill import (
     fill_status,
 )
 from morca._internal.fill_requests import end_finished
+from morca._internal.working_set import probed
 from morca._internal.system import system_now
 from morca._internal.db.batches import mark_batch
 import morca._internal.db.starting as starting_db
@@ -521,6 +522,8 @@ def _start(
             cgroup=cg.path,
         )
         if cg.path:
+            if probed(Int(id), starts[i], _probe_every(p)):
+                self._probe.watch(pid, cg)
             self._contained[pid] = cg^
         self._meters[pid] = Meter()
         self._spawned[pid] = (Int(id), starts[i], stage)
@@ -547,6 +550,12 @@ def _start(
                 )
             except e:
                 print("morca: no sampler for run", id, ":", e)
+
+
+def _probe_every(p: Registered) -> Int:
+    """One run in how many of `p` is probed for its working set (#281):
+    0 for none, unless it learns from it."""
+    return p.probe_every if p.working_set and p.learn else 0
 
 
 def _start_control(
@@ -611,6 +620,8 @@ def _start_control(
     self._spawned[pid] = (id, start, c.stage)
     self._meters[pid] = Meter()
     if cg.path:
+        if probed(id, start, _probe_every(p)):
+            self._probe.watch(pid, cg)
         self._contained[pid] = cg^
     var sampled = c.location != ""
     self._control[pid] = c^

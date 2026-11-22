@@ -496,6 +496,14 @@ def shown(mut db: State, only: String = "") raises -> List[Shown]:
         if not learn:
             var w = _source(sources, "learn")
             s.add("learn", "false", w[0], w[1])
+        elif r.learn_from:
+            var w = _source(sources, "learn")
+            s.add("learn", r.learn_from, w[0], w[1])
+            if r.probe_every:
+                var e = _source(sources, "probe_every")
+                s.add("probe_every", String(r.probe_every.value()), e[0], e[1])
+            else:
+                s.add("probe_every", "1", CODE_DEFAULT, "")
         _show_fills(s, r, sources)
         if r.image:
             s.add("image", r.image, FROM_FLAG, "--image")
@@ -520,7 +528,9 @@ def shown(mut db: State, only: String = "") raises -> List[Shown]:
         for ref row in s.rows:
             if row.setting.source == FROM_FILE:
                 row.setting.line = _line_of(sources, row.key)
-        var l = learned(db, s.name, r.cpus, r.memory_gb)
+        var l = learned(
+            db, s.name, r.cpus, r.memory_gb, r.learn_from == "working_set"
+        )
         s.auto = Request.of(r.cpus, r.memory_gb).auto()
         s.learn = learn
         l.applied = s.auto and learn and l.any()
@@ -672,8 +682,14 @@ def export_toml(mut db: State) raises -> String:
                     toml_string((r.cpus if key == "cpus" else r.memory_gb)),
                     "\n",
                 )
-        if r.learn and not r.learn.value():
+        # `learn` is null or false but for "working_set", which stores true.
+        var learns = not r.learn or r.learn.value()
+        if not learns:
             out.write("learn = false\n")
+        elif r.learn_from:
+            out.write("learn = ", toml_string(r.learn_from), "\n")
+            if r.probe_every:
+                out.write("probe_every = ", r.probe_every.value(), "\n")
         if r.fills:
             out.write("fills = ", toml_string(r.fills), "\n")
         if r.fill_order:

@@ -325,6 +325,8 @@ struct StepRecord(Copyable, Movable):
     """Its latest attempt's swap peak (#282), and of it in zswap; -1 for
     unknown."""
     var zswapped: Int
+    var working_set_mb: Int
+    """What a probe measured (#281); 0 for none."""
 
 
 def step_records(mut conn: Connection, run: Int) raises -> List[StepRecord]:
@@ -351,12 +353,12 @@ def step_records(mut conn: Connection, run: Int) raises -> List[StepRecord]:
             " peak, coalesce(u.cpu, -1) AS cpu, coalesce(u.cpus, -1) AS cpus,",
             " coalesce(u.limit_mb, 0) AS limit_mb, coalesce(u.grant_mb, 0) AS",
             " grant_mb, coalesce(u.swap, -1) AS swap, coalesce(u.zswapped, -1)",
-            " AS zswapped FROM orca.steps s LEFT JOIN LATERAL (SELECT",
-            " a.peak_rss_bytes AS peak, a.cpu_seconds AS cpu, a.peak_cpus AS",
-            " cpus, a.memory_limit_mb AS limit_mb, a.grant_memory_mb AS",
-            " grant_mb, a.memory_swap_peak_bytes AS swap,",
-            " a.memory_zswapped_peak_bytes AS zswapped FROM orca.attempts a",
-            " WHERE a.step = s.id ORDER BY",
+            " AS zswapped, coalesce(u.ws, 0) AS ws FROM orca.steps s LEFT JOIN",
+            " LATERAL (SELECT a.peak_rss_bytes AS peak, a.cpu_seconds AS cpu,",
+            " a.peak_cpus AS cpus, a.memory_limit_mb AS limit_mb,",
+            " a.grant_memory_mb AS grant_mb, a.memory_swap_peak_bytes AS swap,",
+            " a.memory_zswapped_peak_bytes AS zswapped, a.working_set_mb AS ws",
+            " FROM orca.attempts a WHERE a.step = s.id ORDER BY",
             " a.attempt DESC",
             " LIMIT 1) u ON true WHERE s.run = $1 ORDER BY s.ord, s.id",
         ),
@@ -383,6 +385,7 @@ def step_records(mut conn: Connection, run: Int) raises -> List[StepRecord]:
                 Int(r.int64("grant_mb")),
                 Int(r.int64("swap")),
                 Int(r.int64("zswapped")),
+                Int(r.int64("ws")),
             )
         )
     return out^
@@ -469,6 +472,8 @@ struct AttemptRecord(Copyable, Movable):
     var swap: Int
     """Its swap peak (#282), and of it in zswap; -1 for unknown."""
     var zswapped: Int
+    var working_set_mb: Int
+    """What a probe measured (#281); 0 for none."""
 
 
 def _attempts(
@@ -487,8 +492,8 @@ def _attempts(
             " AS cpus, coalesce(a.memory_limit_mb, 0) AS limit_mb,",
             " coalesce(a.grant_memory_mb, 0) AS grant_mb,",
             " coalesce(a.memory_swap_peak_bytes, -1) AS swap,",
-            " coalesce(a.memory_zswapped_peak_bytes, -1) AS zswapped FROM",
-            " orca.attempts a",
+            " coalesce(a.memory_zswapped_peak_bytes, -1) AS zswapped,",
+            " coalesce(a.working_set_mb, 0) AS ws FROM orca.attempts a",
             " JOIN orca.steps s ON s.id = a.step",
             " JOIN orca.runs r ON r.id = s.run WHERE s.run = $1 AND ",
             cond,
@@ -518,6 +523,7 @@ def _attempts(
                 Int(r.int64("grant_mb")),
                 Int(r.int64("swap")),
                 Int(r.int64("zswapped")),
+                Int(r.int64("ws")),
             )
         )
     return out^

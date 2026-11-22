@@ -179,6 +179,7 @@ from morca._internal.cgroup import (
     start_limit_mb,
 )
 from morca._internal.run_cpu import CpuKnobs
+from morca._internal.working_set import ProbeKnobs, ProbeWatch, restore_high
 from morca._internal.control import ControlLimits
 from morca._internal.crash import (
     crash_summary,
@@ -412,6 +413,9 @@ struct Scheduler(Movable):
     """Since when contained runs have been held at their memory limit."""
     var _offload: OffloadWatch
     """The most of each contained run's memory in swap so far (#282)."""
+    var _probe: ProbeWatch
+    """The contained runs probed for their working set
+    (`morca._internal.working_set`)."""
     var _cgroups_next: Int
     """When the runs' cgroups' memory is next recorded, on the monotonic
     clock."""
@@ -501,6 +505,7 @@ struct Scheduler(Movable):
         self._wedged = Dict[Int, Bool]()
         self._held = HeldWatch()
         self._offload = OffloadWatch()
+        self._probe = ProbeWatch()
         self._cgroups_next = 0
         self.instance = 0
         self.leading = True
@@ -639,6 +644,11 @@ struct Scheduler(Movable):
             except:
                 pass
 
+    def _probe_runs(mut self):
+        """Each tick, the next memory.high of each run probed for its
+        working set whose interval has passed (`ProbeWatch.step`)."""
+        self._probe.step(self._contained)
+
     def _kill_wedged(mut self) raises:
         """Kills each process of ours whose run's heartbeat went stale: it's
         wedged, or stopped, rather than gone (it would have been reaped),
@@ -730,7 +740,13 @@ struct Scheduler(Movable):
                 "runs out, and control-placed runs killed over",
                 "MORCA_CONTROL_MEMORY_MB",
             )
+        self._probe = ProbeWatch(ProbeKnobs.from_env())
         self._unswept = self.cgroups.stale()
+        # A probe that stopped (a scheduler before this one, or this one
+        # before a tick failed) leaves no run under its limit.
+        for path in self._unswept:
+            if restore_high(path, self.cgroups.knobs.margin_pct):
+                print("morca: gave", path, "its memory limit back")
         self._sweep_cgroups()
 
     def _sweep_cgroups(mut self):
@@ -823,6 +839,15 @@ struct Scheduler(Movable):
                 print("morca: can't raise", c.pipeline, "memory:", e)
         var stall = Cgroups.stall_ms(c.path)
         var off = self._offload.take(pid, c.path, self.cgroups.knobs.swap_pct)
+        var working_set = self._probe.take(pid)
+        if working_set > 0:
+            print("run", c.run, "pid", pid, "working set", working_set, "MB")
+            try:
+                scheduler_db.attempts_working_set(
+                    self.db.conn, c.run, pid, working_set
+                )
+            except e:
+                print("morca: can't record run", c.run, "working set:", e)
         try:
             scheduler_db.attempts_memory(
                 self.db.conn,
