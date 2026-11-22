@@ -163,6 +163,7 @@ from morca._internal.expiry import (
     expire_argv,
     maintain_binary,
 )
+from morca._internal.offload import OffloadWatch
 from morca._internal.cgroup import (
     Cgroups,
     Contained,
@@ -409,6 +410,8 @@ struct Scheduler(Movable):
     they're reaped: what their attempts are failed with says so."""
     var _held: HeldWatch
     """Since when contained runs have been held at their memory limit."""
+    var _offload: OffloadWatch
+    """The most of each contained run's memory in swap so far (#282)."""
     var _cgroups_next: Int
     """When the runs' cgroups' memory is next recorded, on the monotonic
     clock."""
@@ -497,6 +500,7 @@ struct Scheduler(Movable):
         self._stalled = Dict[Int, Bool]()
         self._wedged = Dict[Int, Bool]()
         self._held = HeldWatch()
+        self._offload = OffloadWatch()
         self._cgroups_next = 0
         self.instance = 0
         self.leading = True
@@ -719,6 +723,7 @@ struct Scheduler(Movable):
         )
         print("morca: run cgroups", self.cgroups.why)
         print("morca: runs' CPU priority:", self.cgroups.cpu_text())
+        print("morca: runs' swap:", self.cgroups.swap_text())
         if not self.cgroups.on():
             print(
                 "morca: runs are contained as before: first to go if memory",
@@ -817,6 +822,7 @@ struct Scheduler(Movable):
             except e:
                 print("morca: can't raise", c.pipeline, "memory:", e)
         var stall = Cgroups.stall_ms(c.path)
+        var off = self._offload.take(pid, c.path, self.cgroups.knobs.swap_pct)
         try:
             scheduler_db.attempts_memory(
                 self.db.conn,
@@ -826,6 +832,8 @@ struct Scheduler(Movable):
                 c.grant_mb,
                 stall[0],
                 stall[1],
+                off.swap_bytes,
+                off.zswapped_bytes,
             )
             scheduler_db.clear_memory_bytes(self.db.conn, c.run, c.start)
         except e:

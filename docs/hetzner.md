@@ -385,7 +385,9 @@ in `lib.sh`, which both run):
   on ssh's standard input (`morca-stack sync`);
 - the stack settings `MORCA_IMAGE`, `CLOUDFLARED_IMAGE`, `BUCKET`,
   `BACKUP_KEEP`, `GHCR_USER`, `OVERLAP` (1 unless `hetzner.env` says 0)
-  and `DRAIN_SECONDS` (`morca-stack configure`), and the apps
+  `DRAIN_SECONDS`, `HANDOVER_WAIT_SECONDS` and `ZSWAP`
+  ([offload to zswap](#offload-to-zswap); unset unless `hetzner.env` sets
+  it) (`morca-stack configure`), and the apps
   (`morca-stack app`). Not the tags: those are `deploy.sh`'s, and
   `MORCA_TAG` in `hetzner.env` is only the first `up.sh`'s. `CGROUPS` (on
   unless set to 0) and `HEALTH_TIMEOUT`, set on the server by hand, aren't
@@ -1049,6 +1051,69 @@ v1), the scheduler says why once (`morca: run cgroups off: ...`) and runs as
 before: `first_to_go`, and control-placed runs killed over
 `MORCA_CONTROL_MEMORY_MB`. Ops > Control lists each run going with its
 memory against its limit.
+
+### Offload to zswap
+
+Off by default (#282). A run a little past its grant whose memory is
+anonymous can't free any: it's throttled at its limit until morca kills it
+for being held there, and its retry asks for 1.5 times as much. With
+`MORCA_RUN_SWAP_PCT` (a whole percent from 0 to 100, in `settings.env`: a
+line of `EXTRA_ENV_FILE`) each run's cgroup may instead keep that percent
+of its limit in swap (`memory.swap.max`, 0 otherwise), so the run pushes
+its coldest pages out and slows down rather than stalls. zswap makes that
+cheap: pages go to a compressed pool in memory first, and to the swapfile
+(4 GB, which cloud-init makes) only once the pool is full. Ubuntu's kernel
+has zswap, off. `ZSWAP` in `hetzner.env` turns it on:
+
+```sh
+# hetzner.env
+ZSWAP=20                         # zswap on, its pool at most 20% of memory
+# the EXTRA_ENV_FILE
+MORCA_RUN_SWAP_PCT=20            # each run may keep 20% of its limit in swap
+```
+
+The deploy passes `ZSWAP` to `stack.conf` (`morca-stack configure`), and
+each `morca-stack apply` writes it to `/sys/module/zswap/parameters`
+(`enabled`, `max_pool_percent`) and to `/etc/tmpfiles.d/morca-zswap.conf`,
+which sets them again at each boot (a reboot, `rescale.sh`), saying what it
+changed:
+
+```
+morca-stack: zswap on, its pool at most 20% of memory (ZSWAP=20; it was N, 20%)
+```
+
+`ZSWAP=0`, or the line taken out of `hetzner.env` once it was on, turns zswap
+off and removes the file; a server whose zswap morca-stack never turned on is
+left as it is. Neither replaces a container. `deploy.sh` and `up.sh` refuse
+a `ZSWAP` that isn't a whole percent from 0 to 50, and a
+`MORCA_RUN_SWAP_PCT` in `EXTRA_ENV_FILE` that isn't one from 0 to 100,
+before anything changes on the server (a scheduler given a bad one wouldn't
+start). An apply warns, and goes on, where the kernel has no zswap or the
+server no swap. The two are independent: `MORCA_RUN_SWAP_PCT` alone offloads
+to the swapfile, uncompressed, and `ZSWAP` alone changes nothing for runs,
+whose `memory.swap.max` stays 0. The scheduler says which on its log:
+
+```
+morca: runs' swap: memory.swap.max at 20% of each run's limit (MORCA_RUN_SWAP_PCT), zswap on
+```
+
+Each attempt then records the most of its memory in swap at once, and of
+that in zswap (the run's Steps table and the attempt's page; [docs/ui.md](ui.md#what-a-run-uses)),
+and a learned request counts the swap peak on top of the memory peak, so
+offload never makes it smaller. A run that needs more than its limit and its
+swap together is held, or killed, as before.
+
+**Measuring it** (the issue's milestone): on a dev stack with both set,
+register a pipeline whose run needs 10 to 20% more than its grant (the
+census's ballast at `memory_gb` a little under its working set), and
+compare, run against run, with `MORCA_RUN_SWAP_PCT=0`: without offload its
+first attempt fails `out of memory at <limit>` after
+`MORCA_RUN_MEMORY_HELD_SECONDS`; with it, the attempt succeeds, its
+`memory_swap_peak_bytes` and `memory_zswapped_peak_bytes` say how much went
+out, its `memory_stall_ms` how long it waited for it, and its duration
+against a run with room the slowdown. `grep zswap /proc/vmstat`
+(`zswpout`, `zswpin`) and `/sys/kernel/debug/zswap` on the server show the
+pool's side.
 
 ## Worker pools that grow themselves
 

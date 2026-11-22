@@ -321,6 +321,10 @@ struct StepRecord(Copyable, Movable):
     var cpus: Float64
     var limit_mb: Int
     var grant_mb: Int
+    var swap: Int
+    """Its latest attempt's swap peak (#282), and of it in zswap; -1 for
+    unknown."""
+    var zswapped: Int
 
 
 def step_records(mut conn: Connection, run: Int) raises -> List[StepRecord]:
@@ -346,10 +350,13 @@ def step_records(mut conn: Connection, run: Int) raises -> List[StepRecord]:
             " = s.copied_from), 0)::text AS from_run, coalesce(u.peak, -1) AS",
             " peak, coalesce(u.cpu, -1) AS cpu, coalesce(u.cpus, -1) AS cpus,",
             " coalesce(u.limit_mb, 0) AS limit_mb, coalesce(u.grant_mb, 0) AS",
-            " grant_mb FROM orca.steps s LEFT JOIN LATERAL (SELECT",
+            " grant_mb, coalesce(u.swap, -1) AS swap, coalesce(u.zswapped, -1)",
+            " AS zswapped FROM orca.steps s LEFT JOIN LATERAL (SELECT",
             " a.peak_rss_bytes AS peak, a.cpu_seconds AS cpu, a.peak_cpus AS",
             " cpus, a.memory_limit_mb AS limit_mb, a.grant_memory_mb AS",
-            " grant_mb FROM orca.attempts a WHERE a.step = s.id ORDER BY",
+            " grant_mb, a.memory_swap_peak_bytes AS swap,",
+            " a.memory_zswapped_peak_bytes AS zswapped FROM orca.attempts a",
+            " WHERE a.step = s.id ORDER BY",
             " a.attempt DESC",
             " LIMIT 1) u ON true WHERE s.run = $1 ORDER BY s.ord, s.id",
         ),
@@ -374,6 +381,8 @@ def step_records(mut conn: Connection, run: Int) raises -> List[StepRecord]:
                 r.float64("cpus"),
                 Int(r.int64("limit_mb")),
                 Int(r.int64("grant_mb")),
+                Int(r.int64("swap")),
+                Int(r.int64("zswapped")),
             )
         )
     return out^
@@ -457,6 +466,9 @@ struct AttemptRecord(Copyable, Movable):
     var cpus: Float64
     var limit_mb: Int
     var grant_mb: Int
+    var swap: Int
+    """Its swap peak (#282), and of it in zswap; -1 for unknown."""
+    var zswapped: Int
 
 
 def _attempts(
@@ -473,7 +485,10 @@ def _attempts(
             " AS log, coalesce(a.peak_rss_bytes, -1) AS peak,",
             " coalesce(a.cpu_seconds, -1) AS cpu, coalesce(a.peak_cpus, -1)",
             " AS cpus, coalesce(a.memory_limit_mb, 0) AS limit_mb,",
-            " coalesce(a.grant_memory_mb, 0) AS grant_mb FROM orca.attempts a",
+            " coalesce(a.grant_memory_mb, 0) AS grant_mb,",
+            " coalesce(a.memory_swap_peak_bytes, -1) AS swap,",
+            " coalesce(a.memory_zswapped_peak_bytes, -1) AS zswapped FROM",
+            " orca.attempts a",
             " JOIN orca.steps s ON s.id = a.step",
             " JOIN orca.runs r ON r.id = s.run WHERE s.run = $1 AND ",
             cond,
@@ -501,6 +516,8 @@ def _attempts(
                 r.float64("cpus"),
                 Int(r.int64("limit_mb")),
                 Int(r.int64("grant_mb")),
+                Int(r.int64("swap")),
+                Int(r.int64("zswapped")),
             )
         )
     return out^

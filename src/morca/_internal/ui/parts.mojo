@@ -451,9 +451,16 @@ def mb_text(mb: Int) -> String:
     return String(gb_text(mb), " GB") if mb >= 1024 else String(mb, " MB")
 
 
-def usage_cell(mut h: Html, u: Usage, limit_mb: Int = 0, grant_mb: Int = 0):
+def usage_cell(
+    mut h: Html,
+    u: Usage,
+    limit_mb: Int = 0,
+    grant_mb: Int = 0,
+    swap_bytes: Int = -1,
+):
     """A `<td>` of a peak in memory, with the CPU in its title, and after
-    it the attempt's memory limit (`morca._internal.cgroup`) when it had one."""
+    it the attempt's memory limit (`morca._internal.cgroup`) when it had one,
+    and what of it went to swap (`morca._internal.offload`) when any did."""
     if u.peak_rss_bytes < 0 and limit_mb <= 0:
         h.raw('<td class="num"></td>')
         return
@@ -462,6 +469,8 @@ def usage_cell(mut h: Html, u: Usage, limit_mb: Int = 0, grant_mb: Int = 0):
         title.write("; " if title else "", "memory limit ", mb_text(limit_mb))
         if grant_mb > 0:
             title.write(", granted ", mb_text(grant_mb))
+    if swap_bytes > 0:
+        title.write("; up to ", bytes_text(swap_bytes), " in swap")
     h.raw('<td class="num" title="')
     h.text(title)
     h.raw('">')
@@ -470,6 +479,10 @@ def usage_cell(mut h: Html, u: Usage, limit_mb: Int = 0, grant_mb: Int = 0):
     if limit_mb > 0:
         h.raw('<span class="muted"> / ')
         h.text(mb_text(limit_mb))
+        h.raw("</span>")
+    if swap_bytes > 0:
+        h.raw('<span class="muted"> + ')
+        h.text(bytes_text(swap_bytes), " swap")
         h.raw("</span>")
     h.raw("</td>")
 
@@ -536,6 +549,30 @@ def limit_facts(mut h: Html, limit_mb: Int, max_mb: Int, grant_mb: Int = 0):
         h.text(", killed past ", mb_text(max_mb))
     if grant_mb > 0:
         h.text(" (granted ", mb_text(grant_mb), ")")
+    h.raw("</dd>")
+
+
+comptime OFFLOAD_HELP = (
+    "With MORCA_RUN_SWAP_PCT over 0, a run's cgroup may keep that percent of"
+    " its limit in swap (memory.swap.max): past its limit its coldest pages"
+    " go there, to zswap's compressed memory first where the host has it on,"
+    " and it slows down rather than being held at its limit. The most of its"
+    " memory in swap at once, and of that in zswap; a learned request counts"
+    " it on top of the peak."
+)
+
+
+def offload_facts(mut h: Html, swap_bytes: Int, zswapped_bytes: Int):
+    """An Offloaded fact (`morca._internal.offload`), when it was measured."""
+    if swap_bytes < 0:
+        return
+    fact_item(h, "Offloaded", "offloaded", OFFLOAD_HELP, "runners")
+    if swap_bytes == 0:
+        h.raw('<span class="muted">nothing: it fit in its limit</span>')
+    else:
+        h.text(bytes_text(swap_bytes), " in swap at most")
+        if zswapped_bytes >= 0:
+            h.text(" (", bytes_text(zswapped_bytes), " of it in zswap)")
     h.raw("</dd>")
 
 

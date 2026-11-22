@@ -80,14 +80,19 @@ def attempts_memory(
     grant_mb: Int,
     stall_ms: Int,
     stall_full_ms: Int,
+    swap_peak_bytes: Int = -1,
+    zswapped_peak_bytes: Int = -1,
 ) raises:
     """Gives `run`'s attempts made by process `pid` that have none their
-    memory limit, grant (0: none) and stall times (-1: unknown)."""
+    memory limit, grant (0: none), stall times and offload peaks (#282;
+    -1: unknown)."""
     _ = conn.execute(
         (
             "UPDATE orca.attempts a SET memory_limit_mb = $3,"
             " grant_memory_mb = nullif($4, 0), memory_stall_ms ="
-            " nullif($5, -1), memory_stall_full_ms = nullif($6, -1)"
+            " nullif($5, -1), memory_stall_full_ms = nullif($6, -1),"
+            " memory_swap_peak_bytes = nullif($7, -1),"
+            " memory_zswapped_peak_bytes = nullif($8, -1)"
             " FROM orca.steps st WHERE st.id = a.step AND st.run = $1"
             " AND a.host LIKE '%:' || $2 AND a.memory_limit_mb IS NULL"
         ),
@@ -97,7 +102,9 @@ def attempts_memory(
         .int64(Int64(limit_mb))
         .int64(Int64(grant_mb))
         .int64(Int64(stall_ms))
-        .int64(Int64(stall_full_ms)),
+        .int64(Int64(stall_full_ms))
+        .int64(Int64(swap_peak_bytes))
+        .int64(Int64(zswapped_peak_bytes)),
     )
 
 

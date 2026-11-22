@@ -426,6 +426,7 @@ need_settings() {
     need_drain_limit
     need_handover_wait
     case $OVERLAP in 0 | 1) ;; *) die "OVERLAP is 1 (overlapping schedulers, the default) or 0, not '$OVERLAP' ($HETZNER_ENV); nothing was changed on the server" ;; esac
+    need_swap_settings
     need BUCKET S3_ENDPOINT S3_REGION
     [ -z "${EXTRA_ENV_FILE:-}" ] || need_file EXTRA_ENV_FILE
     [ -z "${CONFIG_OVERLAY_FILE:-}" ] || need_file CONFIG_OVERLAY_FILE
@@ -452,6 +453,28 @@ need_settings() {
             break
         fi
     done
+}
+
+# need_swap_settings: ZSWAP (hetzner.env) is empty or a whole percent from 0
+# to 50, and EXTRA_ENV_FILE's MORCA_RUN_SWAP_PCT, if it has one, a whole
+# percent from 0 to 100 (#282): refused here, before anything changes on the
+# server, rather than by a scheduler that then won't start.
+need_swap_settings() {
+    case ${ZSWAP:-} in
+        "") ;;
+        *[!0-9]* | ???*) die "ZSWAP is a whole percent of the server's memory from 0 to 50 (0: zswap off), not '$ZSWAP' ($HETZNER_ENV); nothing was changed on the server" ;;
+        *) [ "$ZSWAP" -le 50 ] || die "ZSWAP is a whole percent of the server's memory from 0 to 50 (0: zswap off), not '$ZSWAP' ($HETZNER_ENV); nothing was changed on the server" ;;
+    esac
+    [ -n "${EXTRA_ENV_FILE:-}" ] && [ -r "$EXTRA_ENV_FILE" ] || return 0
+    sp=$(sed -n 's/^[[:space:]]*\(export[[:space:]]*\)\{0,1\}MORCA_RUN_SWAP_PCT=//p' "$EXTRA_ENV_FILE" | tail -n 1)
+    sp=${sp%\"}
+    sp=${sp#\"}
+    case $sp in
+        "") return 0 ;;
+        *[!0-9]* | ????*) ;;
+        *) [ "$sp" -gt 100 ] || return 0 ;;
+    esac
+    die "MORCA_RUN_SWAP_PCT is a whole percent of a run's memory limit from 0 to 100, not '$sp' ($EXTRA_ENV_FILE); nothing was changed on the server"
 }
 
 # need_drain_limit: DRAIN_SECONDS, required (#390), is a whole number of
@@ -722,7 +745,7 @@ sync_settings_() {
     remote morca-stack configure MORCA_IMAGE="$MORCA_IMAGE" CLOUDFLARED_IMAGE="$CLOUDFLARED_IMAGE" \
         BUCKET="$BUCKET" BACKUP_KEEP="$BACKUP_KEEP" GHCR_USER="${GHCR_USER:-}" \
         OVERLAP="$OVERLAP" DRAIN_SECONDS="$DRAIN_SECONDS" \
-        HANDOVER_WAIT_SECONDS="${HANDOVER_WAIT_SECONDS:-}" || return 1
+        HANDOVER_WAIT_SECONDS="${HANDOVER_WAIT_SECONDS:-}" ZSWAP="${ZSWAP:-}" || return 1
     # APPS=console names an app; console:8080 also gives its port, for an
     # app whose morca.toml has no [apps.console] port.
     for app in $APPS; do

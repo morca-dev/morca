@@ -114,6 +114,13 @@ export MORCA_HOST_CGROUP="$FAKE/cgroup" MORCA_MEMINFO="$FAKE/meminfo"
 mkdir -p "$MORCA_HOST_CGROUP"
 echo "cpuset cpu io memory hugetlb pids rdma misc" > "$MORCA_HOST_CGROUP/cgroup.controllers"
 echo "MemTotal:        8192000 kB" > "$MORCA_MEMINFO"
+# Its zswap, off, in front of a swapfile (as cloud-init makes it), and where
+# a setting is kept for each boot.
+export MORCA_ZSWAP_SYS="$FAKE/zswap" MORCA_PROC_SWAPS="$FAKE/swaps" MORCA_TMPFILES="$FAKE/tmpfiles.d"
+mkdir -p "$MORCA_ZSWAP_SYS"
+echo N > "$MORCA_ZSWAP_SYS/enabled"
+echo 20 > "$MORCA_ZSWAP_SYS/max_pool_percent"
+printf 'Filename\tType\tSize\tUsed\tPriority\n/swapfile file 4194300 0 -2\n' > "$MORCA_PROC_SWAPS"
 # The server's settings as up.sh writes them from hetzner.env (deploy.sh
 # brings them in line with it; no tunnel: an empty tunnel.env).
 cat > "$MORCA_CONF/settings.env" << 'EOS'
@@ -518,6 +525,32 @@ deploy eee5555 console=hhh8888 || fail "a deploy that takes HANDOVER_WAIT_SECOND
 has "morca-stack: HANDOVER_WAIT_SECONDS 3600 -> (unset)"
 grep -q 'MORCA_HANDOVER_WAIT_SECONDS' "$MORCA_CONF/morca.env" && fail "MORCA_HANDOVER_WAIT_SECONDS left in morca.env"
 echo "ok   a concurrency key needs HANDOVER_WAIT_SECONDS before anything changes; set, the scheduler gets it"
+# ZSWAP and MORCA_RUN_SWAP_PCT (#282): a bad one is refused before anything
+# changes on the server; ZSWAP set reaches stack.conf, and the apply.
+: > "$FAKE/docker.log"
+for bad in 51 x -1; do
+    { cat "$FAKE/hetzner.env"; echo "ZSWAP=$bad"; } > "$FAKE/zswap.env"
+    (HETZNER_ENV="$FAKE/zswap.env" deploy eee5555 console=hhh8888) && fail "deployed ZSWAP=$bad"
+    has "ZSWAP is a whole percent of the server's memory from 0 to 50 (0: zswap off), not '$bad'"
+done
+for bad in 101 x 12.5; do
+    echo "MORCA_RUN_SWAP_PCT=$bad" > "$FAKE/swap-extra.env"
+    { cat "$FAKE/hetzner.env"; echo "EXTRA_ENV_FILE=$FAKE/swap-extra.env"; } > "$FAKE/zswap.env"
+    (HETZNER_ENV="$FAKE/zswap.env" deploy eee5555 console=hhh8888) && fail "deployed MORCA_RUN_SWAP_PCT=$bad"
+    has "MORCA_RUN_SWAP_PCT is a whole percent of a run's memory limit from 0 to 100, not '$bad'"
+done
+grep -q 'morca pause\|run -d' "$FAKE/docker.log" && fail "a refused deploy paused or started something"
+echo "MORCA_RUN_SWAP_PCT=20" > "$FAKE/swap-extra.env"
+{ cat "$FAKE/hetzner.env"; echo "ZSWAP=20"; echo "EXTRA_ENV_FILE=$FAKE/swap-extra.env"; } > "$FAKE/zswap.env"
+(HETZNER_ENV="$FAKE/zswap.env" deploy eee5555 console=hhh8888) || fail "a deploy with ZSWAP=20 and MORCA_RUN_SWAP_PCT=20"
+has "morca-stack: ZSWAP (unset) -> 20"
+has "morca-stack: zswap on, its pool at most 20% of memory"
+grep -qx 'MORCA_RUN_SWAP_PCT=20' "$MORCA_CONF/settings.env" || fail "no MORCA_RUN_SWAP_PCT in settings.env"
+deploy eee5555 console=hhh8888 || fail "a deploy that takes ZSWAP out"
+has "morca-stack: ZSWAP 20 -> (unset)"
+has "morca-stack: zswap off (ZSWAP=)"
+grep -q 'MORCA_RUN_SWAP_PCT' "$MORCA_CONF/settings.env" && fail "MORCA_RUN_SWAP_PCT left in settings.env"
+echo "ok   ZSWAP and MORCA_RUN_SWAP_PCT are checked before anything changes; ZSWAP reaches the host"
 # A dry run shows the sync and the keys, and writes nothing.
 sed -i.bak '/^POSTHOG_KEY=/d' "$FAKE/hetzner.env"
 printf 'POSTHOG_KEY=\nFIXED_COST=8/month\nBACKUP_KEEP=7\nS3_REGION=nbg1\n' >> "$FAKE/hetzner.env"
@@ -527,7 +560,7 @@ before=$(cat "$MORCA_CONF/settings.env" "$MORCA_CONF/s3.env" "$MORCA_CONF/stack.
 sh deploy/hetzner/deploy.sh --dry-run eee5555 > "$FAKE/out" 2>&1 || fail "a dry run with settings changed"
 has "+ ssh root@<server-ip> morca-stack sync --keys settings.env < "
 has "+ ssh root@<server-ip> morca-stack sync s3.env < $FAKE/s3.env"
-has "+ ssh root@<server-ip> morca-stack configure MORCA_IMAGE=img .*BACKUP_KEEP=7 GHCR_USER= OVERLAP=1 DRAIN_SECONDS=86400 HANDOVER_WAIT_SECONDS=$"
+has "+ ssh root@<server-ip> morca-stack configure MORCA_IMAGE=img .*BACKUP_KEEP=7 GHCR_USER= OVERLAP=1 DRAIN_SECONDS=86400 HANDOVER_WAIT_SECONDS= ZSWAP=$"
 has "# settings.env from $FAKE/hetzner.env: AWS_REGION .*MORCA_FIXED_COST"
 grep -q 'MORCA_POSTHOG_KEY\|notasecret99\|nbg1 ' "$FAKE/out" && fail "the dry run: $(grep 'POSTHOG\|notasecret99' "$FAKE/out")"
 [ "$(cat "$MORCA_CONF/settings.env" "$MORCA_CONF/s3.env" "$MORCA_CONF/stack.conf" | cksum)" = "$before" ] \
@@ -793,6 +826,48 @@ grep -q 'warning:' "$FAKE/out" && fail "warned about peaks with CGROUPS=0"
 stack configure CGROUPS=1
 stack apply > /dev/null 2>&1 || fail "apply with CGROUPS=1 again"
 rm "$FAKE/peaks"
+# zswap (#282): untouched without ZSWAP; on with its pool, and kept for each
+# boot, with it; off with 0, and again once it's unset after being on; a
+# bad value refused; a host without swap or zswap warned about.
+[ "$(cat "$MORCA_ZSWAP_SYS/enabled")" = N ] || fail "zswap turned on without ZSWAP"
+[ ! -e "$MORCA_TMPFILES/morca-zswap.conf" ] || fail "a tmpfiles file without ZSWAP"
+stack configure ZSWAP=25 > "$FAKE/out" 2>&1 || fail "configure ZSWAP=25"
+stack apply > "$FAKE/out" 2>&1 || fail "apply with ZSWAP=25"
+has "morca-stack: zswap on, its pool at most 25% of memory (ZSWAP=25; it was N, 20%)"
+has "scheduler: unchanged"
+[ "$(cat "$MORCA_ZSWAP_SYS/enabled") $(cat "$MORCA_ZSWAP_SYS/max_pool_percent")" = "Y 25" ] || fail "zswap isn't on at 25%"
+grep -qx "w $MORCA_ZSWAP_SYS/enabled - - - - Y" "$MORCA_TMPFILES/morca-zswap.conf" || fail "zswap isn't kept on for each boot"
+grep -qx "w $MORCA_ZSWAP_SYS/max_pool_percent - - - - 25" "$MORCA_TMPFILES/morca-zswap.conf" || fail "zswap's pool isn't kept for each boot"
+stack apply > "$FAKE/out" 2>&1 || fail "apply with ZSWAP=25 again"
+grep -q zswap "$FAKE/out" && fail "an apply that changes nothing said something of zswap"
+for bad in 51 -1 x 2.5; do
+    stack configure ZSWAP=$bad > "$FAKE/out" 2>&1 && fail "configured ZSWAP=$bad"
+    has "ZSWAP is a whole percent of the server's memory from 0 to 50"
+done
+stack configure ZSWAP=0 > /dev/null 2>&1 || fail "configure ZSWAP=0"
+stack apply > "$FAKE/out" 2>&1 || fail "apply with ZSWAP=0"
+has "morca-stack: zswap off (ZSWAP=0)"
+[ "$(cat "$MORCA_ZSWAP_SYS/enabled")" = N ] || fail "ZSWAP=0 left zswap on"
+[ ! -e "$MORCA_TMPFILES/morca-zswap.conf" ] || fail "ZSWAP=0 kept zswap on for each boot"
+stack configure ZSWAP=10 > /dev/null 2>&1 && stack apply > /dev/null 2>&1 || fail "apply with ZSWAP=10"
+stack configure ZSWAP= > /dev/null 2>&1 || fail "configure ZSWAP="
+stack apply > "$FAKE/out" 2>&1 || fail "apply with ZSWAP unset"
+has "morca-stack: zswap off (ZSWAP=)"
+[ ! -e "$MORCA_TMPFILES/morca-zswap.conf" ] || fail "an unset ZSWAP kept zswap on for each boot"
+echo Y > "$MORCA_ZSWAP_SYS/enabled"
+stack apply > "$FAKE/out" 2>&1 || fail "apply on a host whose zswap someone else turned on"
+[ "$(cat "$MORCA_ZSWAP_SYS/enabled")" = Y ] || fail "an unset ZSWAP turned off a zswap it never turned on"
+echo N > "$MORCA_ZSWAP_SYS/enabled"
+printf 'Filename\tType\tSize\tUsed\tPriority\n' > "$MORCA_PROC_SWAPS"
+stack configure ZSWAP=20 > /dev/null 2>&1 || fail "configure ZSWAP=20"
+stack apply > "$FAKE/out" 2>&1 || fail "apply with ZSWAP=20 and no swap"
+has "warning: ZSWAP=20, but this host has no swap"
+mv "$MORCA_ZSWAP_SYS" "$FAKE/zswap.gone"
+stack apply > "$FAKE/out" 2>&1 || fail "apply with ZSWAP=20 and no zswap"
+has "warning: ZSWAP=20, but this kernel has no zswap"
+mv "$FAKE/zswap.gone" "$MORCA_ZSWAP_SYS"
+stack configure ZSWAP=0 > /dev/null 2>&1 && stack apply > /dev/null 2>&1 || fail "apply with ZSWAP=0 at the end"
+printf 'Filename\tType\tSize\tUsed\tPriority\n/swapfile file 4194300 0 -2\n' > "$MORCA_PROC_SWAPS"
 echo sha256:0123456789abcdef0123 > "$FAKE/images/img_eee5555"
 stack apply > "$FAKE/out" 2>&1 || fail "apply after a push"
 has "scheduler: replaced (image eee5555 pushed again ("

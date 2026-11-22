@@ -31,7 +31,11 @@ from morca._internal.cgroup import (
     raised_request,
     run_name,
     start_limit_mb,
+    swap_max_mb,
+    swap_note,
+    swap_pct_of,
 )
+from morca._internal.offload import Offload, OffloadWatch, stat_value
 from morca._internal.run_cpu import CpuKnobs, cpu_max, status_text
 
 
@@ -214,11 +218,14 @@ def test_knobs() raises:
     _ = unsetenv("MORCA_RUN_MEMORY_MARGIN")
     _ = unsetenv("MORCA_RUN_MEMORY_GROWTH")
     _ = unsetenv("MORCA_RUN_MEMORY_HELD_SECONDS")
+    _ = unsetenv("MORCA_RUN_SWAP_PCT")
     var k = MemoryKnobs.from_env()
     assert_equal(k.default_mb, 0)
     assert_equal(k.margin_pct, 25)
     assert_equal(k.growth_pct, 150)
     assert_equal(k.held_s, 120)
+    # No swap unless asked for (#282): memory.swap.max 0, as before.
+    assert_equal(k.swap_pct, 0)
     _ = setenv("MORCA_RUN_MEMORY_GROWTH", "2", True)
     _ = setenv("MORCA_RUN_MEMORY_MARGIN", "10", True)
     _ = setenv("MORCA_RUN_MEMORY_MB", "512", True)
@@ -236,6 +243,110 @@ def test_knobs() raises:
     _ = unsetenv("MORCA_RUN_MEMORY_MB")
     _ = unsetenv("MORCA_RUN_MEMORY_MARGIN")
     _ = unsetenv("MORCA_RUN_MEMORY_GROWTH")
+
+
+def test_swap_knob() raises:
+    """`MORCA_RUN_SWAP_PCT` (#282): a whole percent of the limit, 0 to 100;
+    anything else is refused, as the other knobs are."""
+    _ = setenv("MORCA_RUN_SWAP_PCT", "20", True)
+    assert_equal(MemoryKnobs.from_env().swap_pct, 20)
+    assert_equal(swap_pct_of("0"), 0)
+    assert_equal(swap_pct_of("100"), 100)
+    for bad in ["-1", "101", "x", "12.5", "20%"]:
+        with assert_raises(contains="MORCA_RUN_SWAP_PCT"):
+            _ = swap_pct_of(bad)
+    _ = setenv("MORCA_RUN_SWAP_PCT", "150", True)
+    with assert_raises(contains="from 0 to 100, not 150"):
+        _ = MemoryKnobs.from_env()
+    _ = unsetenv("MORCA_RUN_SWAP_PCT")
+
+
+def test_swap_max_mb() raises:
+    # 20% of a 512 MB limit, rounded up to a whole MB; 0 without swap.
+    assert_equal(swap_max_mb(512, 20), 103)
+    assert_equal(swap_max_mb(1500, 10), 150)
+    assert_equal(swap_max_mb(512, 0), 0)
+    assert_equal(swap_max_mb(512, 100), 512)
+
+
+def test_swap_note() raises:
+    var header = "Filename\tType\tSize\tUsed\tPriority\n"
+    var one = String(header, "/swapfile file 4194300 0 -2\n")
+    assert_equal(
+        swap_note(20, one, "Y"),
+        (
+            "memory.swap.max at 20% of each run's limit (MORCA_RUN_SWAP_PCT),"
+            " zswap on"
+        ),
+    )
+    assert_true("uncompressed" in swap_note(20, one, "N"))
+    assert_true(
+        "no swap, so nothing is offloaded" in swap_note(20, header, "Y")
+    )
+    assert_true("no swap" in swap_note(20, "", ""))
+    var off = Cgroups.off("off")
+    assert_equal(off.swap_text(), "none (no run cgroups)")
+    var on = Cgroups("/sys/fs/cgroup/x", "on", MemoryKnobs(0, 25, 150, 120, 0))
+    assert_true("MORCA_RUN_SWAP_PCT=0" in on.swap_text())
+
+
+def _offload_files(dir: String, swap_mb: Int, zswapped_mb: Int) raises:
+    var mb = 1024 * 1024
+    with open(String(dir, "/memory.swap.current"), "w") as f:
+        f.write(swap_mb * mb, "\n")
+    with open(String(dir, "/memory.stat"), "w") as f:
+        f.write("anon 1\nzswapped ", zswapped_mb * mb, "\n")
+
+
+def test_offload() raises:
+    """A run's offload peaks (`morca._internal.offload`): sampled from its
+    cgroup's memory.swap.current and memory.stat's zswapped, the larger of
+    each kept, with memory.swap.peak at the end; nothing with swap off."""
+    var stat = String(
+        "anon 594137088\nfile 0\nzswap 31457280\nzswapped 104857600\n",
+        "zswpout 25600\n",
+    )
+    assert_equal(stat_value(stat, "zswapped"), 104857600)
+    assert_equal(stat_value(stat, "zswap"), 31457280)
+    assert_equal(stat_value("anon 1\nfile 0\n", "zswapped"), -1)
+    var m = Offload(10, -1).merge(Offload(5, 3))
+    assert_equal(m.swap_bytes, 10)
+    assert_equal(m.zswapped_bytes, 3)
+
+    var mb = 1024 * 1024
+    var dir = String(getenv("TMPDIR", "/tmp"), "/morca-test-offload/run")
+    _ = makedirs(dir, exist_ok=True)
+    # No peak yet (as a kernel before 6.5 has none), even after a test before.
+    with open(String(dir, "/memory.swap.peak"), "w") as f:
+        f.write("0\n")
+    var c = Dict[Int, Contained]()
+    c[7] = Contained(1, 1, "p", dir, 512, 640, 1024, 512)
+    var w = OffloadWatch()
+    _offload_files(dir, 120, 80)
+    w.sample(c, 20)
+    _offload_files(dir, 40, 30)
+    w.sample(c, 20)
+    # The peaks, not the last sample.
+    var got = w.take(7, dir, 20)
+    assert_equal(got.swap_bytes, 120 * mb)
+    assert_equal(got.zswapped_bytes, 80 * mb)
+    # memory.swap.peak (kernel 6.5+) catches what the samples missed.
+    with open(String(dir, "/memory.swap.peak"), "w") as f:
+        f.write(200 * mb, "\n")
+    w.sample(c, 20)
+    assert_equal(w.take(7, dir, 20).swap_bytes, 200 * mb)
+    # Forgotten once taken; a process that's gone is dropped at a sample.
+    w.sample(c, 20)
+    _ = c.pop(7)
+    w.sample(c, 20)
+    assert_equal(len(w.peaks), 0)
+    # Swap off: nothing sampled, nothing known.
+    c[8] = Contained(2, 1, "p", dir, 512, 640, 1024, 512)
+    w.sample(c, 0)
+    assert_equal(len(w.peaks), 0)
+    var none = w.take(8, dir, 0)
+    assert_equal(none.swap_bytes, -1)
+    assert_equal(none.zswapped_bytes, -1)
 
 
 def test_cpu_knobs() raises:
@@ -282,12 +393,14 @@ def test_nice_for() raises:
     var off = Cgroups.off("off")
     assert_equal(off.nice_for(""), 10)
     var on = Cgroups(
-        "/sys/fs/cgroup/x", "on", MemoryKnobs(0, 25, 150, 120), True
+        "/sys/fs/cgroup/x", "on", MemoryKnobs(0, 25, 150, 120, 0), True
     )
     assert_equal(on.nice_for("/sys/fs/cgroup/x/orca-run-1-1-1"), 0)
     # Started without a cgroup after all: the nice instead.
     assert_equal(on.nice_for(""), 10)
-    var no_cpu = Cgroups("/sys/fs/cgroup/x", "on", MemoryKnobs(0, 25, 150, 120))
+    var no_cpu = Cgroups(
+        "/sys/fs/cgroup/x", "on", MemoryKnobs(0, 25, 150, 120, 0)
+    )
     assert_equal(no_cpu.nice_for("/sys/fs/cgroup/x/orca-run-1-1-1"), 10)
     on.cpu_knobs = CpuKnobs(0, 20)
     assert_equal(on.nice_for(""), 0)

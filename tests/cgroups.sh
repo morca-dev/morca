@@ -6,8 +6,9 @@
 # Ops > Control's show the limits; no run cgroup or process is left; and a
 # scheduler that starts removes an empty cgroup a dead one left; and a run
 # held at memory.high short of memory.max is killed as out of memory; and
-# one killed at its memory_gb's maximum fails, unretried; and, with the cpu
-# controller, a run's cgroup has its cpu.weight.
+# one killed at its memory_gb's maximum fails, unretried; and one let offload
+# to swap (MORCA_RUN_SWAP_PCT) instead succeeds and records it; and, with the
+# cpu controller, a run's cgroup has its cpu.weight.
 #
 # The scheduler makes the cgroups under its own cgroup, which it has to be
 # able to write (delegated). Where it isn't, and `sudo -n` works (GitHub's
@@ -225,6 +226,45 @@ if [ -f "$cgbase/memory.pressure" ]; then
     unset MORCA_RUN_MEMORY_HELD_SECONDS
 else
     echo "cgroups: no memory.pressure in $cgbase: the held case is skipped"
+fi
+
+# Offload (#282): with MORCA_RUN_SWAP_PCT=100 and swap on the host, the
+# grower's 300 MB at a 200 MB limit (no margin) pushes what doesn't fit to
+# swap and succeeds at once, where it was killed above; its attempt records
+# the swap peak, and the pages show it. Needs swap (/proc/swaps) and swap
+# accounting (memory.swap.max).
+if [ -n "$(awk 'NR > 1' /proc/swaps)" ] && [ -f "$cgbase/memory.swap.max" ]; then
+    kill "$sched"
+    wait "$sched" 2> /dev/null || true
+    q "UPDATE orca.pipelines SET memory_raised_mb = NULL WHERE name = 'grower'" > /dev/null
+    export MORCA_RUN_SWAP_PCT=100
+    start_scheduler
+    said "morca: runs' swap: memory.swap.max at 100% of each run's limit" || fail "the scheduler didn't say runs may swap: $(grep "runs' swap" build/cgroups-sched.out)"
+    ./build/morca backfill grower 2024-06 >> "$log" 2>&1 || fail "backfill 2024-06"
+    r6=$(q "SELECT max(id) FROM orca.runs")
+    until_ 120 "run $r6 didn't succeed: $(q "SELECT id, status, starts, error FROM orca.runs WHERE id = $r6")" \
+        is "SELECT status FROM orca.runs WHERE id = $r6" succeeded
+    is "SELECT starts FROM orca.runs WHERE id = $r6" 1 \
+        || fail "run $r6 wasn't let offload at 200 MB: $(q "SELECT a.attempt, a.status, a.error FROM orca.attempts a JOIN orca.steps s ON s.id = a.step WHERE s.run = $r6")"
+    until_ 10 "run $r6's attempt has no limit" \
+        is "SELECT count(*) FROM orca.attempts a JOIN orca.steps s ON s.id = a.step WHERE s.run = $r6 AND a.memory_limit_mb = 200" 1
+    swapped=$(q "SELECT coalesce(a.memory_swap_peak_bytes, -1) FROM orca.attempts a JOIN orca.steps s ON s.id = a.step WHERE s.run = $r6")
+    q "SELECT a.memory_swap_peak_bytes, a.memory_zswapped_peak_bytes FROM orca.attempts a JOIN orca.steps s ON s.id = a.step WHERE s.run = $r6" >> "$log"
+    # At least most of the 100 MB that didn't fit.
+    [ "$swapped" -ge $((50 * 1048576)) ] || fail "run $r6's attempt's swap peak: $swapped"
+    curl -fs -H 'Accept: application/json' "$base/runs/$r6" > build/cgroups-run6.json || fail "GET /runs/$r6 JSON"
+    jq -e ".steps[0].memory_swap_peak_bytes == $swapped" build/cgroups-run6.json > /dev/null \
+        || fail "run $r6's JSON has no swap peak: $(jq -c '.steps' build/cgroups-run6.json)"
+    a6=$(q "SELECT a.id FROM orca.attempts a JOIN orca.steps s ON s.id = a.step WHERE s.run = $r6")
+    curl -fs "$base/runs/$r6/attempts/$a6" > build/cgroups-attempt6.out || fail "GET the attempt"
+    grep -q 'Offloaded<span class="help">' build/cgroups-attempt6.out || fail "the attempt's page has no Offloaded"
+    curl -fs "$base/runs/$r6" | grep -q ' swap</span>' || fail "the steps table has no swap beside the peak"
+    kill "$sched"
+    wait "$sched" 2> /dev/null || true
+    unset MORCA_RUN_SWAP_PCT
+    start_scheduler
+else
+    echo "cgroups: no swap on this host, or no memory.swap.max in $cgbase: the offload case is skipped"
 fi
 
 # Killed at the most it may ask for (memory_gb = 0.25: 256 MB, under the

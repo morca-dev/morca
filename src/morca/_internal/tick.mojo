@@ -96,6 +96,7 @@ def tick(mut self: Scheduler, now: Int64) raises:
                 print("morca: can't keep the driver log at", log, ":", e)
     var readings = self._sample()
     self._kill_held()
+    self._offload.sample(self._contained, self.cgroups.knobs.swap_pct)
     try:
         self._kill_wedged()
     except e:

@@ -462,7 +462,14 @@ what the retry asks for: 1.5 times as much, up to the request's maximum,
 which the pipeline's later runs ask for too. In the JSON, a run has
 `memory_limit` (`limit_mb`, `max_mb`, `current_bytes` while it runs), and each
 step and attempt `memory_limit_mb` and `grant_memory_mb`; null without a
-cgroup.
+cgroup. With `MORCA_RUN_SWAP_PCT` over 0 ([Offload to
+swap](morca-toml.md#requests-and-grants), #282) the Peak cell adds what went
+to swap, `312 MB / 256 MB + 64 MB swap`, and an attempt's page has
+**Offloaded**: the most of its memory in swap at once, and of that in zswap
+(`64 MB in swap at most (60 MB of it in zswap)`, or `nothing: it fit in its
+limit`). In the JSON, each step and attempt has `memory_swap_peak_bytes` and
+`memory_zswapped_peak_bytes`, null where it wasn't measured (no cgroup,
+`MORCA_RUN_SWAP_PCT` 0, or no zswap in the kernel for the second).
 
 Not measured: runs on EC2 or Kubernetes (their machines' samples are under
 Machines), runs no scheduler or worker started (`<binary> run`), and on

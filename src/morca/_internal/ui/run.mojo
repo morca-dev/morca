@@ -942,7 +942,7 @@ def _run_live(
         h.num(s.attempts)
         h.mono(s.started)
         h.mono(s.ended)
-        usage_cell(h, s.usage, s.limit_mb, s.grant_mb)
+        usage_cell(h, s.usage, s.limit_mb, s.grant_mb, s.swap_bytes)
         if s.usage.cpu_seconds >= 0:
             h.num(cpu_text(s.usage.cpu_seconds))
         else:
