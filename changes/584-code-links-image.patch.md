@@ -1,0 +1,1 @@
+- **Links to the code after a run in an image:** a pipeline whose runs record a different image than `morca register` did keeps the links to its code on its page and on its runs' pages; they had gone once a run started. (#584)

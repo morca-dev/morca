@@ -43,7 +43,10 @@ struct VersionRow(Copyable, Movable):
 def version_rows(
     mut conn: Connection, pipeline: String = "", id: Int = 0
 ) raises -> List[VersionRow]:
-    """A pipeline's versions newest first, or the one with `id`."""
+    """A pipeline's versions newest first, or the one with `id`. A version
+    with no locations of its own has those of the same code at the same
+    source and commit: a run records its version with the image it runs
+    in, which can differ from the one `morca register` mapped (#583)."""
     var rows = conn.query(
         String(
             "SELECT v.id, v.registry_hash, v.source, v.commit_sha, v.dirty,",
@@ -52,7 +55,12 @@ def version_rows(
             " AS first_seen, ",
             utc_sql("v.last_seen"),
             " AS last_seen, (SELECT count(*) FROM orca.runs r WHERE r.version",
-            " = v.id) AS runs, coalesce(v.locations::text, '') AS locations",
+            " = v.id) AS runs, coalesce(v.locations::text, (SELECT",
+            " w.locations::text FROM orca.pipeline_versions w WHERE",
+            " w.pipeline = v.pipeline AND w.registry_hash = v.registry_hash",
+            " AND w.source = v.source AND w.commit_sha = v.commit_sha AND",
+            " w.dirty = v.dirty AND w.locations IS NOT NULL ORDER BY w.id",
+            " DESC LIMIT 1), '') AS locations",
             " FROM orca.pipeline_versions v WHERE ($1 = '' OR",
             " v.pipeline = $1) AND ($2 = 0 OR v.id = $2) ORDER BY v.id DESC",
         ),
