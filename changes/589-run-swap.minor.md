@@ -1,0 +1,1 @@
+- **Runs may offload to swap or zswap**: `MORCA_RUN_SWAP_PCT` (default 0, as before) lets each run's cgroup keep that percent of its limit in swap, so a run a little past its grant slows down instead of being held and killed; each attempt records what it offloaded, learned requests count it, and the Hetzner deploy can turn the server's zswap on with `ZSWAP` (tools 0.39.0). (#589)
