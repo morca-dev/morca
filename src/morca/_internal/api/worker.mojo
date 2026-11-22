@@ -10,6 +10,7 @@
 | `/api/worker/exited` | a run's process ended, with its samples |
 | `/api/worker/cluster` | a run this worker started as a cluster: its head's address and token (`morca._internal.run_cluster`) |
 | `/api/worker/left` | a member's process ended |
+| `/api/worker/join` | `morca host join`, setting a machine up: its pool's volumes, `max_runs` and the server's worker image (`morca._internal.pool_boot`) |
 | `/api/worker/boot` | a machine the pool autoscaler made, booting: the image, its login and the bucket's variables (`morca._internal.pool_boot`) |
 | `/api/worker/store/<call>` | a `RunStore` call of a run this worker claimed (`morca._internal.state.PgStore`) |
 
@@ -33,8 +34,15 @@ from json import Value, loads
 from threads import AtomicFlag, WorkerPool
 from threads.ffi import OpaquePtr, opaque_ptr
 
+import morca._internal.db.audit as audit_db
+
 from morca._internal.run_cluster import member_left, report_head
-from morca._internal.pool_boot import BOOT_PATH, boot_answer
+from morca._internal.pool_boot import (
+    BOOT_PATH,
+    JOIN_PATH,
+    boot_answer,
+    join_answer,
+)
 from morca._internal.http_store import STORE_PATH
 from morca._internal.json import quote
 from morca._internal.state import State
@@ -83,6 +91,7 @@ def routes() -> List[WorkerRoute]:
         WorkerRoute("/api/worker/release", False, _release),
         WorkerRoute("/api/worker/exited", False, _exited),
         WorkerRoute(BOOT_PATH, False, _boot),
+        WorkerRoute(JOIN_PATH, False, _join),
         WorkerRoute("/api/worker/cluster", False, _cluster),
         WorkerRoute("/api/worker/left", False, _left),
         WorkerRoute(STORE_PATH, True, _store),
@@ -126,6 +135,21 @@ def _boot(mut db: State, w: WorkerCall) raises -> Page:
         return _answer(200, boot_answer(db, w.worker.id))
     except e:
         return _error(403, String(e))
+
+
+def _join(mut db: State, w: WorkerCall) raises -> Page:
+    """`morca host join`: what its service needs (`morca._internal.pool_boot`),
+    audited."""
+    var answer = join_answer(db, w.worker.pool)
+    audit_db.add(
+        db.conn,
+        w.worker.user(),
+        JOIN_PATH,
+        0,
+        String("name=", text_field(w.body, "name"), " pool=", w.worker.pool),
+        "worker",
+    )
+    return _answer(200, answer)
 
 
 def _store(mut db: State, w: WorkerCall) raises -> Page:

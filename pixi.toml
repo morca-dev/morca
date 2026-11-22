@@ -256,6 +256,9 @@ test-pool-fills = { cmd = "scripts/with-postgres.sh tests/pool_fills.sh" }
 # Self-hosted pools and `morca host` (#220): a pool with no provider gives
 # its workers its env, secrets and max_runs; a host drains and is removed.
 test-hosts = { cmd = "scripts/with-postgres.sh tests/hosts.sh" }
+# `morca host join` (#220): the service files it writes under a --root, and
+# the worker they run; nothing is installed or started.
+test-host-join = { cmd = "scripts/with-postgres.sh tests/host_join.sh" }
 # No Postgres deadlock on orca.runs between ticks and bulk updates (#440).
 test-run-locks = { cmd = "scripts/with-postgres.sh tests/run_locks.sh" }
 test-source = { cmd = "scripts/mojo-build.sh -I src $DEP_INC -D MORCA_SOURCE=https://example.com/lake.git -D MORCA_COMMIT=1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a tests/test_source.mojo -o build/test-source && ./build/test-source" }
@@ -331,7 +334,7 @@ test-executor-core = { depends-on = ["build-shared", "test-sample", "test-steps"
 test-executor-workers = { depends-on = ["build-shared", "test-ec2", "test-autoscale", "test-no-workers", "test-pool", "test-hcloud", "test-pool-scale", "test-pool-scale-ec2", "test-pool-image", "test-run-cluster", "test-secrets", "test-placement", "test-grants", "test-pressure", "test-lost-workers"] }
 test-executor = { depends-on = ["test-executor-core", "test-executor-workers"] }
 # The scheduler, the UI, and what a registration and its code control:
-test-scheduler-ui = { depends-on = ["build-shared", "test-toml", "test-upgrade", "test-config", "test-fill", "test-fill-version", "test-fill-requests", "test-priority", "test-pool-fills", "test-hosts", "test-run-locks", "test-metrics", "test-terms", "test-scheduler", "test-ui", "test-fleet", "test-system", "test-actions", "test-calendar", "test-ui-login", "test-ui-drain", "test-remote", "test-worker-api", "test-pause", "test-older-binary", "test-watchdog", "test-limit", "test-data-cache", "test-turnstile", "test-notify", "test-versions", "test-manual-run", "test-new-code", "test-defer", "test-dead-runs", "test-adopt", "test-overlap", "test-outdated", "test-concurrency", "test-one-run-per-key", "test-hourly", "test-weekly", "test-sense-errors", "test-stop", "test-binary-timeouts"] }
+test-scheduler-ui = { depends-on = ["build-shared", "test-toml", "test-upgrade", "test-config", "test-fill", "test-fill-version", "test-fill-requests", "test-priority", "test-pool-fills", "test-hosts", "test-host-join", "test-run-locks", "test-metrics", "test-terms", "test-scheduler", "test-ui", "test-fleet", "test-system", "test-actions", "test-calendar", "test-ui-login", "test-ui-drain", "test-remote", "test-worker-api", "test-pause", "test-older-binary", "test-watchdog", "test-limit", "test-data-cache", "test-turnstile", "test-notify", "test-versions", "test-manual-run", "test-new-code", "test-defer", "test-dead-runs", "test-adopt", "test-overlap", "test-outdated", "test-concurrency", "test-one-run-per-key", "test-hourly", "test-weekly", "test-sense-errors", "test-stop", "test-binary-timeouts"] }
 test = { depends-on = ["test-executor", "test-scheduler-ui"] }
 toy = { cmd = "scripts/mojo-build.sh -I src $DEP_INC examples/toy.mojo -o build/toy" }
 fanout = { cmd = "scripts/mojo-build.sh -I src $DEP_INC examples/fanout.mojo -o build/fanout" }

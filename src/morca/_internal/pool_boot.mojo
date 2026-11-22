@@ -16,6 +16,13 @@ image as `morca worker --pool <pool> --name <machine>`, with run cgroups
 (`docs/hetzner.md`, "A cgroup per run"). With `MORCA_POOL_WORKER_COMMAND`
 set on the scheduler, the script runs that command as the worker instead
 (tests, without Docker).
+
+A machine joined by hand (`morca host join`, `morca._internal.host_join`)
+asks `/api/worker/join` instead, with any live token of its pool:
+`join_answer` gives the pool's volumes and `max_runs`, and the worker image
+the server runs (`MORCA_WORKER_IMAGE`), which a container is started on
+unless `--image` says otherwise. It holds no secret: the bucket's
+variables stay on the machine, in an env file of its own.
 """
 
 from std.os import getenv
@@ -23,10 +30,12 @@ from std.os import getenv
 import morca._internal.db.pools as pools_db
 
 from morca._internal.json import quote
+from morca._internal.pool_config import pool_settings, pool_volumes
 from morca._internal.registry import ImageRef, Registry
 from morca._internal.state import State
 
 comptime BOOT_PATH = "/api/worker/boot"
+comptime JOIN_PATH = "/api/worker/join"
 comptime CREATED_BY = "pool:"
 """`orca.workers.created_by` of a token the autoscaler made: `pool:<pool>`."""
 comptime WORKER_IMAGE = "MORCA_WORKER_IMAGE"
@@ -216,4 +225,25 @@ def boot_answer(mut db: State, worker: Int) raises -> String:
         ', "token": ',
         quote(login[1]),
         "}}",
+    )
+
+
+def join_answer(mut db: State, pool: String) raises -> String:
+    """The UI's answer to `/api/worker/join` for a token of `pool`: what
+    `morca host join` sets its service up with, as JSON. No secret."""
+    var vols = String("[")
+    var vs = pool_volumes(db, pool)
+    for i in range(len(vs)):
+        vols.write(", " if i else "", quote(vs[i]))
+    vols.write("]")
+    return String(
+        '{"pool": ',
+        quote(pool),
+        ', "image": ',
+        quote(getenv(WORKER_IMAGE)),
+        ', "volumes": ',
+        vols,
+        ', "max_runs": ',
+        pool_settings(db, pool).max_runs,
+        "}",
     )

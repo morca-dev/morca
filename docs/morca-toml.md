@@ -812,10 +812,11 @@ idle_seconds = 900
 | `max_runs` | 1 to 1000 | none | Runs at once on each worker of the pool ([workers.md](workers.md#a-pools-settings)). |
 | `env` | table | none | Variables every run on the pool's workers gets, under the pipeline's. |
 | `secrets` | table | none | Secrets by ID, read on each worker, under the pipeline's. |
+| `volumes` | list of `source:target[:ro]` | none | The mounts of a worker `morca host join --container` starts ([workers.md](workers.md#joining-a-machine-morca-host-join)). |
 
 A pool without a `provider` is self-hosted (#220): its machines join by
-hand (`morca worker-token create`, then `morca worker` on each), and only
-`max_runs`, `env` and `secrets` apply; `machines`, `locations`,
+hand (`morca worker-token create`, then `morca host join` or `morca
+worker` on each), and only `max_runs`, `env`, `secrets` and `volumes` apply; `machines`, `locations`,
 `max_machines` and `idle_seconds` are refused there. It's recorded in
 `orca.pool_settings`, not `orca.pools`, so the autoscaler leaves it alone.
 

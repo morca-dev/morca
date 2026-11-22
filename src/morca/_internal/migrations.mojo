@@ -956,6 +956,15 @@ def _migrations() -> List[List[String]]:
             "ALTER TABLE orca.pipelines ADD COLUMN probe_every integer",
             "ALTER TABLE orca.attempts ADD COLUMN working_set_mb bigint",
         ],
+        # A pool's volumes (#220, `morca host join --container`): the mounts
+        # of its workers' containers. Additive: a column with a default the
+        # binaries before it neither read nor write.
+        [
+            (
+                "ALTER TABLE orca.pool_settings ADD COLUMN volumes jsonb NOT"
+                " NULL DEFAULT '[]'"
+            ),
+        ],
     ]
 
 
@@ -1021,6 +1030,9 @@ def _floor_raisers() -> List[Int]:
     67 (the working-set probe, #281) is additive: nullable columns the
     binaries before it neither read nor write. A registration one of them
     makes leaves `learn_from` and `probe_every` as they were.
+    68 (`pool_settings.volumes`, #220) is additive: a column with a
+    default the binaries before it neither read nor write; a registration
+    they make leaves it as it was.
     """
     return [1, 24]
 

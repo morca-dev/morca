@@ -47,6 +47,7 @@ settings:
 max_runs = 3                                       # runs at once on each worker
 env = { MOJO_HISTORY_WORKDIR = "/work/clones" }
 secrets = { GITHUB_TOKEN = "orca/github-token" }   # IDs, read on the worker
+volumes = ["census-work:/work"]                    # a container's mounts
 ```
 
 | Key | | |
@@ -54,6 +55,7 @@ secrets = { GITHUB_TOKEN = "orca/github-token" }   # IDs, read on the worker
 | `max_runs` | 1 to 1000 | Runs at once on each worker of the pool. The UI never gives a worker more; a worker started without `--max-runs` takes it as its own. Unset: each worker's `--max-runs` (1). |
 | `env` | table of names | Variables every run on the pool's workers gets, under the pipeline's own: a pipeline's `env` of the same name wins. A name that looks like a secret's (`TOKEN`, `PASSWORD`, ...) is refused. |
 | `secrets` | table of names to IDs | Secrets every run gets, read on the worker with its own `MORCA_SECRET_FETCH`, as a pipeline's are: morca.toml, the database and the claim hold only the IDs. |
+| `volumes` | list of `source:target[:ro\|:rw]` | The mounts of a worker that `morca host join --container` starts (below): a Docker volume's name or an absolute path, then an absolute path in the container. At most 32, no two on one target, and no space, quote, `:`, `,` or `$` in a path. A worker run as a service, not in a container, has none. |
 
 `morca register` with the file records every pool in `orca.pool_settings`
 (and those with a provider in `orca.pools` too); a pool the file no longer
@@ -61,9 +63,70 @@ has loses its settings. They travel in each claim's answer, over the
 worker API's TLS: the run's spec has the pool's `env` and secret IDs merged
 under the pipeline's, and the answer has the pool's `max_runs`. A worker
 from before this gets the variables (they are in the spec) but keeps its
-own `--max-runs`, which the UI caps at the pool's. A pool's `volumes` (the
-container's mounts) need the host agent that starts the container
-(#220), which isn't there yet: mount them in the `docker run` below.
+own `--max-runs`, which the UI caps at the pool's. The volumes go to
+`morca host join`, which asks `/api/worker/join` for them.
+
+## Joining a machine: morca host join
+
+On the machine, once, with a token from the server in a file only its
+owner can read:
+
+```sh
+# On the server:
+morca worker-token create --pool bgent --label bgent      # prints the token
+# On the machine, the token alone in /etc/morca/token (chmod 600), and the
+# bucket's keys in /etc/morca/bucket.env (chmod 600, NAME=value lines):
+sudo morca host join https://morca.example.com --pool bgent \
+    --token-file /etc/morca/token --env-file /etc/morca/bucket.env
+```
+
+It asks the UI's `/api/worker/join` with the token, which checks it is a
+live token of the pool and answers the pool's volumes and `max_runs` and
+the server's worker image (`MORCA_WORKER_IMAGE`), then installs and starts
+one of:
+
+| | Installs | Restarts |
+|---|---|---|
+| systemd (Linux, the default there) | `/etc/systemd/system/morca-worker-<pool>.service`, running this `morca worker` | always, but not after exit 3 (its token refused: `morca host remove`) |
+| launchd (macOS, the default there) | `/Library/LaunchDaemons/dev.morca.worker.<pool>.plist`, its log in `/var/log/morca-worker-<pool>.log` | `KeepAlive`, at most every 30 s |
+| `--container` | `/etc/morca/worker-<pool>-container.sh`, which runs `docker run -d --restart always` of the image (`--image`, else the server's) with the token file mounted read-only, the env files given and the pool's volumes mounted | `--restart always` |
+
+Beside it, `/etc/morca/worker-<pool>.env` (mode 600) has the worker's own
+settings: `MORCA_REMOTE` and each `--set NAME=value` (`MORCA_RESERVE_CPUS=2`,
+say; a name that looks like a secret's is refused). `/etc/morca/host-<pool>.json`
+(mode 600) records what was installed.
+
+**No secret leaves its file.** The token stays in the file named with
+`--token-file`, and the bucket's keys and the like in the `--env-file`s,
+which the service reads in place (`morca worker --env-file`); both must be
+mode 600, or the join is refused. Nothing it writes or prints holds one.
+The join is a row of `orca.audit` (user `worker:<label>`, action
+`/api/worker/join`).
+
+| Flag | Default | |
+|---|---|---|
+| `<url>` | `MORCA_REMOTE` | the UI |
+| `--pool` | (required) | the token's pool |
+| `--token-file` | (required) | the token, on its first line; mode 600 |
+| `--name` | the host name | how Ops names it |
+| `--service` | systemd on Linux, launchd on macOS | |
+| `--container` | | Docker instead of a service |
+| `--image` | the server's `MORCA_WORKER_IMAGE` | the container's image |
+| `--env-file` | none | the user's env files, read in place; mode 600 (repeat it) |
+| `--set NAME=value` | none | written to its own env file (repeat it) |
+| `--advertise` | none | its address for runs spread over the pool ([below](#one-run-over-several-workers)); a container gets host networking |
+| `--dir` | `/var/lib/morca/<pool>/stage` | where runs' output is staged |
+| `--user` | root | the user the service runs as, who must own the token and env files |
+| `--binary` | this `morca` | the `morca` a service runs |
+| `--root <dir>` | `/` | write every file under `<dir>`, with the paths in them too, and start nothing |
+| `--dry-run` | | print the files and what it would run, and write nothing |
+
+Run it again to change any of it: the files are written again and the
+service restarted. `morca host join --uninstall --pool bgent` stops the
+service (or removes the container) and deletes what `host-<pool>.json`
+lists. The token stays live on the server until `morca host remove`.
+Keeping a joined machine on the server's tag after a deploy is still by
+hand (`--container`: run `morca host join` again, or its script).
 
 ## Fills on a pool
 
@@ -232,6 +295,7 @@ MORCA_WAREHOUSE=s3://... MORCA_LOGS=s3://... MORCA_SECRET_FETCH=/etc/orca/fetch-
 | `--dir` | `$TMPDIR/morca-worker` | where a run's output is staged |
 | `--image` | `MORCA_IMAGE` | the worker's version (below) |
 | `--name` | the host name | how Ops and the run's page name it |
+| `--env-file` | none | `NAME=value` lines (as Docker's `--env-file`), read first; a variable already set wins (repeat it) |
 
 A worker with `MORCA_DATABASE_URL` set refuses to start.
 

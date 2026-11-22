@@ -19,6 +19,7 @@ import morca._internal.db.workers as workers_db
 from morca._internal.pool_config import (
     PoolConfig,
     pool_settings,
+    pool_volumes,
     read_pools,
     record_pools,
 )
@@ -313,6 +314,7 @@ def test_self_hosted_pools_are_recorded() raises:
     var f = ProjectConfig(
         String(
             '[pools.bgent]\nmax_runs = 3\nenv = { W = "/work" }\n',
+            'volumes = ["census-work:/work"]\n',
             'secrets = { GH = "orca/gh" }\n',
             '[pools.lab]\nprovider = "ec2"\nmachines = [{ type = "a" }]\n',
             "max_runs = 2\n",
@@ -329,12 +331,14 @@ def test_self_hosted_pools_are_recorded() raises:
         ),
         1,
     )
+    assert_equal(pool_volumes(db, "bgent"), ["census-work:/work"])
     var s = pool_settings(db, "bgent")
     assert_equal(s.max_runs, 3)
     assert_equal(s.env[0][0], "W")
     assert_equal(s.secrets[0][1], "orca/gh")
     assert_equal(pool_settings(db, "lab").max_runs, 2)
     assert_equal(pool_settings(db, "nowhere").max_runs, 0)
+    assert_equal(pool_volumes(db, "nowhere"), List[String]())
     var hand = ProjectConfig("[pools.lab]\n", "morca.toml")
     assert_equal(record_pools(db, read_pools(hand.doc)), ["lab"])
     assert_equal(_count("SELECT count(*) AS n FROM orca.pools"), 0)

@@ -36,6 +36,12 @@ pipeline's own (a pipeline's variable of the same name wins). `secrets`
 are Secrets Manager IDs, which the worker reads with its own
 `MORCA_SECRET_FETCH`: no value is in morca.toml or the database, and `env`
 refuses a name that looks like a secret's.
+
+`volumes = ["census-work:/work", "/srv/secrets:/etc/orca/secrets:ro"]` are
+the mounts of a worker started in a container by `morca host join
+--container` (`morca._internal.host_join`), which `/api/worker/join` gives
+it: a Docker volume's name or an absolute path, then the absolute path in
+the container, and `ro` or `rw`.
 """
 
 from json import loads
@@ -72,7 +78,10 @@ comptime POOL_KEYS = [
     "max_runs",
     "env",
     "secrets",
+    "volumes",
 ]
+comptime MOST_VOLUMES = 32
+"""The most volumes a pool may mount."""
 comptime MOST_RUNS = 1000
 """The most a pool's `max_runs` may be."""
 comptime DEFAULT_MAX_MACHINES = 1
@@ -107,6 +116,9 @@ struct PoolConfig(Copyable, Movable):
     """Variables every run of its workers gets, under the pipeline's."""
     var secrets: List[Tuple[String, String]]
     """Variables and the secret IDs their workers read them by."""
+    var volumes: List[String]
+    """`source:target[:ro|:rw]` mounts of its workers' containers
+    (`morca host join --container`)."""
 
     def grown(self) -> Bool:
         """Whether morca makes its machines: it has a provider."""
@@ -137,6 +149,9 @@ struct PoolConfig(Copyable, Movable):
 
     def secrets_json(self) -> String:
         return pairs_json(self.secrets, "id")
+
+    def volumes_json(self) -> String:
+        return _names_json(self.volumes)
 
 
 def pairs_json(pairs: List[Tuple[String, String]], b: String) -> String:
@@ -247,6 +262,103 @@ def _pairs(
     return out^
 
 
+def _path_problem(p: String) -> String:
+    """Why `p` can't be a volume's path, or empty: absolute, and none of
+    what a shell, an env file or Docker's `-v` would read otherwise."""
+    if not p.startswith("/"):
+        return String("a path is absolute: ", quote(p))
+    for b in p.as_bytes():
+        if (
+            b <= 0x20
+            or b == 0x7F
+            or b == UInt8(ord(":"))
+            or b == UInt8(ord(","))
+            or b == UInt8(ord("'"))
+            or b == UInt8(ord('"'))
+            or b == UInt8(ord("\\"))
+            or b == UInt8(ord("$"))
+            or b == UInt8(ord("`"))
+        ):
+            return String("not a path a volume can have: ", quote(p))
+    return ""
+
+
+def volume_problem(v: String) -> String:
+    """Why `v` can't be one of a pool's `volumes`, or empty:
+    `source:target[:ro|:rw]`, the source a Docker volume's name (`a-z`,
+    `A-Z`, `0-9`, `_`, `.`, `-`, a letter or digit first) or an absolute
+    path, the target an absolute path."""
+    var parts = v.split(":")
+    if len(parts) < 2 or len(parts) > 3:
+        return String(
+            "a volume is source:target or source:target:ro, not ", quote(v)
+        )
+    var source = String(parts[0])
+    var target = String(parts[1])
+    if len(parts) == 3 and parts[2] != "ro" and parts[2] != "rw":
+        return String(
+            "a volume's mode is ro or rw, not ", quote(String(parts[2]))
+        )
+    if source.startswith("/"):
+        var why = _path_problem(source)
+        if why:
+            return why
+    else:
+        var b = source.as_bytes()
+        if len(b) == 0 or len(b) > 64:
+            return String("a volume's name is 1 to 64 characters: ", quote(v))
+        for i in range(len(b)):
+            var c = b[i]
+            var alnum = (
+                (c >= UInt8(ord("a")) and c <= UInt8(ord("z")))
+                or (c >= UInt8(ord("A")) and c <= UInt8(ord("Z")))
+                or (c >= UInt8(ord("0")) and c <= UInt8(ord("9")))
+            )
+            if not alnum and (
+                i == 0
+                or (
+                    c != UInt8(ord("_"))
+                    and c != UInt8(ord("."))
+                    and c != UInt8(ord("-"))
+                )
+            ):
+                return String(
+                    "a volume's source is a name or an absolute path, not ",
+                    quote(source),
+                )
+    return _path_problem(target)
+
+
+def _volumes(
+    doc: TomlDoc, base: List[String], r: _Reader
+) raises -> List[String]:
+    """A pool's `volumes`, checked: no two on the same target."""
+    var p = base.copy()
+    p.append("volumes")
+    var out = List[String]()
+    var v = doc.get(p)
+    if not v:
+        return out^
+    ref l = v.value()
+    if l.kind != ARRAY or doc.is_table_array(l):
+        r.fail(l.line, 'volumes is a list of strings: ["name:/path", ...]')
+    if len(l.items) > MOST_VOLUMES:
+        r.fail(l.line, String("volumes: at most ", MOST_VOLUMES))
+    var targets = List[String]()
+    for i in range(len(l.items)):
+        if l.item_kinds[i] != STRING:
+            r.fail(l.line, "volumes: each is a string, source:target[:ro]")
+        var why = volume_problem(l.items[i])
+        if why:
+            r.fail(l.line, String("volumes: ", why))
+        var target = String(l.items[i].split(":")[1])
+        if target in targets:
+            r.fail(l.line, String("volumes: two on ", target))
+        targets.append(target)
+        out.append(l.items[i])
+    return out^
+
+
 def read_pool(doc: TomlDoc, name: String) raises -> PoolConfig:
     """`[pools.<name>]` of `doc`, checked; raises `<line>: [pools.<name>]
     <why>`."""
@@ -274,7 +386,7 @@ def read_pool(doc: TomlDoc, name: String) raises -> PoolConfig:
                     "has no key ",
                     toml_key(key),
                     " (it has provider, machines, locations, max_machines,",
-                    " idle_seconds, max_runs, env and secrets)",
+                    " idle_seconds, max_runs, env, secrets and volumes)",
                 ),
             )
     # provider
@@ -286,6 +398,7 @@ def read_pool(doc: TomlDoc, name: String) raises -> PoolConfig:
     var max_runs = _int(doc, max_runs_p, r, "max_runs", 1, MOST_RUNS, 0)
     var env = _pairs(doc, base, r, "env")
     var secrets = _pairs(doc, base, r, "secrets")
+    var volumes = _volumes(doc, base, r)
     if not pv:
         # Self-hosted (#220): its machines join by hand, and only the
         # settings above apply.
@@ -313,6 +426,7 @@ def read_pool(doc: TomlDoc, name: String) raises -> PoolConfig:
             max_runs,
             env^,
             secrets^,
+            volumes^,
         )
     if pv.value().kind != STRING:
         r.fail(pv.value().line, "provider is a string")
@@ -413,6 +527,7 @@ def read_pool(doc: TomlDoc, name: String) raises -> PoolConfig:
         max_runs,
         env^,
         secrets^,
+        volumes^,
     )
 
 
@@ -444,6 +559,7 @@ def record_pools(mut db: State, pools: List[PoolConfig]) raises -> List[String]:
             p.secrets_json(),
             p.max_runs,
         )
+        pools_db.set_volumes(tx, p.name, p.volumes_json())
         if not p.grown():
             continue
         keep.append(p.name)
@@ -519,6 +635,14 @@ def under_pool(
             out.append(p)
     for o in own:
         out.append(o)
+    return out^
+
+
+def pool_volumes(mut db: State, pool: String) raises -> List[String]:
+    """`pool`'s volumes, as `morca register` recorded them."""
+    var out = List[String]()
+    for v in loads(pools_db.volumes(db.conn, pool)).array_items():
+        out.append(v.string_value())
     return out^
 
 

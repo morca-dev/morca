@@ -100,6 +100,7 @@ from morca._internal.pool_config import read_pools, record_pools
 from morca._internal.registering import register_pipeline
 from morca._internal.registered import Registered, registered
 from morca._internal.fill_requesting import cancel_fill, request_fill
+from morca._internal.host_join import host_join_command
 from morca._internal.hosts import host_command
 from morca._internal.scheduler import Scheduler
 from morca._internal.tick import tick
@@ -231,6 +232,10 @@ comptime USAGE = """usage:
   morca worker-token create --pool <pool> [--days N] [--label L]
   morca worker-token list
   morca worker-token revoke <id>
+  morca host join <url> --pool <pool> --token-file <path> [--container]
+              [--service systemd|launchd] [--root <dir>] [--dry-run] [...]
+                                    (on a machine: installs its worker as a
+                                    service; --uninstall removes it)
   morca host list [--pool <pool>]    (the machines of worker pools: morca.hosts)
   morca host drain|undrain <id>      (it finishes its runs, claims no more)
   morca host remove <id> [--force]   (revokes its token; refused while it
@@ -457,6 +462,9 @@ def _command(args: List[String], target: String) raises -> Int:
     if args[1] == "worker":
         # Talks only to the UI's API, with no database (morca.worker).
         return worker_command(args, target)
+    if args[1] == "host" and len(args) >= 3 and args[2] == "join":
+        # On the machine joining, with no database (morca.host_join).
+        return host_join_command(args)
     if args[1] == "config" and len(args) >= 3 and args[2] == "check":
         # A file only, for a project's CI: no database.
         return _config_check(args)
