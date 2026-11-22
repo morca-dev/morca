@@ -79,6 +79,27 @@ def upsert_settings(
     )
 
 
+def set_volumes(mut tx: Transaction, name: String, volumes: String) raises:
+    """Records pool `name`'s volumes, a JSON array of `source:target[:ro]`
+    (`upsert_settings` first)."""
+    _ = tx.execute(
+        "UPDATE orca.pool_settings SET volumes = $2::jsonb WHERE name = $1",
+        Params().text(name).text(volumes),
+    )
+
+
+def volumes(mut conn: Connection, pool: String) raises -> String:
+    """`pool`'s volumes as JSON, `[]` for none or a pool morca.toml doesn't
+    declare."""
+    var rows = conn.query(
+        "SELECT volumes::text AS v FROM orca.pool_settings WHERE name = $1",
+        Params().text(pool),
+    )
+    if len(rows) == 0:
+        return "[]"
+    return rows.row(0).text("v")
+
+
 def delete_settings_but(mut tx: Transaction, keep: String) raises:
     """Deletes the settings of every pool not named in `keep`, a JSON array
     of names."""

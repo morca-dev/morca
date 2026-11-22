@@ -48,6 +48,11 @@ claim's answer.
 runs: it finishes those it has, keeps beating, and claims again once the
 drain is lifted (`morca host undrain`).
 
+**Env files.** Each `--env-file` (`morca host join`'s services pass them)
+is read before anything else, as Docker and systemd read one: a
+`NAME=value` a line, the value as written, blank lines and `#` comments
+skipped. A variable already in the environment keeps its value.
+
 **Versions.** The worker's image is `--image`, else `MORCA_IMAGE`. A run it's
 given whose pipeline's image isn't that is put back (`/api/worker/release`)
 rather than started, though the UI shouldn't hand it one
@@ -62,7 +67,7 @@ started has its start given back.
 """
 
 from std.ffi import c_int, external_call
-from std.os import getenv, makedirs
+from std.os import getenv, makedirs, setenv
 from std.sys.info import CompilationTarget, num_logical_cores
 from std.time import perf_counter_ns, sleep
 
@@ -123,6 +128,7 @@ comptime WORKER_USAGE = """usage:
   morca worker --pool <pool> [--remote <url>] [--token-file <path>]
               [--max-runs N] [--poll-seconds S] [--dir <dir>]
               [--image <image>] [--name <name>] [--advertise <address>]
+              [--env-file <path>]...
               (the token: MORCA_WORKER_TOKEN, or --token-file)"""
 
 
@@ -795,9 +801,55 @@ def _usage(msg: String) -> Int:
     return 2
 
 
+def env_file_pairs(text: String) raises -> List[Tuple[String, String]]:
+    """The variables of an env file's `text`: `NAME=value` lines, the value
+    as written (no quotes taken off, as Docker's `--env-file`), blank and
+    `#` lines skipped. Raises on any other line, saying which."""
+    var out = List[Tuple[String, String]]()
+    var n = 0
+    for raw in text.split("\n"):
+        n += 1
+        var line = String(raw.rstrip("\r"))
+        var bare = String(line.strip())
+        if not bare or bare.startswith("#"):
+            continue
+        var eq = line.find("=").or_else(-1)
+        var name = String(line[byte=:eq].strip()) if eq > 0 else String()
+        if eq <= 0 or not name or " " in name:
+            raise Error("line ", n, " isn't NAME=value")
+        out.append((name, String(line[byte = eq + 1 :])))
+    return out^
+
+
+def load_env_file(path: String) raises:
+    """Sets the variables of the env file at `path` that aren't set."""
+    var text: String
+    with open(path, "r") as f:
+        text = f.read()
+    var pairs: List[Tuple[String, String]]
+    try:
+        pairs = env_file_pairs(text)
+    except e:
+        raise Error("morca worker: ", path, ": ", e)
+    for p in pairs:
+        if not getenv(p[0]):
+            _ = setenv(p[0], p[1], False)
+
+
 def worker_command(args: List[String], target: String) raises -> Int:
     """`morca worker ...`, to the UI `target` unless `--remote` follows."""
+    # Its env files first: they give what the defaults below read.
+    var k = 2
+    while k + 1 < len(args):
+        if args[k] == "--env-file":
+            try:
+                load_env_file(args[k + 1])
+            except e:
+                return _usage(String(e))
+        k += 2
     var url = target
+    if not url:
+        url = getenv("MORCA_REMOTE")
     var pool = String()
     var token_file = String()
     var max_runs = 1
@@ -838,6 +890,8 @@ def worker_command(args: List[String], target: String) raises -> Int:
             name = val
         elif a == "--advertise":
             advertise = val
+        elif a == "--env-file":
+            pass  # read above
         else:
             return _usage(String("unknown argument: ", a))
         i += 2

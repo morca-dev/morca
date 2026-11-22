@@ -32,7 +32,16 @@ from morca._internal.http_store import (
 )
 from morca._internal.store import RunResult, StepRun, SUCCEEDED
 from morca._internal.db.run_rows import RunInfo, StepInfo, Usage
+from morca._internal.host_join import (
+    CONTAINER,
+    LAUNCHD,
+    SYSTEMD,
+    JoinPlan,
+    stop_commands,
+    word_problem,
+)
 from morca._internal.sample import machine_name
+from morca._internal.worker import env_file_pairs
 from morca._internal.workers import (
     WorkerRun,
     version_refusal,
@@ -216,6 +225,113 @@ def test_refusal() raises:
     assert_equal(refusal('{"error": "morca: lost run 3"}'), "morca: lost run 3")
     assert_equal(refusal("<html>bad gateway</html>"), "")
     assert_equal(refusal('{"ok": true}'), "")
+
+
+def _plan(service: String, root: String = "/") -> JoinPlan:
+    return JoinPlan(
+        service,
+        "bgent",
+        "https://morca.example.com",
+        "lab",
+        "/opt/morca/bin/morca",
+        "/home/m/.morca/token",
+        ["/home/m/worker.env"],
+        [("MORCA_RESERVE_CPUS", "2")],
+        root,
+        "",
+        "",
+        "ghcr.io/morca-dev/census:1.2.3" if service == CONTAINER else "",
+        ["census-work:/work"] if service == CONTAINER else List[String](),
+        "",
+    )
+
+
+def test_env_files() raises:
+    # `morca worker --env-file` reads them as Docker does (#220).
+    var got = env_file_pairs(
+        "# a comment\n\nA=1\nMORCA_SECRET_FETCH=sh /etc/orca/fetch\nB=x=y\r\n"
+    )
+    assert_equal(len(got), 3)
+    assert_equal(got[1][1], "sh /etc/orca/fetch")
+    assert_equal(got[2][0], "B")
+    assert_equal(got[2][1], "x=y")
+    with assert_raises(contains="line 2 isn't NAME=value"):
+        _ = env_file_pairs("A=1\nnot a pair\n")
+
+
+def test_host_join_files() raises:
+    # What `morca host join` writes (#220): no secret in any of it.
+    var u = _plan(SYSTEMD)
+    assert_equal(u.problem(), "")
+    assert_equal(
+        u.service_path(), "/etc/systemd/system/morca-worker-bgent.service"
+    )
+    assert_equal(u.env_path(), "/etc/morca/worker-bgent.env")
+    var unit = u.unit_text()
+    assert_true(
+        String(
+            "ExecStart=/opt/morca/bin/morca worker --pool bgent --remote",
+            " https://morca.example.com --token-file /home/m/.morca/token",
+            " --name lab --dir /var/lib/morca/bgent/stage --env-file",
+            " /etc/morca/worker-bgent.env --env-file /home/m/worker.env\n",
+        )
+        in unit,
+        unit,
+    )
+    assert_true("RestartPreventExitStatus=3\n" in unit)
+    assert_true("WantedBy=multi-user.target" in unit)
+    assert_true("MORCA_RESERVE_CPUS=2\n" in u.env_text())
+    assert_equal(len(u.start_commands()), 3)
+    # Under a root, every path is under it.
+    var rooted = _plan(SYSTEMD, "/tmp/r/")
+    assert_equal(rooted.record_path(), "/tmp/r/etc/morca/host-bgent.json")
+    assert_true("--dir /tmp/r/var/lib/morca/bgent/stage" in rooted.unit_text())
+    var l = _plan(LAUNCHD)
+    var plist = l.plist_text()
+    assert_equal(
+        l.service_path(), "/Library/LaunchDaemons/dev.morca.worker.bgent.plist"
+    )
+    assert_true(
+        "<string>--token-file</string>\n   "
+        " <string>/home/m/.morca/token</string>"
+        in plist,
+        plist,
+    )
+    assert_true("<key>KeepAlive</key>\n  <true/>" in plist)
+    assert_equal(l.start_commands()[1][1], "bootstrap")
+    var c = _plan(CONTAINER)
+    assert_equal(c.problem(), "")
+    var d = " ".join(c.docker_args())
+    assert_true(
+        String(
+            "docker run -d --name morca-worker-bgent --restart always",
+            " --env-file /etc/morca/worker-bgent.env --env-file",
+            " /home/m/worker.env -v /home/m/.morca/token:/etc/morca/token:ro",
+            " -v /var/lib/morca/bgent/stage:/var/lib/morca/stage -v",
+            " census-work:/work ghcr.io/morca-dev/census:1.2.3 worker --pool",
+            " bgent --remote https://morca.example.com --token-file",
+            " /etc/morca/token --name lab --dir /var/lib/morca/stage",
+        )
+        == d,
+        d,
+    )
+    assert_true("exec 'docker' 'run'" in c.container_script())
+    assert_true('"service": "container"' in c.record_json())
+    assert_equal(
+        stop_commands(CONTAINER, "morca-worker-bgent", "x")[0][2], "-f"
+    )
+    # What can't go in a service file as it is.
+    assert_true("can't have a space" in word_problem("a path", "/a b"))
+    assert_true("can't have" in word_problem("a path", "/a%b"))
+    var bad = _plan(SYSTEMD)
+    bad.token_file = "token"
+    assert_equal(bad.problem(), "the token file's path is absolute")
+    bad = _plan(SYSTEMD)
+    bad.settings = [("API_TOKEN", "x")]
+    assert_true("looks like a secret" in bad.problem())
+    bad = _plan(CONTAINER)
+    bad.volumes = ["a:b"]
+    assert_true("the pool's volumes" in bad.problem())
 
 
 def main() raises:

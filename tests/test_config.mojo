@@ -21,6 +21,7 @@ from morca._internal.pool_config import (
     NO_WAIT,
     pool_slots,
     read_pools,
+    volume_problem,
     under_pool,
 )
 from morca._internal.secrets import env_name_problem
@@ -553,7 +554,27 @@ def test_self_hosted_pools() raises:
     _refused('[pools.lab]\nenv = { API_TOKEN = "x" }\n', "looks like a secret")
     _refused('[pools.lab]\nenv = { MORCA_IMAGE = "x" }\n', "set by morca")
     _refused('[pools.lab]\nsecrets = { A = "b" }\n', "under orca/")
-    _refused('[pools.lab]\nvolumes = ["a:/a"]\n', "has no key volumes")
+    _refused('[pools.lab]\nvolume = ["a:/a"]\n', "has no key volume")
+    # Volumes (#220): the mounts of its workers' containers.
+    var vols = read_pools(
+        ProjectConfig(
+            '[pools.lab]\nvolumes = ["census-work:/work", "/srv/s:/s:ro"]\n',
+            "morca.toml",
+        ).doc
+    )
+    assert_equal(vols[0].volumes, ["census-work:/work", "/srv/s:/s:ro"])
+    assert_equal(
+        vols[0].volumes_json(), '["census-work:/work", "/srv/s:/s:ro"]'
+    )
+    assert_equal(volume_problem("a.b-c_1:/x/y:rw"), "")
+    assert_true("source:target" in volume_problem("/a"))
+    assert_true("absolute" in volume_problem("a:b"))
+    assert_true("mode is ro or rw" in volume_problem("a:/b:rx"))
+    assert_true("a name or an absolute path" in volume_problem("-a:/b"))
+    assert_true("can have" in volume_problem("/a$b:/b"))
+    _refused('[pools.lab]\nvolumes = "a:/a"\n', "volumes is a list of strings")
+    _refused('[pools.lab]\nvolumes = ["a:/a", "b:/a"]\n', "two on /a")
+    _refused('[pools.lab]\nvolumes = ["a:/a b"]\n', "not a path a volume")
 
 
 def test_what_a_pool_gives_its_workers() raises:
