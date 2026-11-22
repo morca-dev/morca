@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.41.1 - 2026-11-22
+
+- **Links to the code after a run in an image:** a pipeline whose runs record a different image than `morca register` did keeps the links to its code on its page and on its runs' pages; they had gone once a run started. (#584)
+
 ## 0.41.0 - 2026-11-21
 
 - **Kubernetes:** Postgres backups to the bucket with a restore Job, run secrets from the Secret `morca-secrets` (the manifests no longer hold `morca-db` and `morca-s3`: apply `deploy/k8s/local-secrets.yaml` on kind or make them yourself), `morca config apps --kube`, the UI as its own Deployment (`deploy/k8s/ui.yaml`, which you now apply too), and `deploy/k8s/deploy.sh <tag>` (K8S.md#deploying). (#570, #571, #573)

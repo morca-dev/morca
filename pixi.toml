@@ -2,7 +2,7 @@
 authors = ["Marius S <39998+winding-lines@users.noreply.github.com>"]
 channels = ["https://conda.modular.com/max-nightly", "conda-forge"]
 name = "morca"
-version = "0.41.0"
+version = "0.41.1"
 description = "Orchestration for Mojo data pipelines: DAGs in Mojo, cron schedules, a web UI."
 preview = ["pixi-build"]
 platforms = ["osx-arm64", "linux-64", "linux-aarch64"]
@@ -46,7 +46,7 @@ sqlite = ">=3.45,<4"
 # revisions mojoshelf published of what it imports.
 [package]
 name = "morca-mojo"
-version = "0.41.0"
+version = "0.41.1"
 
 [package.build]
 backend = { name = "pixi-build-mojo", version = "0.*" }
