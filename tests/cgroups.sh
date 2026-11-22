@@ -76,8 +76,13 @@ export MORCA_STALE_SECONDS=5 MORCA_START_SECONDS=20 MORCA_SAMPLE_SECONDS=0 MORCA
 export MORCA_RUN_MEMORY_MB=200 MORCA_RUN_MEMORY_MARGIN=0 MORCA_RUN_MEMORY_GROWTH=2 GROW_MB=300
 pids=
 sched=
+swapfile=
 cleanup() {
     for p in $pids $sched; do kill "$p" 2> /dev/null || true; done
+    if [ -n "$swapfile" ]; then
+        sudo swapoff "$swapfile" 2> /dev/null || true
+        sudo rm -f "$swapfile"
+    fi
     if [ -n "$made" ]; then
         sleep 1
         sudo sh -c "echo $$ > $back/cgroup.procs" 2> /dev/null || true
@@ -232,7 +237,16 @@ fi
 # grower's 300 MB at a 200 MB limit (no margin) pushes what doesn't fit to
 # swap and succeeds at once, where it was killed above; its attempt records
 # the swap peak, and the pages show it. Needs swap (/proc/swaps) and swap
-# accounting (memory.swap.max).
+# accounting (memory.swap.max). On a runner with sudo (where it made the
+# cgroup above) and no swap, a 1 GB swapfile for the test, removed at the end.
+if [ -z "$(awk 'NR > 1' /proc/swaps)" ] && [ -n "$made" ]; then
+    swapfile=/var/tmp/morca-test-swap-$$
+    if sudo fallocate -l 1G "$swapfile" && sudo chmod 600 "$swapfile" && sudo mkswap "$swapfile" > /dev/null && sudo swapon "$swapfile"; then
+        echo "cgroups: made $swapfile, a swapfile for the offload case"
+    else
+        echo "cgroups: can't make a swapfile ($swapfile)"
+    fi
+fi
 if [ -n "$(awk 'NR > 1' /proc/swaps)" ] && [ -f "$cgbase/memory.swap.max" ]; then
     kill "$sched"
     wait "$sched" 2> /dev/null || true
