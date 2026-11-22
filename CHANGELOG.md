@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.42.0 - 2026-11-22
+
+- **Links to the code after a run in an image:** a pipeline whose runs record a different image than `morca register` did keeps the links to its code on its page and on its runs' pages; they had gone once a run started. (#584)
+
+- **Steadier kind tests:** the deploy test waits for a run to record its version, and the kind test prints more when it fails. (#585)
+
+- **Self-hosted pools**: a `[pools.<name>]` without a `provider` is a pool whose machines join by hand, any pool can give its workers `max_runs`, `env` and `secrets`, and `morca host list|drain|undrain|remove` drains and removes a pool's machines. (#587)
+
+- **A pipeline's working set, probed:** with `learn = "working_set"` (and `probe_every = N`) in morca.toml, the scheduler lowers a probed local or control-placed run's `memory.high` against its memory pressure, records the working set it held beside the peak, and learns `auto` memory from it once 3 runs have one. (#588)
+
+- **Runs may offload to swap or zswap**: `MORCA_RUN_SWAP_PCT` (default 0, as before) lets each run's cgroup keep that percent of its limit in swap, so a run a little past its grant slows down instead of being held and killed; each attempt records what it offloaded, learned requests count it, and the Hetzner deploy can turn the server's zswap on with `ZSWAP` (tools 0.39.0). (#589)
+
 ## 0.41.0 - 2026-11-21
 
 - **Kubernetes:** Postgres backups to the bucket with a restore Job, run secrets from the Secret `morca-secrets` (the manifests no longer hold `morca-db` and `morca-s3`: apply `deploy/k8s/local-secrets.yaml` on kind or make them yourself), `morca config apps --kube`, the UI as its own Deployment (`deploy/k8s/ui.yaml`, which you now apply too), and `deploy/k8s/deploy.sh <tag>` (K8S.md#deploying). (#570, #571, #573)
