@@ -122,7 +122,8 @@ def registrations(
             " orca.runs r WHERE r.pipeline = orca.pipelines.name AND r.status"
             " = 'succeeded' ORDER BY r.id DESC LIMIT 1), ''),"
             " coalesce(memory_raised_mb, 0), coalesce(cpus, ''),"
-            " coalesce(memory_gb, ''), coalesce(learn_from, '')) ELSE '' END"
+            # concat_ws skips a null: a key without learn_from is as before.
+            " coalesce(memory_gb, ''), learn_from) ELSE '' END"
             " AS learn_key,"
             " coalesce(learned->>'key', '') AS learned_key,"
             " coalesce((learned->>'runs')::bigint, 0) AS learned_runs,"
