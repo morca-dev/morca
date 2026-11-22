@@ -395,7 +395,7 @@ struct Ui(Copyable, Handler):
             if required and not call.user:
                 return login_needed(req, json)
             var page = route.handler(db, call)
-            if page.status == 303 and call.user:
+            if page.status == 303 and call.user and not page.audited:
                 audit(
                     db,
                     call.user,

@@ -707,6 +707,10 @@ Machines card draws them; for a worker, the runs it claimed. A worker
 samples only its runs' processes, so their Resources cards have what they
 used.
 
+A self-hosted machine whose token is still good has Drain (Undrain while
+it drains) and Remove beside its state, on its row and its page, which do
+what `morca host` does ([workers.md](workers.md#hosts-list-drain-remove)).
+
 ## The watchdog page
 
 `/watchdog` lists each rule with each of its thresholds, the last value and

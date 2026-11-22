@@ -29,6 +29,11 @@ from morca._internal.metrics import metrics_html, parse_samples
 from morca._internal.logs import read_location
 from morca._internal.sample import machine_name, metrics_location
 from morca._internal.state import State
+from morca._internal.ui.host_actions import (
+    host_buttons,
+    image_cell,
+    server_image,
+)
 from morca._internal.ui.layout import card_open, fact_item, page_html
 from morca._internal.ui.errors import not_found
 from morca._internal.ui.terms import header_help, value_help
@@ -246,6 +251,7 @@ def machines_html(
     _th(h, "CPU", True)
     _th(h, "Worker")
     h.raw("</tr></thead><tbody>")
+    var server = server_image()
     for m in ms:
         h.raw('<tr class="pools__', m.state, '"><td><a href="')
         h.text(machine_href(m))
@@ -258,8 +264,9 @@ def machines_html(
         h.term("machine_kind", m.kind)
         h.raw("</td><td>")
         _state_html(h, m)
+        host_buttons(h, m)
         h.raw("</td>")
-        h.mono(m.image if m.image else String("-"))
+        image_cell(h, m, server)
         h.num(String(m.cpus) if m.cpus > 0 else String("-"))
         h.num(_memory(m.memory_mb))
         h.raw("<td>")
@@ -506,7 +513,10 @@ def pools_live(mut db: State, ask: PoolsAsk) raises -> Page:
     refreshes from; it never ends."""
     var h = Html()
     _live_html(h, db, ask)
-    return Page(200, String(), h^.finish(), "text/html; charset=utf-8")
+    var p = Page(200, String(), h^.finish(), "text/html; charset=utf-8")
+    # Its "Log in to ..." links (a host's buttons) go back to the page.
+    p.here = String("/ops/pools", ask.query())
+    return p^
 
 
 def pools_api(mut db: State, ask: PoolsAsk) raises -> Page:
@@ -546,6 +556,7 @@ def machine_page(mut db: State, kind: String, id: String) raises -> Page:
     h.text(m.name)
     h.raw(" ")
     _state_html(h, m)
+    host_buttons(h, m)
     h.raw("</h1>")
     card_open(
         h,
@@ -567,7 +578,13 @@ def machine_page(mut db: State, kind: String, id: String) raises -> Page:
     _fact(h, "Image", "m-image")
     h.raw("<code>")
     h.text(m.image if m.image else String("-"))
-    h.raw("</code></dd>")
+    h.raw("</code>")
+    var server = server_image()
+    if m.kind == SELF_HOSTED and server:
+        h.raw(' <span class="muted">· the server\'s: <code>')
+        h.text(server)
+        h.raw("</code></span>")
+    h.raw("</dd>")
     _fact(h, "CPUs", "m-cpus")
     h.text(String(m.cpus) if m.cpus > 0 else String("-"))
     h.raw("</dd>")
