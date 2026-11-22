@@ -1,0 +1,1 @@
+- **Steadier kind tests:** the deploy test waits for a run to record its version, and the kind test prints more when it fails. (#585)
