@@ -246,3 +246,86 @@ def host_command(url: String, args: List[String]) raises -> Int:
         )
         return 0
     return _usage(String("unknown: morca host ", sub))
+
+
+# ── for the UI and `--remote` (morca._internal.api.actions) ──────────────────
+
+
+@fieldwise_init
+struct HostDone(Copyable, Movable):
+    """What a drain, undrain or remove did, for the UI's answer."""
+
+    var refused: String
+    """Why it wasn't done, or empty."""
+    var busy: Bool
+    """Refused only because the host has runs running: removing it with
+    `force` does it."""
+    var running: Int
+    """The runs it had running."""
+
+
+def set_host_draining(
+    mut db: State, id: Int, on: Bool, who: String, source: String
+) raises -> HostDone:
+    """Drains host `id` (`on`) or undrains it, as `morca host drain|undrain`
+    does, audited as `who`'s from `source` (none without a `who`, as the
+    UI's actions with login off)."""
+    var running = workers_db.running_runs(db.conn, id)
+    if not workers_db.set_draining(db.conn, id, on):
+        return HostDone(
+            String(
+                "host ",
+                id,
+                " is no live worker token's, or is ",
+                "draining" if on else "not draining",
+                " already",
+            ),
+            False,
+            running,
+        )
+    if who:
+        audit(
+            db,
+            who,
+            "host drain" if on else "host undrain",
+            0,
+            String("id=", id),
+            source,
+        )
+    return HostDone(String(), False, running)
+
+
+def remove_host(
+    mut db: State, id: Int, force: Bool, who: String, source: String
+) raises -> HostDone:
+    """Revokes host `id`'s token, as `morca host remove [--force]` does:
+    refused while it has runs running unless `force`; audited as
+    `set_host_draining` is."""
+    var running = workers_db.running_runs(db.conn, id)
+    if running > 0 and not force:
+        return HostDone(
+            String(
+                "host ",
+                id,
+                " has ",
+                running,
+                " runs running: drain it first, or remove it anyway",
+                " (morca host remove --force), and they are queued again",
+            ),
+            True,
+            running,
+        )
+    if not workers_db.revoke(db.conn, id):
+        return HostDone(
+            String("host ", id, " is no live worker token's"), False, running
+        )
+    if who:
+        audit(
+            db,
+            who,
+            "host remove",
+            0,
+            String("id=", id, " running=", running),
+            source,
+        )
+    return HostDone(String(), False, running)

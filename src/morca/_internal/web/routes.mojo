@@ -31,7 +31,7 @@ stylesheet is served before any route is looked up.
 | `/ops/control` | Control, the one machine running the scheduler, this UI, Postgres and local and control-placed runs (so not a pool on Pools): its own health: CPU, memory, the disk Postgres is on and network over `?range=24h`, `7d` or `14d`, and each container's memory (`morca._internal.system`), and the watchdog's banner, refreshed every 30 s from `/ops/control/live`; `/api/system` is the same as JSON; `/system` redirects here (301) |
 | `/metrics` | Prometheus gauges: the control instance's CPU, memory, disk, network and containers' memory, runs running and queued, hosts, and errors in the last hour; open like the other pages (reads need no login) |
 | `/ops/pools` | Pools, every machine runs are placed on (`morca._internal.ui.pools`, `morca._internal.views.pools`): a row per EC2 instance morca launched (live, and gone for an hour after it ended), per live Kubernetes run's pods (on the Kubernetes runner) and per worker token's machine (`orca.workers`), with its pool, kind, state, image, CPUs, memory, runs, last heartbeat, CPU and worker; `?pool=` (`ec2`, `kubernetes`, `worker:<pool>`) and `?kind=` (`ec2`, `k8s`, `self-hosted`) filter it; machines gone for over an hour are behind `?gone=1`; with EC2 in view, Fleet's cards (`morca._internal.fleet`) and its charts over `?range=24h` or `7d`; refreshed every 10 s from `/ops/pools/live`; `/api/pools` the same as JSON, every machine unless `?gone=0` |
-| `/ops/pools/<kind>/<id>` | a machine: its facts, and an EC2 instance's samples over its run (the run page's Machines charts) or the runs a worker claimed |
+| `/ops/pools/<kind>/<id>` | a machine: its facts, and an EC2 instance's samples over its run (the run page's Machines charts) or the runs a worker claimed; a self-hosted one's Drain (or Undrain) and Remove, as on its row (`morca._internal.ui.host_actions`) |
 | `/ops/fleet`, `/ops/workers` | moved to `/ops/pools?kind=ec2` (Fleet's `?range=` kept) and `?kind=self-hosted` (301), as are `/ops/fleet/hosts`, `/ops/workers/live`, `/fleet` and `/fleet/hosts` (to `/ops/pools/live` for the fragments); asked for JSON, they answer Fleet's and Workers' JSON as before, as `/api/fleet` (the summary, hosts and charts of `morca._internal.fleet`) and `/api/workers` (each worker token's pool, label, worker, image, last heartbeat, runs, CPUs and memory) do. A worker's own requests go to `/api/worker/...` with its token |
 | `/watchdog`, `/api/watchdog` | the watchdog's rules with their last values, limits and snoozes, and the trips with a pipeline still paused (`morca._internal.watchdog`); also the red banner on `/`, `/ops/pools` and `/ops/control`; the page refreshes every 30 s from `/watchdog/live` |
 | `/datasets` | datasets, with their writers, readers and latest snapshots, and the graph of pipelines and datasets |
@@ -215,6 +215,23 @@ def routes() -> List[Route]:
         action("/runs/{id:int}/resume", actions.resume, "run"),
         action("/runs/{id:int}/rerun", actions.rerun, "run"),
         action("/runs/{id:int}/cancel", actions.cancel, "run"),
+        # A self-hosted host's (morca host), and the same for --remote.
+        action(
+            "/ops/pools/self-hosted/{id:int}/drain", actions.host_drain, "host"
+        ),
+        action(
+            "/ops/pools/self-hosted/{id:int}/undrain",
+            actions.host_undrain,
+            "host",
+        ),
+        action(
+            "/ops/pools/self-hosted/{id:int}/remove",
+            actions.host_remove,
+            "host",
+        ),
+        action("/api/hosts/{id:int}/drain", actions.host_drain, "host"),
+        action("/api/hosts/{id:int}/undrain", actions.host_undrain, "host"),
+        action("/api/hosts/{id:int}/remove", actions.host_remove, "host"),
     ]
 
 

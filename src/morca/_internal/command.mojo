@@ -102,6 +102,7 @@ from morca._internal.registered import Registered, registered
 from morca._internal.fill_requesting import cancel_fill, request_fill
 from morca._internal.host_join import host_join_command
 from morca._internal.hosts import host_command
+from morca._internal.remote_hosts import host_remote
 from morca._internal.scheduler import Scheduler
 from morca._internal.tick import tick
 from morca._internal.control import fetch_secret
@@ -241,7 +242,9 @@ comptime USAGE = """usage:
   morca host remove <id> [--force]   (revokes its token; refused while it
                                     runs unless --force)
   morca host upgrade <id>            (a --container host moves to the
-                                    server's worker image now, once idle)
+                                    server's worker image now, once idle;
+                                    list, drain, undrain and remove also
+                                    with --remote <url>)
   morca worker --pool <pool> [--remote <url>] [--token-file <path>]
               [--max-runs N] [--poll-seconds S] [--dir <dir>]
               [--image <image>] [--name <name>] [--advertise <address>]
@@ -249,7 +252,7 @@ comptime USAGE = """usage:
   morca login [<url>] [--user NAME] [--days N] [--label L]
   morca logout [<url>]
   morca --remote <url> backfill|start|cancel|pause|unpause|resume|rerun|
-                      rebuild|status|lineage|watchdog|alerts ...
+                      rebuild|status|lineage|watchdog|alerts|host ...
                 (to a deployed morca ui, as the user morca login logged in;
                 or MORCA_REMOTE=<url>)"""
 
@@ -446,6 +449,9 @@ def _command(args: List[String], target: String) raises -> Int:
         return login_command(args, target)
     if args[1] == "logout":
         return logout_command(args, target)
+    if target and args[1] == "host":
+        var api = remote_api(target)
+        return host_remote(api, args)
     if target and is_remote_command(args[1]):
         var api = remote_api(target)
         return api_command(api, args)

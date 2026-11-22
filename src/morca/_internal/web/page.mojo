@@ -28,6 +28,9 @@ struct Page(Movable):
     """Where a login link on it comes back to; empty for its own URL."""
     var headers: List[Tuple[String, String]]
     """More headers to send: a cookie, `WWW-Authenticate`."""
+    var audited: Bool
+    """Set by an action that wrote its own `orca.audit` row (`morca host`'s
+    actions), so the server doesn't add one by its path."""
 
     def __init__(
         out self,
@@ -46,6 +49,7 @@ struct Page(Movable):
         self.poll_every = poll_every
         self.here = String()
         self.headers = List[Tuple[String, String]]()
+        self.audited = False
 
 
 def _reason(status: Int) -> String:
