@@ -14,7 +14,7 @@ from json import loads
 from morca._internal.db.live import stale_limit
 from morca._internal.hosts import HOST_USAGE, host_line
 from morca._internal.remote import Api
-from morca._internal.workers import WorkerRow
+from morca._internal.workers import WorkerRow, text_field
 
 
 def _host_id(arg: String) raises -> Int:
@@ -74,6 +74,9 @@ def host_remote(mut api: Api, args: List[String]) raises -> Int:
                 w["expires"].string_value(),
                 None,
                 w["draining"].bool_value(),
+                # None from a server before these (#220, part 3).
+                text_field(w, "host_image"),
+                text_field(w, "host_upgrade"),
             )
             if pool and r.pool != pool:
                 continue
