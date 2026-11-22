@@ -96,7 +96,7 @@ if join "$base" --pool t --token-file "$t/token" --root "$t/r0" > "$t/out" 2>&1;
 grep -q "is readable by others" "$t/out" || fail "the refusal: $(cat "$t/out")"
 chmod 600 "$t/token"
 if join "$base" --pool t --token-file "$t/other-token" --root "$t/r0" > "$t/out" 2>&1; then fail "another pool's token was taken"; fi
-grep -q "for pool other, not t" "$t/out" || fail "the refusal: $(cat "$t/out")"
+grep -q "the server refused the join: morca: this worker token is for pool other, not t" "$t/out" || fail "the refusal: $(cat "$t/out")"
 [ ! -e "$t/r0" ] || fail "a refused join wrote files: $(find "$t/r0")"
 echo "ok   a readable token file and another pool's token are refused, and nothing is written"
 

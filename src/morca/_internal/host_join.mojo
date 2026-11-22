@@ -43,7 +43,7 @@ from std.os.path import exists
 from std.sys import argv
 from std.sys.info import CompilationTarget
 
-from json import loads
+from json import Value, loads
 
 from morca._common.paths import absolute
 from morca._internal.control import pool_problem
@@ -738,10 +738,20 @@ def host_join_command(args: List[String]) raises -> Int:
         raise Error("morca: ", token_file, "'s first line isn't a token")
     # The server checks the token is a live one of the pool, and says
     # what the pool's machines are set up with.
-    var answer = StateApi(url, token).request_once(
-        JOIN_PATH,
-        Body().text("pool", pool).text("name", name).finish(),
-    )
+    var answer: Value
+    try:
+        answer = StateApi(url, token).request_once(
+            JOIN_PATH,
+            Body().text("pool", pool).text("name", name).finish(),
+        )
+    except e:
+        var msg = String(e)
+        if msg.startswith(FINAL):
+            raise Error(
+                "morca: the server refused the join: ",
+                String(msg[byte = FINAL.byte_length() :]),
+            )
+        raise e^
     var vols = List[String]()
     if String("volumes") in answer:
         for v in answer["volumes"].array_items():
