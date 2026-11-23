@@ -1,1 +1,0 @@
-- **morca host join**: `morca host join <url> --pool <pool> --token-file <path>` installs a machine's worker as a systemd or launchd service, or with `--container` a Docker container restarted always with the pool's new `volumes` mounted, and `--uninstall` removes it. (#591)

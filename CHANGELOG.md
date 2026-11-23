@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.43.0 - 2026-11-23
+
+- **Drain, Undrain and Remove on Ops > Pools**: a self-hosted host's row and page have the buttons `morca host` has, audited as the logged-in user's, and `morca --remote <url> host list|drain|undrain|remove` works against a deployed UI. (#590)
+
+- **morca host join**: `morca host join <url> --pool <pool> --token-file <path>` installs a machine's worker as a systemd or launchd service, or with `--container` a Docker container restarted always with the pool's new `volumes` mounted, and `--uninstall` removes it. (#591)
+
+- **Hand-joined hosts follow the server's image**: a worker installed with `morca host join --container` drains after a deploy and its script starts it on the server's `MORCA_WORKER_IMAGE` (back on the old one if the pull or start fails), a service reports `needs-upgrade`, `morca host list` shows each host's image against the server's, and `morca host upgrade <id>` retries now; migration 69 is additive. (#593)
+
 ## 0.42.0 - 2026-11-22
 
 - **Links to the code after a run in an image:** a pipeline whose runs record a different image than `morca register` did keeps the links to its code on its page and on its runs' pages; they had gone once a run started. (#584)
