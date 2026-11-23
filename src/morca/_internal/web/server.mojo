@@ -92,7 +92,7 @@ from morca._internal.web.auth import (
 )
 from morca._internal.web.drain import Drain
 from morca._internal.web.cache import CacheHandle, ResponseCache, cache_key
-from morca._internal.web.limit import Gate, Limits
+from morca._internal.web.limit import Gate, Limits, refuse_crawler
 from morca._internal.web.turnstile import (
     VERIFY_PATH,
     Turnstile,
@@ -283,6 +283,9 @@ struct Ui(Copyable, Handler):
 
     def serve(self, req: Request) raises -> Response:
         var path = _path_of(req.url)
+        var crawler = refuse_crawler(req, path)
+        if crawler:
+            return crawler.take()
         var key = cache_key(req, path)
         # A kept read is for those who passed Turnstile, if it's on.
         if key and not self.turnstile.asked(req, path):

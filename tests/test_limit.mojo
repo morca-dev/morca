@@ -9,6 +9,7 @@ from morca._internal.web.limit import (
     TOO_MANY,
     ClientTable,
     admit,
+    declared_crawler,
     is_data_read,
     release,
 )
@@ -23,6 +24,39 @@ def test_data_reads() raises:
     assert_false(is_data_read("/datasets/mojo.repos?tab=database"))
     assert_false(is_data_read("/datasets/mojo.repos/snapshots/1"))
     assert_false(is_data_read("/runs?tab=data"))
+
+
+def test_declared_crawlers() raises:
+    var chrome = String(
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like",
+        " Gecko) Chrome/145.0.0.0 Safari/537.36",
+    )
+    assert_false(declared_crawler(chrome))
+    assert_false(declared_crawler(""))
+    assert_false(declared_crawler("curl/8.7.1"))
+    assert_false(
+        declared_crawler(
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"
+            " AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.0.1"
+            " Safari/605.1.15"
+        )
+    )
+    # Meta's, as it reads the UI: a browser's with its name at the end.
+    assert_true(
+        declared_crawler(
+            String(
+                chrome,
+                (
+                    " (compatible; meta-externalagent/1.1;"
+                    " +https://developers.facebook.com/docs/sharing/webmasters/crawler)"
+                ),
+            )
+        )
+    )
+    assert_true(declared_crawler("facebookexternalhit/1.1"))
+    assert_true(declared_crawler("Mozilla/5.0 (compatible; GPTBot/1.2)"))
+    assert_true(declared_crawler("Mozilla/5.0 (compatible; Bytespider)"))
+    assert_true(declared_crawler("Mozilla/5.0 (compatible; bingbot/2.0)"))
 
 
 def test_rate_per_minute() raises:

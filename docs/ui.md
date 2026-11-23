@@ -759,7 +759,11 @@ are `/healthz`, the stylesheet, `/robots.txt` and the worker API.
 
 `/robots.txt` disallows every crawler, and each answer carries
 `X-Robots-Tag: noindex, nofollow`: run, snapshot and data pages are endless
-and the data views are costly.
+and the data views are costly. A crawler that names itself in its
+`User-Agent` (`bot`, `crawler`, `spider`, Meta's `meta-external...` and the
+like) is answered 403 on every page but `/robots.txt` and `/healthz`: some
+read past `/robots.txt`, from a new address for each request. A request
+with a session or an API token is never refused.
 
 ## Turnstile
 
