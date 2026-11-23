@@ -16,7 +16,8 @@
 #   MORCA_UI_SECURE_COOKIES=1, an https Origin is the UI's own;
 # - 5 failed logins for a name in 15 minutes get 429, the right password
 #   included, until the window passes;
-# - /healthz answers 200 "ok" without a login, login required or not.
+# - /healthz answers 200 "ok" without a login, login required or not;
+# - a crawler that names itself gets 403, but /robots.txt and /healthz.
 #
 # Needs MORCA_DATABASE_URL (pixi run test-ui-login starts a throwaway server),
 # curl and jq.
@@ -178,6 +179,14 @@ done
 [ "$(cat "$log.healthz")" = ok ] || fail "/healthz said: $(cat "$log.healthz")"
 [ "$(curl -s -o /dev/null -w '%{http_code}' -I "$base/healthz")" = 200 ] || fail "HEAD /healthz"
 rm -f "$log.healthz"
+
+# A crawler that names itself gets 403 on a page, but still /robots.txt
+# (which turns it away) and /healthz (a monitor's name may hold "bot").
+bot='Mozilla/5.0 (X11; Linux x86_64) Chrome/145.0.0.0 Safari/537.36 (compatible; meta-externalagent/1.1)'
+[ "$(curl -s -o /dev/null -w '%{http_code}' -A "$bot" "$base/runs")" = 403 ] || fail "a crawler read /runs"
+[ "$(curl -s -o /dev/null -w '%{http_code}' -A "$bot" "$base/login")" = 403 ] || fail "a crawler read /login"
+[ "$(curl -s -o /dev/null -w '%{http_code}' -A "$bot" "$base/robots.txt")" = 200 ] || fail "a crawler's /robots.txt"
+[ "$(curl -s -o /dev/null -w '%{http_code}' -A "$bot" "$base/healthz")" = 200 ] || fail "a crawler's /healthz"
 kill "$ui"
 
 # Behind a proxy that terminates TLS (MORCA_UI_TRUST_PROXY=1), the browser's

@@ -20,6 +20,11 @@ cap, or a second one from a client that has one running, 503 with
 `/robots.txt` or the worker API, nor to a request with a session cookie or
 an `Authorization` header: people logged in and scripts aren't counted.
 
+A crawler that names itself in its `User-Agent` (`declared_crawler`) is
+answered 403 on everything but those exempt requests: `/robots.txt` turns
+every crawler away, and some read past it (Meta's, from a new address for
+each request, which no limit per client catches).
+
 The counts live in one table, behind a mutex, that every worker thread
 shares; minutes that have ended are dropped from it as it grows.
 """
@@ -98,6 +103,43 @@ def exempt(req: Request, path: String) -> Bool:
     if req.headers.get("Authorization"):
         return True
     return Bool(cookie(req, SESSION_COOKIE))
+
+
+def declared_crawler(user_agent: String) -> Bool:
+    """Whether `user_agent` names a crawler. No browser's does."""
+    var ua = user_agent.lower()
+    # `bot` covers GPTBot, ClaudeBot, Googlebot, bingbot, Amazonbot and the
+    # like; `spider` Bytespider and Baiduspider.
+    return (
+        "bot" in ua
+        or "crawler" in ua
+        or "spider" in ua
+        or "meta-external" in ua
+        or "meta-webindexer" in ua
+        or "facebookexternalhit" in ua
+        or "slurp" in ua
+    )
+
+
+def refuse_crawler(req: Request, path: String) -> Optional[Response]:
+    """The 403 for a crawler that names itself, or None: for a request that
+    isn't `exempt`, so `/robots.txt` still answers it and a monitor still
+    reads `/healthz`."""
+    if exempt(req, path) or not declared_crawler(req.headers.get("User-Agent")):
+        return None
+    var resp = Response(
+        status=403,
+        reason="Forbidden",
+        body=List[UInt8](
+            "crawlers aren't served here: see /robots.txt\n".as_bytes()
+        ),
+    )
+    try:
+        resp.headers.set("Content-Type", "text/plain; charset=utf-8")
+        resp.headers.set("Cache-Control", "no-store")
+    except:
+        pass
+    return resp^
 
 
 @fieldwise_init
