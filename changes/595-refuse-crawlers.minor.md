@@ -1,1 +1,0 @@
-- **Crawlers that name themselves are refused:** `morca ui` answers 403 to a request whose `User-Agent` names a crawler (`bot`, `crawler`, `spider`, Meta's), on every page but `/robots.txt` and `/healthz`; a session or an API token is never refused. (#595)
