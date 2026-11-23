@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.44.0 - 2026-11-23
+
+- **Crawlers that name themselves are refused:** `morca ui` answers 403 to a request whose `User-Agent` names a crawler (`bot`, `crawler`, `spider`, Meta's), on every page but `/robots.txt` and `/healthz`; a session or an API token is never refused. (#595)
+
 ## 0.43.0 - 2026-11-23
 
 - **Drain, Undrain and Remove on Ops > Pools**: a self-hosted host's row and page have the buttons `morca host` has, audited as the logged-in user's, and `morca --remote <url> host list|drain|undrain|remove` works against a deployed UI. (#590)
