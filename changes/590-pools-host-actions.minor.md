@@ -1,1 +1,0 @@
-- **Drain, Undrain and Remove on Ops > Pools**: a self-hosted host's row and page have the buttons `morca host` has, audited as the logged-in user's, and `morca --remote <url> host list|drain|undrain|remove` works against a deployed UI. (#590)
