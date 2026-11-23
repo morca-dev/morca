@@ -240,8 +240,11 @@ comptime USAGE = """usage:
   morca host list [--pool <pool>]    (the machines of worker pools: morca.hosts)
   morca host drain|undrain <id>      (it finishes its runs, claims no more)
   morca host remove <id> [--force]   (revokes its token; refused while it
-                                    runs unless --force; each of these
-                                    also with --remote <url>)
+                                    runs unless --force)
+  morca host upgrade <id>            (a --container host moves to the
+                                    server's worker image now, once idle;
+                                    list, drain, undrain and remove also
+                                    with --remote <url>)
   morca worker --pool <pool> [--remote <url>] [--token-file <path>]
               [--max-runs N] [--poll-seconds S] [--dir <dir>]
               [--image <image>] [--name <name>] [--advertise <address>]

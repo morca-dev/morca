@@ -19,13 +19,15 @@ live one of that pool, then writes:
 | | |
 |---|---|
 | `/etc/morca/worker-<pool>.env` | the worker's own settings (`MORCA_REMOTE`, `--set`s), mode 600; no secret |
-| `/etc/morca/host-<pool>.json` | what was installed, for `--uninstall` (and for an agent that follows the server's image, later) |
+| `/etc/morca/host-<pool>.json` | what was installed, for `--uninstall`; in a container, the image it runs |
 | systemd (Linux) | `/etc/systemd/system/morca-worker-<pool>.service`, `Restart=always` but not after exit 3 (its token refused) |
 | launchd (macOS) | `/Library/LaunchDaemons/dev.morca.worker.<pool>.plist`, `KeepAlive`, its log in `/var/log/morca-worker-<pool>.log` |
-| `--container` | `/etc/morca/worker-<pool>-container.sh`, a `docker run --restart always` of the image with the token file, the env files and the pool's volumes mounted |
+| `--container` | `/etc/morca/worker-<pool>-container.sh`, a loop that runs the image (`docker run --rm`) with the token file, the env files and the pool's volumes mounted, and moves it to the server's image after a deploy (`morca._internal.host_follow`); the systemd unit or launchd job above runs the script instead of `morca worker` |
 
-and starts it (`systemctl enable --now`, `launchctl bootstrap`, or the
-script). The token stays in the file the user named, which the service
+and starts it (`systemctl enable` and `restart`, or `launchctl
+bootstrap`). A service's worker gets `--host-service <kind>`, a
+container's `--host-image <image>`: what it reports of the server's image,
+and whether it follows it (`morca._internal.host_follow`). The token stays in the file the user named, which the service
 reads (`morca worker --token-file`); the bucket's keys and other secrets
 stay in the user's own `--env-file`s (mode 600 too), which the service
 reads in place. Nothing printed or written holds a secret.
@@ -47,6 +49,7 @@ from json import Value, loads
 
 from morca._common.paths import absolute
 from morca._internal.control import pool_problem
+from morca._internal.host_follow import container_script
 from morca._internal.http_store import Body, StateApi
 from morca._internal.json import quote
 from morca._internal.pool_boot import JOIN_PATH
@@ -111,11 +114,6 @@ def _xml(s: String) -> String:
     )
 
 
-def _sh(s: String) -> String:
-    """`s` as one shell word (`word_problem` has checked it)."""
-    return String("'", s, "'")
-
-
 @fieldwise_init
 struct JoinPlan(Copyable, Movable):
     """What `morca host join` installs, and where."""
@@ -143,6 +141,12 @@ struct JoinPlan(Copyable, Movable):
     """The pool's, mounted in a container."""
     var user: String
     """The user a service runs as; empty for root."""
+    var supervisor: String
+    """In a container, `SYSTEMD` or `LAUNCHD`: what runs its script."""
+
+    def _kind(self) -> String:
+        """`SYSTEMD` or `LAUNCHD`: what keeps it running."""
+        return self.supervisor if self.service == CONTAINER else self.service
 
     def _prefix(self) -> String:
         return String("") if self.root == "/" else String(self.root.rstrip("/"))
@@ -166,21 +170,28 @@ struct JoinPlan(Copyable, Movable):
 
     def service_path(self) -> String:
         """The unit, the plist or the container's script."""
-        if self.service == SYSTEMD:
+        if self.service == CONTAINER:
+            return self.script_path()
+        return self.unit_path()
+
+    def script_path(self) -> String:
+        return String(self.etc(), "/worker-", self.pool, "-container.sh")
+
+    def unit_path(self) -> String:
+        """The systemd unit or the plist that keeps it running."""
+        if self._kind() == SYSTEMD:
             return String(
                 self._prefix(),
                 "/etc/systemd/system/",
                 self.unit_name(),
                 ".service",
             )
-        if self.service == LAUNCHD:
-            return String(
-                self._prefix(),
-                "/Library/LaunchDaemons/",
-                self.label(),
-                ".plist",
-            )
-        return String(self.etc(), "/worker-", self.pool, "-container.sh")
+        return String(
+            self._prefix(),
+            "/Library/LaunchDaemons/",
+            self.label(),
+            ".plist",
+        )
 
     def log_path(self) -> String:
         return String(self._prefix(), "/var/log/", self.unit_name(), ".log")
@@ -278,7 +289,16 @@ struct JoinPlan(Copyable, Movable):
         if self.advertise:
             out.append("--advertise")
             out.append(self.advertise)
+        out.append("--host-service")
+        out.append(self.service)
         return out^
+
+    def program_args(self) -> List[String]:
+        """What the unit or the plist runs: the worker, or the container's
+        script."""
+        if self.service == CONTAINER:
+            return ["/bin/sh", self.script_path()]
+        return self.worker_args()
 
     def unit_text(self) -> String:
         """The systemd unit."""
@@ -292,17 +312,24 @@ struct JoinPlan(Copyable, Movable):
             " of pool ",
             self.pool,
             "\n",
-            "After=network-online.target\n",
+            "After=network-online.target",
+            " docker.service\n" if self.service == CONTAINER else "\n",
             "Wants=network-online.target\n\n",
             "[Service]\n",
             "ExecStart=",
-            " ".join(self.worker_args()),
+            " ".join(self.program_args()),
             "\n",
             "Restart=always\n",
             "RestartSec=5\n",
             "# Exit 3: its token was refused (revoked: morca host remove).\n",
             "RestartPreventExitStatus=3\n",
         )
+        if self.service == CONTAINER:
+            out.write(
+                'ExecStopPost=-/bin/sh -c "docker rm -f ',
+                self.unit_name(),
+                ' > /dev/null 2>&1"\n',
+            )
         if self.user:
             out.write("User=", self.user, "\n")
         out.write("\n[Install]\nWantedBy=multi-user.target\n")
@@ -323,7 +350,7 @@ struct JoinPlan(Copyable, Movable):
             "</string>\n",
             "  <key>ProgramArguments</key>\n  <array>\n",
         )
-        for a in self.worker_args():
+        for a in self.program_args():
             out.write("    <string>", _xml(a), "</string>\n")
         out.write(
             "  </array>\n",
@@ -346,17 +373,16 @@ struct JoinPlan(Copyable, Movable):
         out.write("</dict>\n</plist>\n")
         return out^
 
-    def docker_args(self) -> List[String]:
-        """`docker run` of the worker: the token file, its stage and the
-        pool's volumes mounted, its env files given, restarted always."""
+    def docker_head(self) -> List[String]:
+        """`docker run` of the worker up to its image: the token file, its
+        stage and the pool's volumes mounted, its env files given, in the
+        foreground (its script starts it again)."""
         var out: List[String] = [
             "docker",
             "run",
-            "-d",
+            "--rm",
             "--name",
             self.unit_name(),
-            "--restart",
-            "always",
             "--env-file",
             self.env_path(),
         ]
@@ -375,8 +401,11 @@ struct JoinPlan(Copyable, Movable):
             # on this address.
             out.append("--network")
             out.append("host")
-        out.append(self.image)
-        var tail: List[String] = [
+        return out^
+
+    def docker_tail(self) -> List[String]:
+        """The worker's arguments, after the image (`--host-image` last)."""
+        var out: List[String] = [
             "worker",
             "--pool",
             self.pool,
@@ -389,34 +418,36 @@ struct JoinPlan(Copyable, Movable):
             "--dir",
             STAGE_IN_CONTAINER,
         ]
-        for a in tail:
-            out.append(a)
         if self.advertise:
             out.append("--advertise")
             out.append(self.advertise)
         return out^
 
+    def docker_args(self) -> List[String]:
+        """The container's `docker run`, on the image it runs now."""
+        var out = self.docker_head()
+        out.append(self.image)
+        for a in self.docker_tail():
+            out.append(a)
+        out.append("--host-image")
+        out.append(self.image)
+        return out^
+
     def container_script(self) -> String:
-        """The script that (re)starts the container."""
-        var words = List[String]()
-        for a in self.docker_args():
-            words.append(_sh(a))
-        return String(
-            "#!/bin/sh\n",
-            "# morca host join: pool ",
+        """The loop that runs the container, and replaces it on the
+        server's image (`morca._internal.host_follow`)."""
+        comptime AT = "@IMAGE@"
+        var rec = self._record(AT)
+        var at = rec.find(AT).or_else(0)
+        return container_script(
             self.pool,
-            "'s worker in a container (morca._internal.host_join).\n",
-            "# Run again to start it afresh, on a new image too.\n",
-            "set -eu\n",
-            "mkdir -p ",
-            _sh(self.stage()),
-            "\n",
-            "docker rm -f ",
-            _sh(self.unit_name()),
-            " > /dev/null 2>&1 || true\n",
-            "exec ",
-            " ".join(words),
-            "\n",
+            self.unit_name(),
+            self.record_path(),
+            self.stage(),
+            self.docker_head(),
+            self.docker_tail(),
+            String(rec[byte=:at]),
+            String(rec[byte = at + AT.byte_length() :]),
         )
 
     def service_text(self) -> String:
@@ -426,52 +457,64 @@ struct JoinPlan(Copyable, Movable):
             return self.plist_text()
         return self.container_script()
 
-    def record_json(self) -> String:
-        """`host-<pool>.json`: what was installed."""
-        return (
+    def unit_file_text(self) -> String:
+        """A container's unit or plist, which runs its script."""
+        if self.supervisor == SYSTEMD:
+            return self.unit_text()
+        return self.plist_text()
+
+    def _record(self, image: String) -> String:
+        var b = (
             Body()
             .text("pool", self.pool)
             .text("service", self.service)
             .text("remote", self.remote)
             .text("name", self.name)
-            .text("image", self.image)
+            .text("image", image)
             .text("token_file", self.token_file)
             .text("service_file", self.service_path())
             .text("env_file", self.env_path())
             .text("unit", self.unit_name())
             .text("label", self.label())
-            .finish()
         )
+        if self.service == CONTAINER:
+            b = b^.text("supervisor", self.supervisor).text(
+                "unit_file", self.unit_path()
+            )
+        return b^.finish()
+
+    def record_json(self) -> String:
+        """`host-<pool>.json`: what was installed (in a container, the
+        image it runs, which its script rewrites when it moves)."""
+        return self._record(self.image)
 
     def start_commands(self) -> List[List[String]]:
         """What starts it, once its files are in place."""
         var out = List[List[String]]()
-        if self.service == SYSTEMD:
+        if self._kind() == SYSTEMD:
             out.append(["systemctl", "daemon-reload"])
             out.append(["systemctl", "enable", self.unit_name()])
             out.append(["systemctl", "restart", self.unit_name()])
-        elif self.service == LAUNCHD:
+        else:
             out.append(
                 ["launchctl", "bootout", String("system/", self.label())]
             )
-            out.append(
-                ["launchctl", "bootstrap", "system", self.service_path()]
-            )
-        else:
-            out.append(["sh", self.service_path()])
+            out.append(["launchctl", "bootstrap", "system", self.unit_path()])
         return out^
 
 
 def stop_commands(
-    service: String, unit: String, label: String
+    service: String, unit: String, label: String, supervisor: String = ""
 ) -> List[List[String]]:
-    """What stops an installed one, before its files are removed."""
+    """What stops an installed one, before its files are removed (a
+    container `supervisor` runs: its service, then the container)."""
     var out = List[List[String]]()
-    if service == SYSTEMD:
+    var kind = supervisor if service == CONTAINER else service
+    if kind == SYSTEMD:
         out.append(["systemctl", "disable", "--now", unit])
-    elif service == LAUNCHD:
+    elif kind == LAUNCHD:
         out.append(["launchctl", "bootout", String("system/", label)])
-    else:
+    if service == CONTAINER:
         out.append(["docker", "rm", "-f", unit])
     return out^
 
@@ -581,6 +624,7 @@ def _uninstall(pool: String, root: String, dry_run: Bool) raises -> Int:
         "",
         List[String](),
         "",
+        "",
     )
     var record = probe.record_path()
     if not exists(record):
@@ -592,16 +636,27 @@ def _uninstall(pool: String, root: String, dry_run: Bool) raises -> Int:
         r = f.read()
     var v = loads(r)
     var service = v["service"].string_value()
+    # A container's supervisor; none in a record from before it had one,
+    # whose container ran on docker's restart policy alone.
+    var supervisor = (
+        v["supervisor"].string_value() if String("supervisor")
+        in v else String()
+    )
     if root == "/":
         for c in stop_commands(
-            service, v["unit"].string_value(), v["label"].string_value()
+            service,
+            v["unit"].string_value(),
+            v["label"].string_value(),
+            supervisor,
         ):
             if dry_run:
                 print("would run:", " ".join(c))
             else:
                 _ = _run(c)  # gone already is fine
-    var keys: List[String] = ["service_file", "env_file"]
+    var keys: List[String] = ["service_file", "unit_file", "env_file"]
     for key in keys:
+        if key not in v:
+            continue
         var p = v[key].string_value()
         if dry_run:
             print("would remove", p)
@@ -706,8 +761,6 @@ def host_join_command(args: List[String]) raises -> Int:
         return _usage(String("morca: ", why))
     if uninstall:
         return _uninstall(pool, root, dry_run)
-    if container and service:
-        return _usage("--container or --service, not both")
     if not url:
         url = getenv("MORCA_REMOTE")
     if not url:
@@ -759,6 +812,10 @@ def host_join_command(args: List[String]) raises -> Int:
     var kind = CONTAINER if container else (
         service if service else default_service()
     )
+    # A container is run by a script, which the service keeps running.
+    var supervisor = (service if service else default_service()) if (
+        container
+    ) else String()
     if kind == CONTAINER and not image:
         image = (
             answer["image"].string_value() if String("image")
@@ -797,6 +854,7 @@ def host_join_command(args: List[String]) raises -> Int:
         image,
         vols^,
         user,
+        supervisor,
     )
     var problem = plan.problem()
     if problem:
@@ -810,6 +868,8 @@ def host_join_command(args: List[String]) raises -> Int:
         ),
         (plan.record_path(), plan.record_json() + "\n", 0o600),
     ]
+    if kind == CONTAINER:
+        files.append((plan.unit_path(), plan.unit_file_text(), 0o644))
     var start = plan.start_commands()
     if dry_run:
         for f in files:

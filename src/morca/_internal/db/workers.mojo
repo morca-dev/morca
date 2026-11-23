@@ -72,6 +72,36 @@ def set_draining(mut conn: Connection, id: Int, on: Bool) raises -> Bool:
     )
 
 
+def ask_upgrade(mut conn: Connection, id: Int) raises -> Bool:
+    """Asks the worker of live token `id` to move to the server's image now
+    (`morca host upgrade`); False if `id` is no live token."""
+    return (
+        conn.execute(
+            (
+                "UPDATE orca.workers SET upgrade = now() WHERE id = $1 AND"
+                " revoked IS NULL AND expires > now()"
+            ),
+            Params().int64(Int64(id)),
+        )
+        == 1
+    )
+
+
+def take_upgrade(mut conn: Connection, id: Int) raises -> Bool:
+    """Whether the worker of token `id` was asked to upgrade, which it is
+    now told: the ask is cleared."""
+    return (
+        conn.execute(
+            (
+                "UPDATE orca.workers SET upgrade = NULL WHERE id = $1 AND"
+                " upgrade IS NOT NULL"
+            ),
+            Params().int64(Int64(id)),
+        )
+        == 1
+    )
+
+
 def is_draining(mut conn: Connection, id: Int) raises -> Bool:
     """Whether the worker of token `id` was asked to drain."""
     var rows = conn.query(
@@ -144,6 +174,12 @@ struct Token(Copyable, Movable):
     var expires: String
     var draining: Bool
     """Its worker was asked to drain (`morca host drain`)."""
+    var host_image: String
+    """The image its container runs, as it said (`morca host join
+    --container`); empty if none."""
+    var host_upgrade: String
+    """What it said of the server's image (`morca._internal.host_follow`):
+    `current`, `draining`, `failed` or `needs-upgrade`, then that image."""
 
 
 def tokens(mut conn: Connection) raises -> List[Token]:
@@ -162,8 +198,9 @@ def tokens(mut conn: Connection) raises -> List[Token]:
             " coalesce(memory_mb, 0) AS mem, coalesce(running, '') AS running,",
             " to_char(expires AT TIME ZONE 'UTC', ",
             ts,
-            ") AS expires, draining IS NOT NULL AS draining FROM",
-            " orca.workers ORDER BY id DESC",
+            ") AS expires, draining IS NOT NULL AS draining,",
+            " coalesce(host_image, '') AS host_image, coalesce(host_upgrade,",
+            " '') AS host_upgrade FROM orca.workers ORDER BY id DESC",
         )
     ):
         out.append(
@@ -181,6 +218,8 @@ def tokens(mut conn: Connection) raises -> List[Token]:
                 r.text("running"),
                 r.text("expires"),
                 r.bool("draining"),
+                r.text("host_image"),
+                r.text("host_upgrade"),
             )
         )
     return out^
@@ -226,6 +265,8 @@ def set_seen(
     running: String,
     room_cpus: Int = -1,
     room_memory_mb: Int = -1,
+    host_image: String = "",
+    host_upgrade: String = "",
 ) raises:
     """Keeps what worker `id` says of itself (empty or 0 for unsaid; -1
     for the room it can grant a run)."""
@@ -234,7 +275,8 @@ def set_seen(
             "UPDATE orca.workers SET name = nullif($2, ''), image ="
             " nullif($3, ''), cpus = nullif($4, 0), memory_mb = nullif($5, 0),"
             " running = nullif($6, ''), room_cpus = nullif($7, -1),"
-            " room_memory_mb = nullif($8, -1) WHERE id = $1"
+            " room_memory_mb = nullif($8, -1), host_image = nullif($9, ''),"
+            " host_upgrade = nullif($10, '') WHERE id = $1"
         ),
         Params()
         .int64(Int64(id))
@@ -244,7 +286,9 @@ def set_seen(
         .int64(Int64(memory_mb))
         .text(running)
         .int32(Int32(room_cpus))
-        .int64(Int64(room_memory_mb)),
+        .int64(Int64(room_memory_mb))
+        .text(host_image)
+        .text(host_upgrade),
     )
 
 

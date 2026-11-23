@@ -73,6 +73,7 @@ from morca._internal.admission import (
     worker_host,
 )
 from morca._internal.control import WORKER_PREFIX, pool_problem
+from morca._internal.pool_boot import WORKER_IMAGE
 from morca._internal.http_store import (
     Body,
     bytes_of_hex,
@@ -242,6 +243,10 @@ struct WorkerRow(Copyable, Movable):
     it sent one."""
     var draining: Bool
     """Its worker was asked to drain (`morca host drain`)."""
+    var host_image: String
+    """The image its container runs (`morca host join --container`)."""
+    var host_upgrade: String
+    """What it says of the server's image (`morca._internal.host_follow`)."""
 
 
 def worker_rows(mut db: State) raises -> List[WorkerRow]:
@@ -267,6 +272,8 @@ def worker_rows(mut db: State) raises -> List[WorkerRow]:
                 r.expires,
                 pressure.get(worker_host(r.id)),
                 r.draining,
+                r.host_image,
+                r.host_upgrade,
             )
         )
     return out^
@@ -405,6 +412,8 @@ def _seen(mut db: State, w: WorkerAuth, v: Value) raises:
         text_field(v, "running"),
         Int(room_cpus),
         Int(room_mb),
+        text_field(v, "host_image"),
+        text_field(v, "host_upgrade"),
     )
     if String("pressure") in v and v["pressure"].is_object():
         _pressure_seen(db, w, v, Report.from_json(v["pressure"]))
@@ -534,6 +543,14 @@ def claim(mut db: State, w: WorkerAuth, v: Value) raises -> String:
     var most = String(', "max_runs": ', settings.max_runs) if (
         settings.max_runs > 0
     ) else String()
+    # The image the server's pool workers run, which a host `morca host
+    # join` installed follows (morca._internal.host_follow), and once
+    # after `morca host upgrade`, that it should now.
+    var image = getenv(WORKER_IMAGE)
+    if image:
+        most.write(', "worker_image": ', quote(image))
+    if workers_db.take_upgrade(db.conn, w.id):
+        most.write(', "upgrade": true')
     return String(
         answer[byte = : answer.byte_length() - 1],
         most,
@@ -1067,6 +1084,8 @@ def workers_json(rows: List[WorkerRow]) -> String:
             .text("expires", r.expires)
             .raw("memory_pressure", row_json(r.pressure))
             .bool("draining", r.draining)
+            .text("host_image", r.host_image)
+            .text("host_upgrade", r.host_upgrade)
             .finish()
         )
     out.write("]}")

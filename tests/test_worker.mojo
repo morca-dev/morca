@@ -3,6 +3,8 @@ store calls send and get back over `morca ui`'s API, the spec a worker is
 given, and the checks made on both sides. tests/worker.sh runs it all
 against morca ui, the scheduler and a worker."""
 
+from std.os import getenv, makedirs, remove
+from std.os.path import exists
 from std.testing import (
     TestSuite,
     assert_equal,
@@ -39,6 +41,12 @@ from morca._internal.host_join import (
     JoinPlan,
     stop_commands,
     word_problem,
+)
+from morca._internal.host_follow import (
+    FAILED_FILE,
+    WANT_FILE,
+    Follow,
+    image_problem,
 )
 from morca._internal.sample import machine_name
 from morca._internal.worker import env_file_pairs
@@ -243,6 +251,7 @@ def _plan(service: String, root: String = "/") -> JoinPlan:
         "ghcr.io/morca-dev/census:1.2.3" if service == CONTAINER else "",
         ["census-work:/work"] if service == CONTAINER else List[String](),
         "",
+        SYSTEMD if service == CONTAINER else "",
     )
 
 
@@ -273,7 +282,8 @@ def test_host_join_files() raises:
             "ExecStart=/opt/morca/bin/morca worker --pool bgent --remote",
             " https://morca.example.com --token-file /home/m/.morca/token",
             " --name lab --dir /var/lib/morca/bgent/stage --env-file",
-            " /etc/morca/worker-bgent.env --env-file /home/m/worker.env\n",
+            " /etc/morca/worker-bgent.env --env-file /home/m/worker.env",
+            " --host-service systemd\n",
         )
         in unit,
         unit,
@@ -304,22 +314,63 @@ def test_host_join_files() raises:
     var d = " ".join(c.docker_args())
     assert_true(
         String(
-            "docker run -d --name morca-worker-bgent --restart always",
+            "docker run --rm --name morca-worker-bgent",
             " --env-file /etc/morca/worker-bgent.env --env-file",
             " /home/m/worker.env -v /home/m/.morca/token:/etc/morca/token:ro",
             " -v /var/lib/morca/bgent/stage:/var/lib/morca/stage -v",
             " census-work:/work ghcr.io/morca-dev/census:1.2.3 worker --pool",
             " bgent --remote https://morca.example.com --token-file",
             " /etc/morca/token --name lab --dir /var/lib/morca/stage",
+            " --host-image ghcr.io/morca-dev/census:1.2.3",
         )
         == d,
         d,
     )
-    assert_true("exec 'docker' 'run'" in c.container_script())
-    assert_true('"service": "container"' in c.record_json())
-    assert_equal(
-        stop_commands(CONTAINER, "morca-worker-bgent", "x")[0][2], "-f"
+    # Its script runs the image its record names, and its unit the script.
+    var script = c.container_script()
+    assert_true(
+        "'--network'" not in script
+        and "\"$image\" 'worker' '--pool'" in script,
+        script,
     )
+    assert_true("'--host-image' \"$image\"\n" in script, script)
+    assert_true("RECORD='/etc/morca/host-bgent.json'\n" in script, script)
+    assert_true('docker pull "$want"' in script, script)
+    assert_true("ghcr.io/morca-dev/census:1.2.3" not in script, script)
+    var rec = c.record_json()
+    assert_true('"service": "container"' in rec)
+    assert_true('"image": "ghcr.io/morca-dev/census:1.2.3"' in rec, rec)
+    assert_true('"supervisor": "systemd"' in rec, rec)
+    # The record, as its script writes it back, is the record.
+    var at = rec.find('"image": "').or_else(-1) + 10
+    var end = rec.find('"', at).or_else(-1)
+    assert_true(
+        String(
+            "printf '%s%s%s\\n' '",
+            rec[byte=:at],
+            "' \"$1\" '",
+            rec[byte=end:],
+            "'",
+        )
+        in script,
+        script,
+    )
+    assert_equal(
+        c.unit_path(), "/etc/systemd/system/morca-worker-bgent.service"
+    )
+    var cu = c.unit_file_text()
+    assert_true(
+        "ExecStart=/bin/sh /etc/morca/worker-bgent-container.sh\n" in cu, cu
+    )
+    assert_true("After=network-online.target docker.service\n" in cu, cu)
+    assert_true("RestartPreventExitStatus=3\n" in cu, cu)
+    assert_equal(c.start_commands()[2][2], "morca-worker-bgent")
+    var stops = stop_commands(CONTAINER, "morca-worker-bgent", "x", SYSTEMD)
+    assert_equal(len(stops), 2)
+    assert_equal(stops[0][0], "systemctl")
+    assert_equal(stops[1][2], "-f")
+    # A record from before the script had a supervisor: the container only.
+    assert_equal(len(stop_commands(CONTAINER, "morca-worker-bgent", "x")), 1)
     # What can't go in a service file as it is.
     assert_true("can't have a space" in word_problem("a path", "/a b"))
     assert_true("can't have" in word_problem("a path", "/a%b"))
@@ -332,6 +383,93 @@ def test_host_join_files() raises:
     bad = _plan(CONTAINER)
     bad.volumes = ["a:b"]
     assert_true("the pool's volumes" in bad.problem())
+
+
+def _lines(path: String) raises -> List[String]:
+    var out = List[String]()
+    with open(path, "r") as f:
+        for l in f.read().split("\n"):
+            out.append(String(l))
+    return out^
+
+
+def test_follow() raises:
+    # A host following the server's worker image (#220).
+    var dir = String(getenv("TMPDIR", "/tmp").rstrip("/"), "/morca-follow-test")
+    makedirs(dir, exist_ok=True)
+    for name in [WANT_FILE, FAILED_FILE]:
+        if exists(String(dir, "/", name)):
+            remove(String(dir, "/", name))
+    # An older UI says no image: nothing changes.
+    var f = Follow("img:1", "", "", dir)
+    f.start()
+    f.observe(loads('{"run": null}'), 0)
+    assert_false(f.draining())
+    assert_equal(f.state(), "")
+    f.observe(loads('{"run": null, "worker_image": "img:1"}'), 0)
+    assert_false(f.draining())
+    assert_equal(f.state(), "current img:1")
+    # The server moved on: it drains, then says what to start.
+    f.observe(loads('{"run": null, "worker_image": "img:2"}'), 1)
+    assert_true(f.draining())
+    assert_equal(f.state(), "draining img:2")
+    f.leave()
+    assert_equal(_lines(String(dir, "/", WANT_FILE))[0], "img:2")
+    # Started again on img:1 with that still there: nothing replaced it, and
+    # it doesn't drain for img:2 again.
+    var again = Follow("img:1", "", "", dir)
+    again.start()
+    assert_false(exists(String(dir, "/", WANT_FILE)))
+    assert_equal(_lines(String(dir, "/", FAILED_FILE))[0], "img:2")
+    again.observe(loads('{"run": null, "worker_image": "img:2"}'), 0)
+    assert_false(again.draining())
+    assert_equal(again.state(), "failed img:2")
+    # Until it's asked to (morca host upgrade), or the server moves on.
+    again.observe(
+        loads('{"run": null, "worker_image": "img:2", "upgrade": true}'), 0
+    )
+    assert_true(again.draining())
+    assert_false(exists(String(dir, "/", FAILED_FILE)))
+    var later = Follow("img:1", "", "", dir)
+    later.failed = "img:2"
+    later.observe(loads('{"run": null, "worker_image": "img:3"}'), 0)
+    assert_true(later.draining())
+    # Started on the image it asked for: done.
+    f.leave()
+    var moved = Follow("img:2", "", "", dir)
+    moved.start()
+    assert_false(exists(String(dir, "/", WANT_FILE)))
+    assert_equal(moved.failed, "")
+    # A failure the script wrote (a pull it couldn't make), with why.
+    with open(String(dir, "/", FAILED_FILE), "w") as out:
+        out.write("img:3\ncan't pull img:3 (unauthorized)\n")
+    var refused = Follow("img:2", "", "", dir)
+    refused.start()
+    assert_equal(refused.failed, "img:3")
+    assert_true("unauthorized" in refused.why)
+    refused.observe(loads('{"run": null, "worker_image": "img:3"}'), 0)
+    assert_false(refused.draining())
+    remove(String(dir, "/", FAILED_FILE))
+    # A service reports, and never drains.
+    var svc = Follow("", "systemd", "", dir)
+    svc.observe(loads('{"run": null, "worker_image": "img:2"}'), 0)
+    assert_false(svc.draining())
+    assert_equal(svc.state(), "needs-upgrade img:2")
+    var same = Follow("", "launchd", "img:2", dir)
+    same.observe(loads('{"run": null, "worker_image": "img:2"}'), 0)
+    assert_equal(same.state(), "current img:2")
+    # A plain worker (the autoscaler's, or by hand) says nothing.
+    var plain = Follow("", "", "img:1", dir)
+    plain.observe(loads('{"run": null, "worker_image": "img:2"}'), 0)
+    assert_false(plain.draining())
+    assert_equal(plain.state(), "")
+    # An image that isn't a plain reference is ignored.
+    var odd = Follow("img:1", "", "", dir)
+    odd.observe(loads('{"run": null, "worker_image": "img:2; rm -rf /"}'), 0)
+    assert_false(odd.draining())
+    assert_true("not an image reference" in image_problem("a b"))
+    assert_equal(image_problem("ghcr.io/morca-dev/census:1.2.3"), "")
+    assert_equal(image_problem("r.io/x@sha256:ab12"), "")
 
 
 def main() raises:
