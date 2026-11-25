@@ -1,5 +1,7 @@
 # morca
 
+[![Used by](https://mojourney.dev/badge/morca-dev/morca/used-by.svg)](https://mojourney.dev/repos/morca-dev/morca#used-by) [![Mojo version](https://mojourney.dev/badge/morca-dev/morca/mojo.svg)](https://mojourney.dev/repos/morca-dev/morca)
+
 Orchestration for data pipelines written in Mojo: DAGs declared in Mojo and
 checked by the compiler, schedules in cron syntax, and a web UI for runs,
 reruns and backfills. Steps run on [dista](https://github.com/morca-dev/dista)
