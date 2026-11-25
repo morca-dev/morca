@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.45.0 - 2026-11-25
+
+- **Mojo 1.3.0.dev2026112505:** the toolchain moves from 1.3.0.dev2026111805, which miscompiled some `while True:` loops, and every tin moves with it; zstd-mojo is now pure Mojo, so `zstd-shim` and libzstd leave the images. A project on morca-mojo must move its own Mojo pin to the same nightly. (#597)
+
 ## 0.44.0 - 2026-11-23
 
 - **Crawlers that name themselves are refused:** `morca ui` answers 403 to a request whose `User-Agent` names a crawler (`bot`, `crawler`, `spider`, Meta's), on every page but `/robots.txt` and `/healthz`; a session or an API token is never refused. (#595)
