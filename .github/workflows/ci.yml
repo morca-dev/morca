@@ -159,13 +159,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: morca-dev/dista
-          ref: ad2d57559d2d4f1ac65a7ed7293ca2868d570392
+          ref: 085d459d61655a9d9653a5f248e501ad728b76b8
           path: dista.mojo
       # So does k8s, the scheduler's Kubernetes client.
       - uses: actions/checkout@v4
         with:
           repository: magmalake/k8s.mojo
-          ref: 58140f9a6f7c0384a68e16794fb87297866f6415
+          ref: cb2bf1475e1849151106b3188c0cf8ed15846046
           path: k8s.mojo
 
       # Off before setup-pixi restores rattler's git cache: git's
@@ -461,7 +461,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: morca-dev/dista
-          ref: ad2d57559d2d4f1ac65a7ed7293ca2868d570392
+          ref: 085d459d61655a9d9653a5f248e501ad728b76b8
           path: dista.mojo
       # Off before setup-pixi restores rattler's git cache: git's
       # background maintenance in a cached repo races its
@@ -579,9 +579,9 @@ jobs:
         with:
           path: morca
       - uses: actions/checkout@v4
-        with: {repository: morca-dev/dista, ref: ad2d57559d2d4f1ac65a7ed7293ca2868d570392, path: dista.mojo}
+        with: {repository: morca-dev/dista, ref: 085d459d61655a9d9653a5f248e501ad728b76b8, path: dista.mojo}
       - uses: actions/checkout@v4
-        with: {repository: magmalake/k8s.mojo, ref: 58140f9a6f7c0384a68e16794fb87297866f6415, path: k8s.mojo}
+        with: {repository: magmalake/k8s.mojo, ref: cb2bf1475e1849151106b3188c0cf8ed15846046, path: k8s.mojo}
       - uses: actions/checkout@v4
         with: {repository: magmalake/memory-region.mojo, ref: 31bda02fa429496e064d764d2d4039160f77e1af, path: memory-region.mojo}
       - uses: actions/checkout@v4
@@ -677,9 +677,9 @@ jobs:
           path: morca
           persist-credentials: false
       - uses: actions/checkout@v4
-        with: {repository: morca-dev/dista, ref: ad2d57559d2d4f1ac65a7ed7293ca2868d570392, path: dista.mojo, persist-credentials: false}
+        with: {repository: morca-dev/dista, ref: 085d459d61655a9d9653a5f248e501ad728b76b8, path: dista.mojo, persist-credentials: false}
       - uses: actions/checkout@v4
-        with: {repository: magmalake/k8s.mojo, ref: 58140f9a6f7c0384a68e16794fb87297866f6415, path: k8s.mojo, persist-credentials: false}
+        with: {repository: magmalake/k8s.mojo, ref: cb2bf1475e1849151106b3188c0cf8ed15846046, path: k8s.mojo, persist-credentials: false}
       - uses: actions/checkout@v4
         with: {repository: magmalake/memory-region.mojo, ref: 31bda02fa429496e064d764d2d4039160f77e1af, path: memory-region.mojo, persist-credentials: false}
       - uses: actions/checkout@v4
@@ -780,9 +780,9 @@ jobs:
           clean: false
           persist-credentials: false
       - uses: actions/checkout@v4
-        with: {repository: morca-dev/dista, ref: ad2d57559d2d4f1ac65a7ed7293ca2868d570392, path: dista.mojo, clean: true, persist-credentials: false}
+        with: {repository: morca-dev/dista, ref: 085d459d61655a9d9653a5f248e501ad728b76b8, path: dista.mojo, clean: true, persist-credentials: false}
       - uses: actions/checkout@v4
-        with: {repository: magmalake/k8s.mojo, ref: 58140f9a6f7c0384a68e16794fb87297866f6415, path: k8s.mojo, clean: true, persist-credentials: false}
+        with: {repository: magmalake/k8s.mojo, ref: cb2bf1475e1849151106b3188c0cf8ed15846046, path: k8s.mojo, clean: true, persist-credentials: false}
 
       - name: A clean workspace but for the pixi environment
         run: |
