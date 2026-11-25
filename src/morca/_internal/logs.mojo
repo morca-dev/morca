@@ -118,7 +118,7 @@ def _write_out(data: List[UInt8]):
     var at = 0
     while at < len(data):
         var n = external_call["write", Int](
-            c_int(1), data.unsafe_ptr() + at, len(data) - at
+            c_int(1), data.unsafe_ptr().unsafe_offset(at), len(data) - at
         )
         if n <= 0:
             return
@@ -206,7 +206,7 @@ def write_location(location: String, data: Span[UInt8, _]) raises:
             remove(tmp)
         except:
             pass
-        raise e^
+        raise e
     var to = location
     if (
         external_call["rename", c_int](

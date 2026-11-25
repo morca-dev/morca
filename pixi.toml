@@ -16,25 +16,25 @@ platforms = ["osx-arm64", "linux-64", "linux-aarch64"]
 # in [package] below and in deploy/runtime/pixi.toml, and it moves across all
 # magmalake tins together. The full `mojo` package beside the compiler, for
 # the llvm-symbolizer deploy/Dockerfile ships.
-mojo-compiler = "==1.3.0.dev2026111805"
-mojo = "==1.3.0.dev2026111805"
-memory-region-mojo = { git = "https://github.com/magmalake/memory-region.mojo", rev = "d8256141cedc5e35e1a69f9a5eb2faae6116fe3a" }
-arrow-mlake-mojo = { git = "https://github.com/magmalake/arrow-mlake.mojo", rev = "a40c7560837b478b2331bf860fc53da87a332089" }
+mojo-compiler = "==1.3.0.dev2026112505"
+mojo = "==1.3.0.dev2026112505"
+memory-region-mojo = { git = "https://github.com/magmalake/memory-region.mojo", rev = "fa50e3dcb31c01d061463c8bafa48a02bdd9980a" }
+arrow-mlake-mojo = { git = "https://github.com/magmalake/arrow-mlake.mojo", rev = "be75dc08cd3e3ab38cca5b1f2e7f6b7fcd5a4377" }
 # dista writes actor checkpoints through objectstore.
-objectstore-mojo = { git = "https://github.com/magmalake/objectstore.mojo", rev = "ea8d007fba7fc9777ebd5c3a5b7c8beed83a25db" }
+objectstore-mojo = { git = "https://github.com/magmalake/objectstore.mojo", rev = "8811abff03db45f2bc4616bad833c71392e4ef04" }
 # morca's state, and threads-mojo at the revision postgres-mojo pins: the
 # heartbeat runs on a thread of its own. Every tin here is at a revision
 # built with the Mojo above, the same one wherever it is pinned.
-postgres-mojo = { git = "https://github.com/magmalake/postgres.mojo", rev = "188f2f1008737908af9809c5bc328ed0b39923fc" }
-threads-mojo = { git = "https://github.com/magmalake/threads.mojo", rev = "c9da1a84f4f2d624043df97b90bb44f8e8b5256b" }
+postgres-mojo = { git = "https://github.com/magmalake/postgres.mojo", rev = "3dbd6643e6663cbf659807ef27d5f91ab29b0c6c" }
+threads-mojo = { git = "https://github.com/magmalake/threads.mojo", rev = "11f3241ff4233a15a0fd7c56b22102b26aa5cf00" }
 # `morca ui` serves its pages with flare, which pins threads and json_mlake
 # at the revisions here; both ship as .mojoc packages, and flare builds its
 # own native shims.
-flare_mlake = { git = "https://github.com/magmalake/flare_mlake", rev = "a46a8b9068f51bc78b84ee754e65dd2bdbf58743" }
-json_mlake = { git = "https://github.com/magmalake/json_mlake", rev = "7ea15048ac905386a89d03717e56cef8832b571b" }
+flare_mlake = { git = "https://github.com/magmalake/flare_mlake", rev = "dc4d005da42130316dc0f603b5e7fd53a91058f4" }
+json_mlake = { git = "https://github.com/magmalake/json_mlake", rev = "66836dd6e6b3cf77ebb0fbaef46bfe5ac542373e" }
 # morca.sqlite_store, at the revision iceberg-mojo pins too (the data
 # environment).
-sqlite-mojo = { git = "https://github.com/magmalake/sqlite.mojo", rev = "de664a8c996672d4e3c75070ecebd4321ee323fa" }
+sqlite-mojo = { git = "https://github.com/magmalake/sqlite.mojo", rev = "785a2c80c090b90667043fa2cf7969fe1771f2e8" }
 libpq = ">=16,<19"
 postgresql = ">=16,<19"
 # libsqlite is what sqlite-mojo dlopens for morca.sqlite_store; the sqlite3
@@ -132,39 +132,39 @@ path = "src/morca_maintain_bin.mojo"
 extra-args = ["-g1", "--target-cpu", "apple-m1", "-I", "src", "-I", "$PREFIX/lib/mojo"]
 
 [package.host-dependencies]
-mojo-compiler = "==1.3.0.dev2026111805"
-dista-mojo = { git = "https://github.com/morca-dev/dista", rev = "4c8e645153ce90e2be9b6998810d549f31c38689" }
-k8s-mojo = { git = "https://github.com/magmalake/k8s.mojo", rev = "e272aa600d595568643560e61f4fa8654f26947a" }
-iceberg-mojo = { git = "https://github.com/magmalake/iceberg.mojo", rev = "1d4bf77b92c830016b7b46d76d787a5e967767dc" }
-postgres-mojo = { git = "https://github.com/magmalake/postgres.mojo", rev = "188f2f1008737908af9809c5bc328ed0b39923fc" }
-objectstore-mojo = { git = "https://github.com/magmalake/objectstore.mojo", rev = "ea8d007fba7fc9777ebd5c3a5b7c8beed83a25db" }
-arrow-mlake-mojo = { git = "https://github.com/magmalake/arrow-mlake.mojo", rev = "a40c7560837b478b2331bf860fc53da87a332089" }
-memory-region-mojo = { git = "https://github.com/magmalake/memory-region.mojo", rev = "d8256141cedc5e35e1a69f9a5eb2faae6116fe3a" }
-threads-mojo = { git = "https://github.com/magmalake/threads.mojo", rev = "c9da1a84f4f2d624043df97b90bb44f8e8b5256b" }
-flare_mlake = { git = "https://github.com/magmalake/flare_mlake", rev = "a46a8b9068f51bc78b84ee754e65dd2bdbf58743" }
-json_mlake = { git = "https://github.com/magmalake/json_mlake", rev = "7ea15048ac905386a89d03717e56cef8832b571b" }
-sqlite-mojo = { git = "https://github.com/magmalake/sqlite.mojo", rev = "de664a8c996672d4e3c75070ecebd4321ee323fa" }
+mojo-compiler = "==1.3.0.dev2026112505"
+dista-mojo = { git = "https://github.com/morca-dev/dista", rev = "ef1b6dd49a316316666cb611a5b6d52be081ca0c" }
+k8s-mojo = { git = "https://github.com/magmalake/k8s.mojo", rev = "94c06b13c7a0a0b029f4ce675ea49ab18bbc8613" }
+iceberg-mojo = { git = "https://github.com/magmalake/iceberg.mojo", rev = "67f7616f54a59fde5bd3819e4494635b7452203b" }
+postgres-mojo = { git = "https://github.com/magmalake/postgres.mojo", rev = "3dbd6643e6663cbf659807ef27d5f91ab29b0c6c" }
+objectstore-mojo = { git = "https://github.com/magmalake/objectstore.mojo", rev = "8811abff03db45f2bc4616bad833c71392e4ef04" }
+arrow-mlake-mojo = { git = "https://github.com/magmalake/arrow-mlake.mojo", rev = "be75dc08cd3e3ab38cca5b1f2e7f6b7fcd5a4377" }
+memory-region-mojo = { git = "https://github.com/magmalake/memory-region.mojo", rev = "fa50e3dcb31c01d061463c8bafa48a02bdd9980a" }
+threads-mojo = { git = "https://github.com/magmalake/threads.mojo", rev = "11f3241ff4233a15a0fd7c56b22102b26aa5cf00" }
+flare_mlake = { git = "https://github.com/magmalake/flare_mlake", rev = "dc4d005da42130316dc0f603b5e7fd53a91058f4" }
+json_mlake = { git = "https://github.com/magmalake/json_mlake", rev = "66836dd6e6b3cf77ebb0fbaef46bfe5ac542373e" }
+sqlite-mojo = { git = "https://github.com/magmalake/sqlite.mojo", rev = "785a2c80c090b90667043fa2cf7969fe1771f2e8" }
 
 [package.build-dependencies]
-mojo-compiler = "==1.3.0.dev2026111805"
+mojo-compiler = "==1.3.0.dev2026112505"
 
 [package.run-dependencies]
 # Exactly the compiler liblake was built with: the library and the program
 # share Mojo's runtime (LIB-TINS.md §5, item 10).
-mojo-compiler = "==1.3.0.dev2026111805"
+mojo-compiler = "==1.3.0.dev2026112505"
 libpq = ">=16,<19"
 libsqlite = ">=3.45,<4"
-dista-mojo = { git = "https://github.com/morca-dev/dista", rev = "4c8e645153ce90e2be9b6998810d549f31c38689" }
-k8s-mojo = { git = "https://github.com/magmalake/k8s.mojo", rev = "e272aa600d595568643560e61f4fa8654f26947a" }
-iceberg-mojo = { git = "https://github.com/magmalake/iceberg.mojo", rev = "1d4bf77b92c830016b7b46d76d787a5e967767dc" }
-postgres-mojo = { git = "https://github.com/magmalake/postgres.mojo", rev = "188f2f1008737908af9809c5bc328ed0b39923fc" }
-objectstore-mojo = { git = "https://github.com/magmalake/objectstore.mojo", rev = "ea8d007fba7fc9777ebd5c3a5b7c8beed83a25db" }
-arrow-mlake-mojo = { git = "https://github.com/magmalake/arrow-mlake.mojo", rev = "a40c7560837b478b2331bf860fc53da87a332089" }
-memory-region-mojo = { git = "https://github.com/magmalake/memory-region.mojo", rev = "d8256141cedc5e35e1a69f9a5eb2faae6116fe3a" }
-threads-mojo = { git = "https://github.com/magmalake/threads.mojo", rev = "c9da1a84f4f2d624043df97b90bb44f8e8b5256b" }
-flare_mlake = { git = "https://github.com/magmalake/flare_mlake", rev = "a46a8b9068f51bc78b84ee754e65dd2bdbf58743" }
-json_mlake = { git = "https://github.com/magmalake/json_mlake", rev = "7ea15048ac905386a89d03717e56cef8832b571b" }
-sqlite-mojo = { git = "https://github.com/magmalake/sqlite.mojo", rev = "de664a8c996672d4e3c75070ecebd4321ee323fa" }
+dista-mojo = { git = "https://github.com/morca-dev/dista", rev = "ef1b6dd49a316316666cb611a5b6d52be081ca0c" }
+k8s-mojo = { git = "https://github.com/magmalake/k8s.mojo", rev = "94c06b13c7a0a0b029f4ce675ea49ab18bbc8613" }
+iceberg-mojo = { git = "https://github.com/magmalake/iceberg.mojo", rev = "67f7616f54a59fde5bd3819e4494635b7452203b" }
+postgres-mojo = { git = "https://github.com/magmalake/postgres.mojo", rev = "3dbd6643e6663cbf659807ef27d5f91ab29b0c6c" }
+objectstore-mojo = { git = "https://github.com/magmalake/objectstore.mojo", rev = "8811abff03db45f2bc4616bad833c71392e4ef04" }
+arrow-mlake-mojo = { git = "https://github.com/magmalake/arrow-mlake.mojo", rev = "be75dc08cd3e3ab38cca5b1f2e7f6b7fcd5a4377" }
+memory-region-mojo = { git = "https://github.com/magmalake/memory-region.mojo", rev = "fa50e3dcb31c01d061463c8bafa48a02bdd9980a" }
+threads-mojo = { git = "https://github.com/magmalake/threads.mojo", rev = "11f3241ff4233a15a0fd7c56b22102b26aa5cf00" }
+flare_mlake = { git = "https://github.com/magmalake/flare_mlake", rev = "dc4d005da42130316dc0f603b5e7fd53a91058f4" }
+json_mlake = { git = "https://github.com/magmalake/json_mlake", rev = "66836dd6e6b3cf77ebb0fbaef46bfe5ac542373e" }
+sqlite-mojo = { git = "https://github.com/magmalake/sqlite.mojo", rev = "785a2c80c090b90667043fa2cf7969fe1771f2e8" }
 
 
 [tasks]
@@ -356,7 +356,7 @@ DEP_INC = "-I ../dista.mojo/src -I ../k8s.mojo/src"
 # pin. `mojo format` has no check mode, so format-check formats and then asserts
 # the tree did not move.
 [feature.fmt.dependencies]
-mojo = "==1.3.0.dev2026111805"
+mojo = "==1.3.0.dev2026112505"
 
 [feature.fmt.tasks]
 fmt = { cmd = "mojo format src tests examples fuzz bin" }
@@ -368,17 +368,17 @@ format-check = { cmd = "mojo format src tests examples fuzz bin && git diff --ex
 # that revision pins, as in dista's data environment (CI lays them out); the FFI tins are packages as
 # well, for the C shims they install.
 [feature.data.dependencies]
-mojo-compiler = "==1.3.0.dev2026111805"
-objectstore-mojo = { git = "https://github.com/magmalake/objectstore.mojo", rev = "ea8d007fba7fc9777ebd5c3a5b7c8beed83a25db" }
-zstd-mojo = { git = "https://github.com/magmalake/zstd.mojo", rev = "5b9da775b7fa9ff1e795a3794a6c38a2be605834" }
-lz4-mojo = { git = "https://github.com/magmalake/lz4.mojo", rev = "a978f1ba2248dc7841072bd746e49eff1f09878d" }
-brotli-mojo = { git = "https://github.com/magmalake/brotli.mojo", rev = "f4805b14130fad51c7cc681d53e207717a9427cf" }
-sqlite-mojo = { git = "https://github.com/magmalake/sqlite.mojo", rev = "de664a8c996672d4e3c75070ecebd4321ee323fa" }
-postgres-mojo = { git = "https://github.com/magmalake/postgres.mojo", rev = "188f2f1008737908af9809c5bc328ed0b39923fc" }
+mojo-compiler = "==1.3.0.dev2026112505"
+objectstore-mojo = { git = "https://github.com/magmalake/objectstore.mojo", rev = "8811abff03db45f2bc4616bad833c71392e4ef04" }
+zstd-mojo = { git = "https://github.com/magmalake/zstd.mojo", rev = "be5185ad766f66962ad7bd271d748fb0d6dc8e90" }
+lz4-mojo = { git = "https://github.com/magmalake/lz4.mojo", rev = "3cbbc12289fef72a53c56e5cdabe832812da3ea3" }
+brotli-mojo = { git = "https://github.com/magmalake/brotli.mojo", rev = "1c827642f3794427dd56902f101038fb15c0c115" }
+sqlite-mojo = { git = "https://github.com/magmalake/sqlite.mojo", rev = "785a2c80c090b90667043fa2cf7969fe1771f2e8" }
+postgres-mojo = { git = "https://github.com/magmalake/postgres.mojo", rev = "3dbd6643e6663cbf659807ef27d5f91ab29b0c6c" }
 # The morca binary, which tests/lineage.sh builds for `morca lineage` and
 # `morca ui`, serves the UI with flare: the default environment's pins.
-flare_mlake = { git = "https://github.com/magmalake/flare_mlake", rev = "a46a8b9068f51bc78b84ee754e65dd2bdbf58743" }
-json_mlake = { git = "https://github.com/magmalake/json_mlake", rev = "7ea15048ac905386a89d03717e56cef8832b571b" }
+flare_mlake = { git = "https://github.com/magmalake/flare_mlake", rev = "dc4d005da42130316dc0f603b5e7fd53a91058f4" }
+json_mlake = { git = "https://github.com/magmalake/json_mlake", rev = "66836dd6e6b3cf77ebb0fbaef46bfe5ac542373e" }
 libcurl = ">=8,<9"
 libsqlite = ">=3.45,<4"
 libpq = ">=16,<19"
@@ -494,7 +494,7 @@ minio-server = ">=2025.10.15"
 # harness per parser or decoder under fuzz/, built with every bounds check
 # on. See fuzz/harness.mojo for FUZZ_RUNS and FUZZ_REPLAY.
 [feature.fuzz.dependencies]
-mozz_mlake = { git = "https://github.com/magmalake/mozz_mlake.git", rev = "15df2337ecbe9937da75e44ea36cedd66a8d6373" }
+mozz_mlake = { git = "https://github.com/magmalake/mozz_mlake.git", rev = "8c971ffda874152e73b2229640fcc0938cc92cd6" }
 
 [feature.fuzz.tasks]
 fuzz-months = { cmd = "scripts/mojo-build.sh -D ASSERT=all -I src -I fuzz $DEP_INC fuzz/fuzz_months.mojo -o build/fuzz-months && ./build/fuzz-months" }

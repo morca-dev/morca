@@ -42,7 +42,7 @@ jobs:
       pull-requests: read
     with:
       classify-only: true
-      mojo-compiler: "==1.3.0.dev2026111805"
+      mojo-compiler: "==1.3.0.dev2026112505"
 
   release-check:
     needs: release
@@ -55,7 +55,7 @@ jobs:
       # The test legs below are skipped on release PRs, and the consumer build
       # is the check (the tests build against sibling checkouts of the other tins).
       task: ""
-      mojo-compiler: "==1.3.0.dev2026111805"
+      mojo-compiler: "==1.3.0.dev2026112505"
 
   # Whether the PR changes anything but prose (*.md, docs/, the licence
   # files), which no test, build or check reads: a prose-only PR skips every
@@ -159,13 +159,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: morca-dev/dista
-          ref: 4c8e645153ce90e2be9b6998810d549f31c38689
+          ref: ef1b6dd49a316316666cb611a5b6d52be081ca0c
           path: dista.mojo
       # So does k8s, the scheduler's Kubernetes client.
       - uses: actions/checkout@v4
         with:
           repository: magmalake/k8s.mojo
-          ref: e272aa600d595568643560e61f4fa8654f26947a
+          ref: 94c06b13c7a0a0b029f4ce675ea49ab18bbc8613
           path: k8s.mojo
 
       # Off before setup-pixi restores rattler's git cache: git's
@@ -461,7 +461,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: morca-dev/dista
-          ref: 4c8e645153ce90e2be9b6998810d549f31c38689
+          ref: ef1b6dd49a316316666cb611a5b6d52be081ca0c
           path: dista.mojo
       # Off before setup-pixi restores rattler's git cache: git's
       # background maintenance in a cached repo races its
@@ -579,43 +579,43 @@ jobs:
         with:
           path: morca
       - uses: actions/checkout@v4
-        with: {repository: morca-dev/dista, ref: 4c8e645153ce90e2be9b6998810d549f31c38689, path: dista.mojo}
+        with: {repository: morca-dev/dista, ref: ef1b6dd49a316316666cb611a5b6d52be081ca0c, path: dista.mojo}
       - uses: actions/checkout@v4
-        with: {repository: magmalake/k8s.mojo, ref: e272aa600d595568643560e61f4fa8654f26947a, path: k8s.mojo}
+        with: {repository: magmalake/k8s.mojo, ref: 94c06b13c7a0a0b029f4ce675ea49ab18bbc8613, path: k8s.mojo}
       - uses: actions/checkout@v4
-        with: {repository: magmalake/memory-region.mojo, ref: d8256141cedc5e35e1a69f9a5eb2faae6116fe3a, path: memory-region.mojo}
+        with: {repository: magmalake/memory-region.mojo, ref: fa50e3dcb31c01d061463c8bafa48a02bdd9980a, path: memory-region.mojo}
       - uses: actions/checkout@v4
-        with: {repository: magmalake/arrow-mlake.mojo, ref: a40c7560837b478b2331bf860fc53da87a332089, path: arrow-mlake.mojo}
+        with: {repository: magmalake/arrow-mlake.mojo, ref: be75dc08cd3e3ab38cca5b1f2e7f6b7fcd5a4377, path: arrow-mlake.mojo}
       - uses: actions/checkout@v4
-        with: {repository: magmalake/parquet.mojo, ref: 29c2c687f4a8f729b8a6fb400559c032e14a42c2, path: parquet.mojo}
+        with: {repository: magmalake/parquet.mojo, ref: 7f8bf9a42544e70a12b6b05820321bb31431d228, path: parquet.mojo}
       - uses: actions/checkout@v4
-        with: {repository: magmalake/iceberg.mojo, ref: 1d4bf77b92c830016b7b46d76d787a5e967767dc, path: iceberg.mojo}
+        with: {repository: magmalake/iceberg.mojo, ref: 67f7616f54a59fde5bd3819e4494635b7452203b, path: iceberg.mojo}
       - uses: actions/checkout@v4
-        with: {repository: magmalake/threads.mojo, ref: c9da1a84f4f2d624043df97b90bb44f8e8b5256b, path: threads.mojo}
+        with: {repository: magmalake/threads.mojo, ref: 11f3241ff4233a15a0fd7c56b22102b26aa5cf00, path: threads.mojo}
       - uses: actions/checkout@v4
-        with: {repository: magmalake/thrift.mojo, ref: f09f0877999cb16da7a219943c3ac6f75ef2deaa, path: thrift.mojo}
+        with: {repository: magmalake/thrift.mojo, ref: a8f68811eadb454645696f8566972e9197113660, path: thrift.mojo}
       - uses: actions/checkout@v4
-        with: {repository: magmalake/hashes.mojo, ref: 705664cbeb3804bc94a750b9e8a054e739425bdb, path: hashes.mojo}
+        with: {repository: magmalake/hashes.mojo, ref: 09ae3fc45c6158949f5cd787f9d355f7b3d524e3, path: hashes.mojo}
       - uses: actions/checkout@v4
-        with: {repository: magmalake/snappy.mojo, ref: 459ee401bade016bdda9667948572486315c4de0, path: snappy.mojo}
+        with: {repository: magmalake/snappy.mojo, ref: 4c3d35773100b609d658042bacbc7550edc6b2a0, path: snappy.mojo}
       - uses: actions/checkout@v4
-        with: {repository: magmalake/deflate.mojo, ref: 732a98e2299e67840ffdaf58bf0e4377dc7c30fc, path: deflate.mojo}
+        with: {repository: magmalake/deflate.mojo, ref: 22ccbfeb35b20f6d0e1b33b32bed3a1e18e4fc00, path: deflate.mojo}
       - uses: actions/checkout@v4
-        with: {repository: magmalake/avro.mojo, ref: 85381ca755abc6368ced208a0b123fcfe454d867, path: avro.mojo}
+        with: {repository: magmalake/avro.mojo, ref: 06235449801634895e22a609269f180302cbe4e7, path: avro.mojo}
       - uses: actions/checkout@v4
-        with: {repository: magmalake/roaring.mojo, ref: 4a97ddcaa9d8e27c5446bcf0a63e23254fd02c8c, path: roaring.mojo}
+        with: {repository: magmalake/roaring.mojo, ref: 24a9b476bd6224b33f8f9050c447e1981412533d, path: roaring.mojo}
       - uses: actions/checkout@v4
-        with: {repository: magmalake/objectstore.mojo, ref: ea8d007fba7fc9777ebd5c3a5b7c8beed83a25db, path: objectstore.mojo}
+        with: {repository: magmalake/objectstore.mojo, ref: 8811abff03db45f2bc4616bad833c71392e4ef04, path: objectstore.mojo}
       - uses: actions/checkout@v4
-        with: {repository: magmalake/zstd.mojo, ref: 5b9da775b7fa9ff1e795a3794a6c38a2be605834, path: zstd.mojo}
+        with: {repository: magmalake/zstd.mojo, ref: be5185ad766f66962ad7bd271d748fb0d6dc8e90, path: zstd.mojo}
       - uses: actions/checkout@v4
-        with: {repository: magmalake/lz4.mojo, ref: a978f1ba2248dc7841072bd746e49eff1f09878d, path: lz4.mojo}
+        with: {repository: magmalake/lz4.mojo, ref: 3cbbc12289fef72a53c56e5cdabe832812da3ea3, path: lz4.mojo}
       - uses: actions/checkout@v4
-        with: {repository: magmalake/brotli.mojo, ref: f4805b14130fad51c7cc681d53e207717a9427cf, path: brotli.mojo}
+        with: {repository: magmalake/brotli.mojo, ref: 1c827642f3794427dd56902f101038fb15c0c115, path: brotli.mojo}
       - uses: actions/checkout@v4
-        with: {repository: magmalake/sqlite.mojo, ref: de664a8c996672d4e3c75070ecebd4321ee323fa, path: sqlite.mojo}
+        with: {repository: magmalake/sqlite.mojo, ref: 785a2c80c090b90667043fa2cf7969fe1771f2e8, path: sqlite.mojo}
       - uses: actions/checkout@v4
-        with: {repository: magmalake/postgres.mojo, ref: 188f2f1008737908af9809c5bc328ed0b39923fc, path: postgres.mojo}
+        with: {repository: magmalake/postgres.mojo, ref: 3dbd6643e6663cbf659807ef27d5f91ab29b0c6c, path: postgres.mojo}
       # Off before setup-pixi restores rattler's git cache: git's
       # background maintenance in a cached repo races its
       # `git clone --local` (mojo-census#135).
@@ -677,43 +677,43 @@ jobs:
           path: morca
           persist-credentials: false
       - uses: actions/checkout@v4
-        with: {repository: morca-dev/dista, ref: 4c8e645153ce90e2be9b6998810d549f31c38689, path: dista.mojo, persist-credentials: false}
+        with: {repository: morca-dev/dista, ref: ef1b6dd49a316316666cb611a5b6d52be081ca0c, path: dista.mojo, persist-credentials: false}
       - uses: actions/checkout@v4
-        with: {repository: magmalake/k8s.mojo, ref: e272aa600d595568643560e61f4fa8654f26947a, path: k8s.mojo, persist-credentials: false}
+        with: {repository: magmalake/k8s.mojo, ref: 94c06b13c7a0a0b029f4ce675ea49ab18bbc8613, path: k8s.mojo, persist-credentials: false}
       - uses: actions/checkout@v4
-        with: {repository: magmalake/memory-region.mojo, ref: d8256141cedc5e35e1a69f9a5eb2faae6116fe3a, path: memory-region.mojo, persist-credentials: false}
+        with: {repository: magmalake/memory-region.mojo, ref: fa50e3dcb31c01d061463c8bafa48a02bdd9980a, path: memory-region.mojo, persist-credentials: false}
       - uses: actions/checkout@v4
-        with: {repository: magmalake/arrow-mlake.mojo, ref: a40c7560837b478b2331bf860fc53da87a332089, path: arrow-mlake.mojo, persist-credentials: false}
+        with: {repository: magmalake/arrow-mlake.mojo, ref: be75dc08cd3e3ab38cca5b1f2e7f6b7fcd5a4377, path: arrow-mlake.mojo, persist-credentials: false}
       - uses: actions/checkout@v4
-        with: {repository: magmalake/parquet.mojo, ref: 29c2c687f4a8f729b8a6fb400559c032e14a42c2, path: parquet.mojo, persist-credentials: false}
+        with: {repository: magmalake/parquet.mojo, ref: 7f8bf9a42544e70a12b6b05820321bb31431d228, path: parquet.mojo, persist-credentials: false}
       - uses: actions/checkout@v4
-        with: {repository: magmalake/iceberg.mojo, ref: 1d4bf77b92c830016b7b46d76d787a5e967767dc, path: iceberg.mojo, persist-credentials: false}
+        with: {repository: magmalake/iceberg.mojo, ref: 67f7616f54a59fde5bd3819e4494635b7452203b, path: iceberg.mojo, persist-credentials: false}
       - uses: actions/checkout@v4
-        with: {repository: magmalake/threads.mojo, ref: c9da1a84f4f2d624043df97b90bb44f8e8b5256b, path: threads.mojo, persist-credentials: false}
+        with: {repository: magmalake/threads.mojo, ref: 11f3241ff4233a15a0fd7c56b22102b26aa5cf00, path: threads.mojo, persist-credentials: false}
       - uses: actions/checkout@v4
-        with: {repository: magmalake/thrift.mojo, ref: f09f0877999cb16da7a219943c3ac6f75ef2deaa, path: thrift.mojo, persist-credentials: false}
+        with: {repository: magmalake/thrift.mojo, ref: a8f68811eadb454645696f8566972e9197113660, path: thrift.mojo, persist-credentials: false}
       - uses: actions/checkout@v4
-        with: {repository: magmalake/hashes.mojo, ref: 705664cbeb3804bc94a750b9e8a054e739425bdb, path: hashes.mojo, persist-credentials: false}
+        with: {repository: magmalake/hashes.mojo, ref: 09ae3fc45c6158949f5cd787f9d355f7b3d524e3, path: hashes.mojo, persist-credentials: false}
       - uses: actions/checkout@v4
-        with: {repository: magmalake/snappy.mojo, ref: 459ee401bade016bdda9667948572486315c4de0, path: snappy.mojo, persist-credentials: false}
+        with: {repository: magmalake/snappy.mojo, ref: 4c3d35773100b609d658042bacbc7550edc6b2a0, path: snappy.mojo, persist-credentials: false}
       - uses: actions/checkout@v4
-        with: {repository: magmalake/deflate.mojo, ref: 732a98e2299e67840ffdaf58bf0e4377dc7c30fc, path: deflate.mojo, persist-credentials: false}
+        with: {repository: magmalake/deflate.mojo, ref: 22ccbfeb35b20f6d0e1b33b32bed3a1e18e4fc00, path: deflate.mojo, persist-credentials: false}
       - uses: actions/checkout@v4
-        with: {repository: magmalake/avro.mojo, ref: 85381ca755abc6368ced208a0b123fcfe454d867, path: avro.mojo, persist-credentials: false}
+        with: {repository: magmalake/avro.mojo, ref: 06235449801634895e22a609269f180302cbe4e7, path: avro.mojo, persist-credentials: false}
       - uses: actions/checkout@v4
-        with: {repository: magmalake/roaring.mojo, ref: 4a97ddcaa9d8e27c5446bcf0a63e23254fd02c8c, path: roaring.mojo, persist-credentials: false}
+        with: {repository: magmalake/roaring.mojo, ref: 24a9b476bd6224b33f8f9050c447e1981412533d, path: roaring.mojo, persist-credentials: false}
       - uses: actions/checkout@v4
-        with: {repository: magmalake/objectstore.mojo, ref: ea8d007fba7fc9777ebd5c3a5b7c8beed83a25db, path: objectstore.mojo, persist-credentials: false}
+        with: {repository: magmalake/objectstore.mojo, ref: 8811abff03db45f2bc4616bad833c71392e4ef04, path: objectstore.mojo, persist-credentials: false}
       - uses: actions/checkout@v4
-        with: {repository: magmalake/zstd.mojo, ref: 5b9da775b7fa9ff1e795a3794a6c38a2be605834, path: zstd.mojo, persist-credentials: false}
+        with: {repository: magmalake/zstd.mojo, ref: be5185ad766f66962ad7bd271d748fb0d6dc8e90, path: zstd.mojo, persist-credentials: false}
       - uses: actions/checkout@v4
-        with: {repository: magmalake/lz4.mojo, ref: a978f1ba2248dc7841072bd746e49eff1f09878d, path: lz4.mojo, persist-credentials: false}
+        with: {repository: magmalake/lz4.mojo, ref: 3cbbc12289fef72a53c56e5cdabe832812da3ea3, path: lz4.mojo, persist-credentials: false}
       - uses: actions/checkout@v4
-        with: {repository: magmalake/brotli.mojo, ref: f4805b14130fad51c7cc681d53e207717a9427cf, path: brotli.mojo, persist-credentials: false}
+        with: {repository: magmalake/brotli.mojo, ref: 1c827642f3794427dd56902f101038fb15c0c115, path: brotli.mojo, persist-credentials: false}
       - uses: actions/checkout@v4
-        with: {repository: magmalake/sqlite.mojo, ref: de664a8c996672d4e3c75070ecebd4321ee323fa, path: sqlite.mojo, persist-credentials: false}
+        with: {repository: magmalake/sqlite.mojo, ref: 785a2c80c090b90667043fa2cf7969fe1771f2e8, path: sqlite.mojo, persist-credentials: false}
       - uses: actions/checkout@v4
-        with: {repository: magmalake/postgres.mojo, ref: 188f2f1008737908af9809c5bc328ed0b39923fc, path: postgres.mojo, persist-credentials: false}
+        with: {repository: magmalake/postgres.mojo, ref: 3dbd6643e6663cbf659807ef27d5f91ab29b0c6c, path: postgres.mojo, persist-credentials: false}
       # Off before setup-pixi restores rattler's git cache: git's
       # background maintenance in a cached repo races its
       # `git clone --local` (mojo-census#135).
@@ -780,9 +780,9 @@ jobs:
           clean: false
           persist-credentials: false
       - uses: actions/checkout@v4
-        with: {repository: morca-dev/dista, ref: 4c8e645153ce90e2be9b6998810d549f31c38689, path: dista.mojo, clean: true, persist-credentials: false}
+        with: {repository: morca-dev/dista, ref: ef1b6dd49a316316666cb611a5b6d52be081ca0c, path: dista.mojo, clean: true, persist-credentials: false}
       - uses: actions/checkout@v4
-        with: {repository: magmalake/k8s.mojo, ref: e272aa600d595568643560e61f4fa8654f26947a, path: k8s.mojo, clean: true, persist-credentials: false}
+        with: {repository: magmalake/k8s.mojo, ref: 94c06b13c7a0a0b029f4ce675ea49ab18bbc8613, path: k8s.mojo, clean: true, persist-credentials: false}
 
       - name: A clean workspace but for the pixi environment
         run: |
@@ -863,7 +863,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: magmalake/customs@v0.5.0
+      - uses: magmalake/customs@v0.5.1
       # And the packages as layers: `_internal` imports no public module
       # that imports `_internal` back (AGENTS.md).
       - run: python3 scripts/check_layers.py
