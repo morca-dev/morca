@@ -165,7 +165,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: magmalake/k8s.mojo
-          ref: cb2bf1475e1849151106b3188c0cf8ed15846046
+          ref: 814fe930d3b7a70eb126a112c4a3a4c29ef2e1be
           path: k8s.mojo
 
       # Off before setup-pixi restores rattler's git cache: git's
@@ -581,7 +581,7 @@ jobs:
       - uses: actions/checkout@v4
         with: {repository: morca-dev/dista, ref: 085d459d61655a9d9653a5f248e501ad728b76b8, path: dista.mojo}
       - uses: actions/checkout@v4
-        with: {repository: magmalake/k8s.mojo, ref: cb2bf1475e1849151106b3188c0cf8ed15846046, path: k8s.mojo}
+        with: {repository: magmalake/k8s.mojo, ref: 814fe930d3b7a70eb126a112c4a3a4c29ef2e1be, path: k8s.mojo}
       - uses: actions/checkout@v4
         with: {repository: magmalake/memory-region.mojo, ref: 31bda02fa429496e064d764d2d4039160f77e1af, path: memory-region.mojo}
       - uses: actions/checkout@v4
@@ -679,7 +679,7 @@ jobs:
       - uses: actions/checkout@v4
         with: {repository: morca-dev/dista, ref: 085d459d61655a9d9653a5f248e501ad728b76b8, path: dista.mojo, persist-credentials: false}
       - uses: actions/checkout@v4
-        with: {repository: magmalake/k8s.mojo, ref: cb2bf1475e1849151106b3188c0cf8ed15846046, path: k8s.mojo, persist-credentials: false}
+        with: {repository: magmalake/k8s.mojo, ref: 814fe930d3b7a70eb126a112c4a3a4c29ef2e1be, path: k8s.mojo, persist-credentials: false}
       - uses: actions/checkout@v4
         with: {repository: magmalake/memory-region.mojo, ref: 31bda02fa429496e064d764d2d4039160f77e1af, path: memory-region.mojo, persist-credentials: false}
       - uses: actions/checkout@v4
@@ -782,7 +782,7 @@ jobs:
       - uses: actions/checkout@v4
         with: {repository: morca-dev/dista, ref: 085d459d61655a9d9653a5f248e501ad728b76b8, path: dista.mojo, clean: true, persist-credentials: false}
       - uses: actions/checkout@v4
-        with: {repository: magmalake/k8s.mojo, ref: cb2bf1475e1849151106b3188c0cf8ed15846046, path: k8s.mojo, clean: true, persist-credentials: false}
+        with: {repository: magmalake/k8s.mojo, ref: 814fe930d3b7a70eb126a112c4a3a4c29ef2e1be, path: k8s.mojo, clean: true, persist-credentials: false}
 
       - name: A clean workspace but for the pixi environment
         run: |
