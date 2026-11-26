@@ -25,9 +25,9 @@ def unmeasured(
     """`run`'s attempts by process `pid`, started in the last `since`
     seconds, with no usage recorded yet, oldest first; with `worker` (0 for
     none), only while the run's start `start` is that worker's."""
-    var guard = String()
+    var only_worker = String()
     if worker > 0:
-        guard = (
+        only_worker = (
             " AND EXISTS (SELECT 1 FROM orca.runs r WHERE r.id = $1 AND"
             " r.worker = $4 AND r.starts = $5)"
         )
@@ -42,7 +42,7 @@ def unmeasured(
             " st.run = $1 AND a.host LIKE '%:' || $2 AND a.cpu_seconds IS",
             " NULL AND a.peak_rss_bytes IS NULL AND a.started > now() -",
             " make_interval(secs => $3)",
-            guard,
+            only_worker,
             " ORDER BY a.started, a.id",
         ),
         params,
