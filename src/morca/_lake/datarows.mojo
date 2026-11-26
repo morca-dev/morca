@@ -442,9 +442,8 @@ def _read_rows(t: Table, a: DataAsk, mut cache: ManifestCache) raises -> _Rows:
             r.stopped = _time_stop(a.seconds)
             break
         var got = reader.next_batch()
-        if not got:
+        guard case .Some(b) = got else:
             break
-        ref b = got.value()
         if _bytes(b) + held > cap:
             r.stopped = _memory_stop(a.memory_mb)
             break
@@ -585,9 +584,8 @@ def chart_json(
             stopped = _time_stop(a.seconds)
             break
         var got = reader.next_batch()
-        if not got:
+        guard case .Some(b) = got else:
             break
-        ref b = got.value()
         var at = _batch_columns(b, read, cols)
         for i in range(b.num_rows):
             if scanned >= a.max_rows:

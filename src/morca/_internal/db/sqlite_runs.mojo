@@ -236,9 +236,8 @@ def _run_infos(mut st: Statement) raises -> List[RunInfo]:
     var out = List[RunInfo]()
     while True:
         var r = st.step()
-        if not r:
+        guard case .Some(row) = r else:
             break
-        ref row = r.value()
         out.append(
             RunInfo(
                 row.int_val(0),
@@ -387,9 +386,8 @@ def fence(
     st.bind_int(1, run)
     st.bind_float(2, fresh_seconds)
     var got = st.step()
-    if not got:
+    guard case .Some(row) = got else:
         return None
-    ref row = got.value()
     return Fence(row.text_val(0), row.text_val(1), row.int_val(2) != 0)
 
 
@@ -475,9 +473,9 @@ def timed_out(
     st.bind_text(3, owner)
     st.bind_float(4, secs)
     var got = st.step()
-    if not got:
+    guard case .Some(row) = got else:
         return None
-    return TimedOut(got.value().int_val(0), got.value().text_val(1))
+    return TimedOut(row.int_val(0), row.text_val(1))
 
 
 def fail_attempt(db: Database, attempt: Int, why: String) raises -> Bool:
@@ -546,9 +544,8 @@ def succeeded(db: Database, run: Int) raises -> List[Succeeded]:
     st.bind_int(1, run)
     while True:
         var r = st.step()
-        if not r:
+        guard case .Some(row) = r else:
             break
-        ref row = r.value()
         out.append(
             Succeeded(
                 row.text_val(0),
@@ -575,9 +572,8 @@ def of_run(db: Database, run: Int) raises -> List[StepInfo]:
     st.bind_int(1, run)
     while True:
         var r = st.step()
-        if not r:
+        guard case .Some(row) = r else:
             break
-        ref row = r.value()
         out.append(
             StepInfo(
                 row.text_val(0),
@@ -752,10 +748,10 @@ def pinned_reads(
     st.bind_text(3, partition)
     # Newest first, so the first attempt's snapshot is the one left.
     while True:
-        var row = st.step()
-        if not row:
+        var got = st.step()
+        guard case .Some(row) = got else:
             break
-        out[row.value().text_val(0)] = Int64(row.value().int_val(1))
+        out[row.text_val(0)] = Int64(row.int_val(1))
     return out^
 
 

@@ -86,11 +86,11 @@ def start_run(
     while a live run has one of them, which a second run would run beside;
     a partition that's done is run again."""
     var p = _pipeline(db, pipeline)
-    if not p:
+    guard case .Some(reg) = p else:
         return Outcome.no(_unregistered(pipeline))
     var texts: List[String]
     try:
-        texts = partition_keys(p.value(), keys)
+        texts = partition_keys(reg, keys)
     except e:
         return Outcome.no(String(e))
     if len(texts) == 0:
@@ -115,7 +115,7 @@ def start_run(
                 )
             )
     var id = actions_db.add_started_run(
-        tx, pipeline, p.value().registry_hash, joined, trigger
+        tx, pipeline, reg.registry_hash, joined, trigger
     )
     tx.commit()
     return Outcome.done(Int(id))
@@ -135,14 +135,14 @@ def backfill_runs(
     queued too: refused until `allow_append` confirms it if the pipeline's
     steps append to what they write (`rerun_refusal`)."""
     var p = _pipeline(db, pipeline)
-    if not p:
+    guard case .Some(reg) = p else:
         return Outcome.no(_unregistered(pipeline))
     try:
         if rerun and not allow_append:
-            var why = rerun_refusal(db, p.value(), keys)
+            var why = rerun_refusal(db, reg, keys)
             if why:
                 return Outcome.no(why^, confirm=True)
-        var q = backfill(db, p.value(), keys, rerun, True)
+        var q = backfill(db, reg, keys, rerun, True)
         var o = Outcome.done(0, len(q.runs))
         o.skipped = q.skipped()
         return o^
@@ -157,9 +157,8 @@ def resume_run(mut db: State, run: Int, allow_new_code: Bool) raises -> Outcome:
     since is refused until `allow_new_code`, which the scheduler passes on
     as `--allow-new-code`."""
     var got = actions_db.resumable(db.conn, run)
-    if not got:
+    guard case .Some(r) = got else:
         return Outcome.no(String("no run ", run))
-    ref r = got.value()
     var status = r.status
     if (
         status != "failed"
@@ -214,9 +213,8 @@ def rerun_from(
     appends to a dataset (`appending_writes`): the new run would append
     again beside what `run` committed."""
     var got = actions_db.rerunnable(db.conn, run, step)
-    if not got:
+    guard case .Some(r) = got else:
         return Outcome.no(String("no run ", run))
-    ref r = got.value()
     var pipeline = r.pipeline
     var status = r.status
     if status == "queued" or status == "running":
@@ -281,11 +279,11 @@ def cancel_runs(
     to be retried, over any of `keys` (a run of several keys is cancelled whole),
     or all of them for `@all`. The outcome's `queued` is how many."""
     var got = actions_db.partitioning(db.conn, pipeline)
-    if not got:
+    guard case .Some(part) = got else:
         return Outcome.no(String("no pipeline ", pipeline))
-    var kind = got.value().kind
-    var start = got.value().start
-    var retries = got.value().run_retries
+    var kind = part.kind
+    var start = part.start
+    var retries = part.run_retries
     var all = keys.strip() == "@all"
     var joined = String()
     if not all:

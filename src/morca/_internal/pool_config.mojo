@@ -214,9 +214,8 @@ def _int(
     default: Int,
 ) raises -> Int:
     var v = doc.get(path)
-    if not v:
+    guard case .Some(x) = v else:
         return default
-    ref x = v.value()
     if x.kind != INTEGER:
         r.fail(x.line, String(key, " is a whole number, not ", x.kind))
     var n = x.as_int()
@@ -337,9 +336,8 @@ def _volumes(
     p.append("volumes")
     var out = List[String]()
     var v = doc.get(p)
-    if not v:
+    guard case .Some(l) = v else:
         return out^
-    ref l = v.value()
     if l.kind != ARRAY or doc.is_table_array(l):
         r.fail(l.line, 'volumes is a list of strings: ["name:/path", ...]')
     if len(l.items) > MOST_VOLUMES:
@@ -613,9 +611,8 @@ def _pairs_of(text: String, b: String) raises -> List[Tuple[String, String]]:
 def pool_settings(mut db: State, pool: String) raises -> PoolSettings:
     """`pool`'s settings, as `morca register` recorded them."""
     var got = pools_db.settings(db.conn, pool)
-    if not got:
+    guard case .Some(s) = got else:
         return PoolSettings.none()
-    ref s = got.value()
     return PoolSettings(
         s.max_runs, _pairs_of(s.env, "value"), _pairs_of(s.secrets, "id")
     )

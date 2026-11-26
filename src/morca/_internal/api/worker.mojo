@@ -185,7 +185,7 @@ def answer(url: String, path: String, token: String, body: String) -> Page:
     try:
         var db = State(url)
         var w = worker_of(db, token)
-        if not w:
+        guard case .Some(auth) = w else:
             return _error(
                 401,
                 (
@@ -197,12 +197,12 @@ def answer(url: String, path: String, token: String, body: String) -> Page:
         if not v:
             return _error(400, "morca: a worker's request is a JSON object")
         var pool = text_field(v.value(), "pool")
-        if pool and pool != w.value().pool:
+        if pool and pool != auth.pool:
             return _error(
                 403,
                 String(
                     "morca: this worker token is for pool ",
-                    w.value().pool,
+                    auth.pool,
                     ", not ",
                     pool,
                 ),
@@ -214,7 +214,7 @@ def answer(url: String, path: String, token: String, body: String) -> Page:
             elif path != r.path:
                 continue
             var wc = WorkerCall(
-                url=url, worker=w.value().copy(), body=v.take(), call=call^
+                url=url, worker=auth.copy(), body=v.take(), call=call^
             )
             return r.handler(db, wc)
         return _error(404, String("morca: nothing at ", path))

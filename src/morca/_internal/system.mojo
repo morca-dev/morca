@@ -393,9 +393,8 @@ def system_now(mut db: State) raises -> Optional[Now]:
     """The newest minute the control instance sampled, or None if it never
     has. Check `stale()`: it may be long ago."""
     var got = system_db.newest_minute(db.conn)
-    if not got:
+    guard case .Some(r) = got else:
         return None
-    ref r = got.value()
     return Now(
         r.age,
         r.cpu,
@@ -612,7 +611,7 @@ def _stat(
 
 def system_html(mut h: Html, now: Optional[Now], c: Charts, range: String):
     """The cards, the containers' table and the charts."""
-    if not now:
+    guard case .Some(n) = now else:
         h.raw(
             '<p class="empty">The control instance has not been sampled yet.',
             " Its sampler (<code>morca sample --cgroup ...</code>, started by",
@@ -621,7 +620,6 @@ def system_html(mut h: Html, now: Optional[Now], c: Charts, range: String):
             " reads.</p>",
         )
         return
-    ref n = now.value()
     alert_html(h, warnings(now))
     if n.stale():
         h.raw('<p class="alert">The newest sample is ')
@@ -770,9 +768,8 @@ def _series_json(s: List[Series]) -> String:
 
 
 def now_json(now: Optional[Now]) -> String:
-    if not now:
+    guard case .Some(n) = now else:
         return String("null")
-    ref n = now.value()
     var out = String(
         '{"age_seconds": ',
         _f(n.age, 0),

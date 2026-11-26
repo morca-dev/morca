@@ -190,9 +190,8 @@ struct CacheHandle(Copyable, ImplicitlyCopyable, Movable):
         s.lock.lock()
         var k = s.cache.get(key, _now())
         s.lock.unlock()
-        if not k:
+        guard case .Some(got) = k else:
             return None
-        ref got = k.value()
         var resp = Response(
             status=got.status, reason=_reason(got.status), body=got.body.copy()
         )

@@ -282,10 +282,10 @@ struct TomlDoc(Movable):
             for k in keys:
                 var p = path.copy()
                 p.append(k)
-                var v = self.get(p)
-                if not v:
+                var got = self.get(p)
+                guard case .Some(v) = got else:
                     continue
-                if v.value().kind == TABLE and not self.is_inline(p):
+                if v.kind == TABLE and not self.is_inline(p):
                     tables.append(k)
                     continue
                 if len(path) > 0 and not header:
@@ -296,7 +296,7 @@ struct TomlDoc(Movable):
                         "]\n",
                     )
                     header = True
-                out.write(toml_key(k), " = ", self._value(p, v.value()))
+                out.write(toml_key(k), " = ", self._value(p, v))
                 var note = _note(p, notes)
                 if note:
                     out.write("  # ", note)

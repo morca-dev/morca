@@ -261,12 +261,10 @@ def _runs_table(mut db: State, call: Call) raises -> Page:
 
 def _run(mut db: State, call: Call) raises -> Page:
     var id = call.int("id")
-    var v = run_view(db, id)
-    if not v:
+    var got = run_view(db, id)
+    guard case .Some(v) = got else:
         return not_found(String("no run ", id))
-    return Page(
-        200, run_json(v.value()), run_html(db, v.value(), call.query("steps"))
-    )
+    return Page(200, run_json(v), run_html(db, v, call.query("steps")))
 
 
 def _run_live(mut db: State, call: Call) raises -> Page:
@@ -325,20 +323,20 @@ def _pipeline(mut db: State, call: Call) raises -> Page:
         cov=call.query("cov"),
         url=call.url,
     )
-    var v = pipeline_view(db, ask)
-    if not v:
+    var got = pipeline_view(db, ask)
+    guard case .Some(v) = got else:
         return not_found(String("no pipeline ", ask.name))
-    if ask.shown_tab() == "runs" and jumped(v.value().runs):
+    if ask.shown_tab() == "runs" and jumped(v.runs):
         return Page(
             303,
-            pipeline_json(v.value(), ask),
+            pipeline_json(v, ask),
             String(),
-            location=String("/runs/", v.value().runs.q.run),
+            location=String("/runs/", v.runs.q.run),
         )
     return Page(
         200,
-        pipeline_json(v.value(), ask),
-        pipeline_html(db, v.value(), ask, call.user),
+        pipeline_json(v, ask),
+        pipeline_html(db, v, ask, call.user),
     )
 
 

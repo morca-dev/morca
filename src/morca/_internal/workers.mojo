@@ -212,9 +212,8 @@ def worker_of(mut db: State, token: String) raises -> Optional[WorkerAuth]:
     if not is_token(token):
         return None
     var got = workers_db.seen(db.conn, token_hash(token))
-    if not got:
+    guard case .Some(t) = got else:
         return None
-    ref t = got.value()
     return WorkerAuth(t.id, t.pool, t.label)
 
 
@@ -283,9 +282,8 @@ def ran_on(mut db: State, run: Int) raises -> String:
     """The worker a run's latest start was claimed by, as `<name> (token
     <id>, <label>)`, or empty for a run no worker claimed."""
     var got = workers_db.ran_on(db.conn, run)
-    if not got:
+    guard case .Some(r) = got else:
         return ""
-    ref r = got.value()
     return String(
         r.name if r.name else String("a worker"),
         " (token ",
@@ -737,11 +735,10 @@ def _claim_run(
             sized.source,
             sized.runs,
         )
-        if not got:
+        guard case .Some(r) = got else:
             tx.rollback()
             continue
         started(tx, id, p.concurrency_key)
-        ref r = got.value()
         var spec = WorkerRun(
             Int(id),
             r.start,
@@ -806,9 +803,8 @@ def _contained_exit(mut db: State, w: WorkerAuth, v: Value) raises:
         Int(_num(v, "memory_max_mb")) if String("memory_max_mb") in v else limit
     )
     var got = workers_db.contained(db.conn, run, w.id, start)
-    if not got:
+    guard case .Some(r) = got else:
         return
-    ref r = got.value()
     # Stall times from a worker that measures them (an older one doesn't).
     var stall = (
         _num(v, "memory_stall_ms") if String("memory_stall_ms") in v else -1

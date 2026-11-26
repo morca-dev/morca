@@ -851,9 +851,8 @@ struct Sampler(Movable):
         var fsids = List[Int]()
         for d in self.dirs:
             var got = _disk(d)
-            if not got:
+            guard case .Some(g) = got else:
                 continue
-            ref g = got.value()
             var seen = False
             for f in fsids:
                 if f == g.fsid:

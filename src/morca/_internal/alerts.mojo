@@ -166,10 +166,10 @@ def fill(
     # Since the last fill run that succeeded; else the first fill run, else
     # when the pipeline was first registered.
     var got = notify_db.fill_success_age(db.conn, pipeline)
-    if not got:
+    guard case .Some(age) = got else:
         return
-    var ago = got.value()[0]
-    var ever = got.value()[1]
+    var ago = age[0]
+    var ever = age[1]
     var unfinished = s.done < s.total and (
         s.left + s.retrying + s.live + s.running > 0
     )

@@ -405,9 +405,9 @@ def api() raises -> Api:
         ref l = Pointer[_Loaded, MutAnyOrigin](
             unsafe_from_address=Int(p.value())
         )[]
-        if not l.api:
+        guard case .Some(api) = l.api else:
             raise Error(l.error)
-        return l.api.value().copy()
+        return api.copy()
 
 
 # ── batches as C structs ────────────────────────────────────────────────────
