@@ -14,7 +14,7 @@ not a replacement for them.
 |---|---|
 | Which Ray workload is the next gate? | Ray Data: batch inference over a dataset larger than memory. |
 | Is a cluster always made for one run? | No. Machines are shared and outlive runs. |
-| Can anything live cross a step boundary? | No. A step boundary stays durable: small values in the state database, and table snapshots. |
+| Can a live channel cross a step boundary? | No. A step boundary stays durable: small values in the state database, and table snapshots. |
 
 ## Why the layers were unclear
 
