@@ -742,9 +742,8 @@ def _run_settings(mut h: Html, mut db: State, r: RunRow) raises:
     recorded, else what the pipeline is registered with), and the limits
     and machines. Secrets by name only."""
     var found = run_db.run_settings(db.conn, r.id)
-    if not found:
+    guard case .Some(s) = found else:
         return
-    ref s = found.value()
     card_open(
         h,
         "settings",

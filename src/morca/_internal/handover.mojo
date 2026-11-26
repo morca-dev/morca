@@ -99,9 +99,8 @@ def run_outdated(mut conn: Connection, run: Int) raises -> RunOutdated:
     """Whether `run` is outdated (`outdated_sql`); not for a run that
     isn't running."""
     var got = handover_db.outdatedness(conn, run)
-    if not got:
+    guard case .Some(r) = got else:
         return RunOutdated(False, String(), String(), String())
-    ref r = got.value()
     var o = r.outdated
     return RunOutdated(
         o,

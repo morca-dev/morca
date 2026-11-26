@@ -379,14 +379,13 @@ struct Ui(Copyable, Handler):
                 if required and not call.user:
                     return login_needed(req, json)
                 return respond(not_found(String("nothing at ", path)), json)
-            if not found.route:
+            guard case .Some(route) = found.route else:
                 var miss = found.miss if found.miss else String(
                     "nothing at ", path
                 )
                 return _with_user(
                     not_found(miss), json, call.user, required, req.url
                 )
-            ref route = found.route.value()
             call.params = found.params.copy()
             if route.kind == AUTH:
                 return respond(route.handler(db, call), json)

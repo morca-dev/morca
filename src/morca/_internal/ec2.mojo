@@ -1399,27 +1399,26 @@ struct Ec2Runner(Movable):
                 continue
             self.ec2.terminate([id])
             print("morca: run", run, "replaces pooled", role, id, "(no answer)")
-            var spec = self._spec_of(db, run, start)
-            if not spec:
+            var got = self._spec_of(db, run, start)
+            guard case .Some(spec) = got else:
                 continue
             if role == "worker":
                 var head = ec2_db.head_address(db.conn, run, start)
                 if head and head.value():
-                    self._workers(db, spec.value(), 1, head.value(), True)
+                    self._workers(db, spec, 1, head.value(), True)
                 continue
             # Its workers were told the lost head's address: they go too.
             var others = ec2_db.end_lost_head(db.conn, run, start)
             self.ec2.terminate(others)
-            self.start(db, spec.value(), fresh=True)
+            self.start(db, spec, fresh=True)
 
     def _spec_of(
         self, mut db: State, run: Int, start: Int
     ) raises -> Optional[Ec2Spec]:
         """Run `run`'s start `start`, as `start` was given it."""
         var row = ec2_db.spec_of(db.conn, run, start)
-        if not row:
+        guard case .Some(s) = row else:
             return None
-        ref s = row.value()
         return _spec(s, s.tasks, s.hi if s.lo < 0 else min(s.lo, s.hi))
 
     def _ended_since(self, mut db: State, up: List[String]) raises:

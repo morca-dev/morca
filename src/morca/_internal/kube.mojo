@@ -814,11 +814,11 @@ struct KubeRunner(Movable):
         var run = Int(key[byte=:dash])
         var start = String(key[byte = dash + 1 :])
         var got = kube_db.hold_stuck(db.conn, run, start, why)
-        if not got:
+        guard case .Some(held) = got else:
             return
-        var pipeline = got.value()[0]
+        var pipeline = held[0]
         var subject = String(run, "/", start)
-        if got.value()[1] < self.grace or notify_db.is_known(
+        if held[1] < self.grace or notify_db.is_known(
             db.conn, "pod-stuck", subject
         ):
             return

@@ -70,10 +70,9 @@ def _coverages(
 def _coverage_cell(mut h: Html, p: PipelineRow, c: Optional[Coverage]):
     """A Coverage cell: the percent with a bar, the counts on hover, linking
     to the year calendar (a keyed pipeline's Keys); "—" for none."""
-    if not c:
+    guard case .Some(v) = c else:
         h.raw('<td class="num muted">—</td>')
         return
-    ref v = c.value()
     h.raw('<td class="num"><a class="covpct" href="')
     h.text(coverage_href(p.name, p.kind))
     h.raw('" title="')

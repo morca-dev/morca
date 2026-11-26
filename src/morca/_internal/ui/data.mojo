@@ -733,13 +733,12 @@ def _chart_card(mut h: Html, name: String, q: DataQuery, v: Value) raises:
         )
     h.raw('</select></label><button type="submit">Draw</button></form>')
     var got = v.try_at("/chart")
-    if not got:
+    guard case .Some(c) = got else:
         h.raw(
             '<p class="card__sub">Pick an x and up to three numbers to chart'
             " the filtered rows.</p></section>"
         )
         return
-    ref c = got.value()
     var err = c.try_at("/error")
     if err:
         h.raw('<p class="card__warn">')

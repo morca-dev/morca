@@ -166,10 +166,10 @@ struct SqliteBeat(Beater):
             var step = String(pair[byte=:eq])
             var secs = Float64(String(pair[byte = eq + 1 :]))
             var got = sql.timed_out(db, self.run, step, self.owner, secs)
-            if not got:
+            guard case .Some(t) = got else:
                 continue
-            var attempt = got.value().attempt
-            var partition = got.value().partition
+            var attempt = t.attempt
+            var partition = t.partition
             var why = String(
                 "timed out after ",
                 Int(secs),
@@ -559,13 +559,13 @@ struct SqliteStore(Movable, RunStore):
         while True:
             try:
                 var got = sql.fence(self.db, self.run, stale / 2)
-                if not got:
+                guard case .Some(f) = got else:
                     raise Error(
                         "morca: not committing: run ", self.run, " is gone"
                     )
-                var owner = got.value().owner
-                var status = got.value().status
-                var fresh = got.value().fresh
+                var owner = f.owner
+                var status = f.status
+                var fresh = f.fresh
                 if owner != self.owner or status != RUNNING:
                     raise Error(
                         "morca: not committing: run ",

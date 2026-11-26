@@ -1,0 +1,1 @@
+- **Use `guard` for early exits on Optionals:** an internal refactor of how morca unwraps optional values, with no change in behaviour. (#601)

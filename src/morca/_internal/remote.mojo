@@ -426,9 +426,8 @@ struct Api(Movable):
         var db = State(self.db_url)
         db.migrate()
         var done = act(db, path, _form(fields))
-        if not done:
+        guard case .Some(page) = done else:
             raise Error("morca: nothing at ", path)
-        ref page = done.value()
         if page.status != 303:
             raise Error(_refusal(loads(page.json)))
         return page.json

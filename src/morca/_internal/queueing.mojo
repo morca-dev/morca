@@ -125,9 +125,8 @@ struct KeptKeys(Copyable, Movable):
 
 def kept_keys(mut db: State, pipeline: String) raises -> Optional[KeptKeys]:
     var row = queueing_db.kept_keys(db.conn, pipeline)
-    if not row:
+    guard case .Some(r) = row else:
         return None
-    ref r = row.value()
     var keys = List[String]()
     for k in r.keys.split("\n"):
         if k:
@@ -168,9 +167,8 @@ def kind_mismatch(mut db: State, describe: String) raises -> String:
     a new snapshot of it offers the keys it holds, which are names already.
     So a dated pipeline may write the keys a keyed sensor runs."""
     var m = queueing_db.kind_mismatch(db.conn, describe)
-    if not m:
+    guard case .Some(r) = m else:
         return ""
-    ref r = m.value()
     return String(
         "the sensor ",
         r.reader,

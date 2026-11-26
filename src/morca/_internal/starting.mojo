@@ -95,9 +95,8 @@ def _taken(
     "waiting: for capacity (gharchive, priority 10): needs 2 GB, ...". Of
     the control slots with `control`, else of the grants."""
     var ahead = starting_db.ahead_on_host(tx, p.priority, control, stale, dead)
-    if not ahead:
+    guard case .Some(a) = ahead else:
         return hold
-    ref a = ahead.value()
     var why = String(hold.removeprefix("waiting: ").removeprefix("held: "))
     return String(
         "waiting: for capacity (", a[0], ", priority ", a[1], "): ", why

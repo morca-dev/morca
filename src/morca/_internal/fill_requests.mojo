@@ -127,9 +127,8 @@ def request_progress(
     none; `live` is the keys in its live runs, `done` those done in a run
     of any of its code."""
     var row = requests_db.open_request(tx, pipeline)
-    if not row:
+    guard case .Some(r) = row else:
         return None
-    ref r = row.value()
     var s = RequestProgress()
     s.id = r.id
     s.spec = r.spec

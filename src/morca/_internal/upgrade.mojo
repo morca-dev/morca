@@ -94,12 +94,12 @@ def version_less(a: List[Int], b: List[Int]) -> Bool:
 
 
 def _string(doc: TomlDoc, path: List[String], what: String) raises -> String:
-    var v = doc.get(path)
-    if not v:
+    var got = doc.get(path)
+    guard case .Some(v) = got else:
         return String()
-    if v.value().kind != STRING:
+    if v.kind != STRING:
         raise Error("upgrade: ", what, " must be a string")
-    return v.value().text
+    return v.text
 
 
 def parse_upgrade(text: String) raises -> List[UpgradeStep]:
@@ -109,15 +109,15 @@ def parse_upgrade(text: String) raises -> List[UpgradeStep]:
     that isn't an `morca` command, or an id used twice."""
     var doc = parse_toml(text)
     var out = List[UpgradeStep]()
-    var versions = doc.get(["version"])
-    if not versions:
+    var got = doc.get(["version"])
+    guard case .Some(versions) = got else:
         return out^
-    if versions.value().kind != ARRAY:
+    if versions.kind != ARRAY:
         raise Error(
             "upgrade: `version` must be an array of tables ([[version]])"
         )
     var ids = Dict[String, Bool]()
-    for vi in versions.value().items:
+    for vi in versions.items:
         var vp: List[String] = ["version", vi]
         var vpath = vp.copy()
         vpath.append("version")

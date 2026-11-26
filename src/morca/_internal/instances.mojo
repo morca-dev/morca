@@ -152,12 +152,12 @@ def overlap_refusal(mut db: State) raises -> String:
     it. Doesn't migrate."""
     var floor = migration_floor(known_migrations())
     var got = schedulers_db.overlap_state(db.conn, floor, stale_limit())
-    if not got:
+    guard case .Some(state) = got else:
         return String(
             "no scheduler instance has ever run on this database (one before",
             " MORCA_OVERLAP, or with it off, keeps none)",
         )
-    ref old = got.value()[0]
+    ref old = state[0]
     if len(old) > 0:
         return String(
             "this binary's migrations need a binary that knows at least ",
@@ -169,7 +169,7 @@ def overlap_refusal(mut db: State) raises -> String:
             " knows ",
             old[0][2],
         )
-    if got.value()[1] == 0:
+    if state[1] == 0:
         return String(
             "no live scheduler instance leads (none is going, or it has",
             " MORCA_OVERLAP off)",

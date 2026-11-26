@@ -80,9 +80,8 @@ def pool_next_main(args: List[String]) raises -> Int:
             ref c = db.value().conn
             if ec2_db.beat_idle(c, iid, run, start) == 0:
                 var got = ec2_db.join_handed(c, iid)
-                if not got:
+                guard case .Some(h) = got else:
                     return 1  # ended: the scheduler shut it down
-                ref h = got.value()
                 print(
                     "next",
                     h.run,
