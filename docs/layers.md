@@ -15,6 +15,9 @@ not a replacement for them.
 | Which Ray workload is the next gate? | Ray Data: batch inference over a dataset larger than memory. |
 | Is a cluster always made for one run? | No. Machines are shared and outlive runs. |
 | Can a live channel cross a step boundary? | No. A step boundary stays durable: small values in the state database, and table snapshots. |
+| How many projects share a fleet? | One, for now. A machine's agent runs one image, the server's. |
+| Where does the flow library live? | In dista, as the package `dista.flow`. |
+| Which GPU is the gate measured on? | Metal, which Mojo targets, on the M4 worker. |
 
 ## Why the layers were unclear
 
@@ -188,17 +191,21 @@ than the cluster's memory:
 1 to 3 need nothing from morca and run in dista's local mode, so the flow
 can be measured against Ray Data on one machine before 4 exists.
 
-## Open questions
+## Open question: the `ec2` placement
 
-- **The agent's image.** A machine's agent runs runs at the server's image
-  today. Shared by several projects, it must fetch each job's image. Is one
-  project per fleet enough for now?
-- **Kubernetes as a provider.** There the shared cluster is Kubernetes
-  itself and a worker is a pod. Does the `ec2` placement survive as a
-  provider, or do pools that grow replace it?
-- **GPUs to test on.** `sai` has no card now. The M4 worker has Metal. The
-  group mechanism can be tested with labels alone; the speed bar can't.
-- **Does a flow belong in dista or in a tin of its own?** dista's vision
-  says "not a dataframe engine". A flow moves batches and never looks inside
-  them, which keeps it on the right side of that line, but it is the first
-  library on top of the core.
+Recommended: pools that grow replace it, and EC2 stays as a pool provider.
+
+- **It is the cluster per run this proposal leaves.** An `ec2` run gets a
+  head and worker instances of its own, and waits for them to boot.
+- **The warm pool exists to hide that boot.** It keeps instances per
+  pipeline and per env. A shared pool keeps machines for every pipeline,
+  so it does the same job with fewer idle machines.
+- **Pools already make EC2 machines** (`provider = "ec2"` in `[pools]`),
+  so nothing is lost: `placement = "ec2"` becomes `worker:<pool>` on such a
+  pool.
+- **Order:** first worker groups and demand per group on pools (step 4
+  above), then move the `ec2` placement's users to a pool, then remove the
+  placement and the warm pool in a breaking release.
+
+Kubernetes stays a provider of its own: there the shared cluster is
+Kubernetes, and a worker is a pod.
