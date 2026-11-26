@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.46.0 - 2026-11-26
+
+- **Mojo 1.3.0.dev2026112605:** morca and every tin it uses move from 1.3.0.dev2026112505 to the first nightly with the stable `guard` statement; a project that builds its own morca needs the same nightly. (#600)
+
+- **Use `guard` for early exits on Optionals:** an internal refactor of how morca unwraps optional values, with no change in behaviour. (#601)
+
 ## 0.45.0 - 2026-11-25
 
 - **Mojo 1.3.0.dev2026112505:** the toolchain moves from 1.3.0.dev2026111805, which miscompiled some `while True:` loops, and every tin moves with it; zstd-mojo is now pure Mojo, so `zstd-shim` and libzstd leave the images. A project on morca-mojo must move its own Mojo pin to the same nightly. (#597)
