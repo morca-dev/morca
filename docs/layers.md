@@ -18,6 +18,7 @@ not a replacement for them.
 | How many projects share a fleet? | One, for now. A machine's agent runs one image, the server's. |
 | Where does the flow library live? | In dista, as the package `dista.flow`. |
 | Which GPU is the gate measured on? | Metal, which Mojo targets, on the M4 worker. |
+| What becomes of the `ec2` placement? | Pools that grow replace it. EC2 stays as a pool provider. |
 
 ## Why the layers were unclear
 
@@ -191,9 +192,9 @@ than the cluster's memory:
 1 to 3 need nothing from morca and run in dista's local mode, so the flow
 can be measured against Ray Data on one machine before 4 exists.
 
-## Open question: the `ec2` placement
+## Retiring the `ec2` placement
 
-Recommended: pools that grow replace it, and EC2 stays as a pool provider.
+Pools that grow replace it, and EC2 stays as a pool provider.
 
 - **It is the cluster per run this proposal leaves.** An `ec2` run gets a
   head and worker instances of its own, and waits for them to boot.
