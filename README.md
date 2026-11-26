@@ -55,6 +55,7 @@ them comes with a note in the changelog. Everything under `morca._internal`
 |---|---|
 | [docs/binaries.md](docs/binaries.md) | the prebuilt `morca` and `morca_maintain` in the package: using them, versions and `morca register`'s check, apps beside them |
 | [docs/morca-toml.md](docs/morca-toml.md) | `morca.toml`: every key, precedence, `morca config show` and `export`, and [fills](docs/morca-toml.md#fills) |
+| [docs/layers.md](docs/layers.md) | a proposal: the layers of morca and dista as a Ray replacement, what crosses a step boundary, and the order of work toward Ray Data-style flows |
 | [docs/placement.md](docs/placement.md) | where a pipeline's runs run: `default`, `ec2`, `control` and `worker:<pool>`, and the control host's limits |
 | [docs/workers.md](docs/workers.md) | remote workers: `morca worker`, worker tokens, a worker on another machine, the run's state over the API |
 | [docs/pipeline-protocol.md](docs/pipeline-protocol.md) | the pipeline-binary protocol: the subcommands, describe's JSON, the environment, the run store's rules and the tables' summary keys a pipeline binary must keep to |
