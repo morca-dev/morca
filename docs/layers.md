@@ -189,6 +189,8 @@ than the cluster's memory:
 | 4 | Worker groups and GPUs in requests, grants and `[pools]`; one provider contract | morca |
 | 5 | The embedding flow and its Ray Data counterpart; measure the gate | census, dista `bench/` |
 
+1 to 3 are done in dista. The plan for 4 is [groups.md](groups.md).
+
 1 to 3 need nothing from morca and run in dista's local mode, so the flow
 can be measured against Ray Data on one machine before 4 exists.
 
