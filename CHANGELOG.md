@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.47.0 - 2026-11-27
+
+- **dista 0.7.0:** morca builds on dista 0.7.0, which adds `rt.wait`, streamed results, worker groups and `dista.flow`; nothing in morca uses them yet. (#605)
+
 ## 0.46.0 - 2026-11-26
 
 - **Mojo 1.3.0.dev2026112605:** morca and every tin it uses move from 1.3.0.dev2026112505 to the first nightly with the stable `guard` statement; a project that builds its own morca needs the same nightly. (#600)
