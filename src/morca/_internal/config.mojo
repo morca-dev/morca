@@ -24,6 +24,10 @@ runs (#145), read by `morca register` and `morca aws register`.
     fill_budget_per_day = 5.0    # and the rest of the fill* keys
     enabled = false              # `morca register` skips it (a stack's overlay)
 
+    [pipelines.gharchive.groups.gpu]   # workers by group (morca.groups),
+    workers = "0..2"                   # recorded, not used yet
+    gpus = 1
+
     [stack]                      # for `morca aws up`; not read yet
 
 `morca config check [<file>] [--secrets]` checks a file without a database,
@@ -55,7 +59,9 @@ file back from what's registered.
 (and its types in `_canonical_toml`), which gives the value as text; it is
 then read, merged, overridden, recorded, shown and exported like the
 others, and only its consumer is new. The `fill*` keys (#155, `morca._internal.fill`)
-were added this way, with no flag.
+were added this way, with no flag. `groups` is a table of tables of its
+own (`morca._internal.groups`): `groups_problem` checks it, `resolve`
+reads it into `Resolved.groups`, and its canonical form is `groups_json`.
 """
 
 from std.base64 import b64decode
@@ -80,6 +86,13 @@ from morca._internal.fill import (
     parse_fill_window,
     parse_fills,
 )
+from morca._internal.groups import (
+    Group,
+    ec2_ignores_groups,
+    groups_json,
+    groups_problem,
+    read_groups,
+)
 from morca._internal.json import quote
 from morca._common.paths import absolute
 from morca._internal.proc import (
@@ -88,6 +101,7 @@ from morca._internal.proc import (
 from morca._internal.resources import (
     canonical_cpus,
     canonical_memory_gb,
+    parse_workers,
 )
 from morca._internal.secrets import (
     env_name_problem,
@@ -173,25 +187,6 @@ def parse_worker_procs(v: String) raises -> Int:
     except:
         pass
     raise Error("--worker-procs is a count from 1 to 256 or auto, not ", v)
-
-
-def parse_workers(v: String) raises -> Tuple[Int, Int]:
-    """`--workers`' value, `N` or `MIN..MAX`: the fewest (-1 for a fixed
-    count) and the most."""
-    try:
-        var dots = v.find("..").or_else(-1)
-        if dots >= 0:
-            var lo = Int(v[byte=:dots])
-            var hi = Int(v[byte = dots + 2 :])
-            if lo >= 0 and hi >= max(lo, 1):
-                return (lo, hi)
-        else:
-            var n = Int(v)
-            if n >= 1:
-                return (-1, n)
-    except:
-        pass
-    raise Error("not a count or a range MIN..MAX: ", v)
 
 
 comptime AUTO_MAX_RUNS = 64
@@ -684,6 +679,36 @@ struct ProjectConfig(Movable):
     def pipelines(self) -> List[String]:
         return self.doc.tables(["pipelines"])
 
+    def groups(self, pipeline: String) raises -> List[Group]:
+        """`pipeline`'s worker groups (`morca._internal.groups`), by name."""
+        return read_groups(self.doc, pipeline)
+
+    def group_warnings(self) raises -> List[String]:
+        """`file:line: [pipelines.<name>] ...` for each pipeline placed on
+        `ec2` that declares groups, which that placement ignores."""
+        var out = List[String]()
+        for p in self.pipelines():
+            var why = ec2_ignores_groups(p, self.placement(p), self.groups(p))
+            if why:
+                out.append(
+                    String(
+                        self._loc(["pipelines", p, "groups"]),
+                        ": [pipelines.",
+                        toml_key(p),
+                        "] ",
+                        why,
+                    )
+                )
+        return out^
+
+    def placement(self, pipeline: String) -> String:
+        """`pipeline`'s `placement` in the file: its own, else
+        `[defaults]`', else empty."""
+        var v = self.doc.get(["pipelines", pipeline, "placement"])
+        if not v:
+            v = self.doc.get(["defaults", "placement"])
+        return v.value().text if v else String()
+
     def where(self, pipeline: String, key: String, s: Setting) -> String:
         """`file:line: [table]` of `key`'s value `s` from this file, for
         a refusal that needs the pipeline (`fills` on a keyed one)."""
@@ -844,6 +869,12 @@ struct ProjectConfig(Movable):
                     _ = self.concurrency(p)
                 except e:
                     self._fail(p, table, String("concurrency ", e))
+            elif key == "groups":
+                # Workers by group (morca._internal.groups).
+                var why = groups_problem(self.doc, path)
+                if why:
+                    var w = why.value().copy()
+                    self._fail(w.path, table, w.msg)
             elif is_scalar_key(key):
                 if v.kind == TABLE:
                     self._fail(p, table, String(key, " is a table"))
@@ -869,7 +900,7 @@ struct ProjectConfig(Movable):
                 var known = String()
                 for k in materialize[SCALAR_KEYS]():
                     known.write(k, ", ")
-                known.write("concurrency, enabled, secrets and env")
+                known.write("concurrency, enabled, groups, secrets and env")
                 self._fail(
                     p,
                     table,
@@ -969,6 +1000,10 @@ struct Resolved(Movable):
     var values: Dict[String, Setting]
     var secrets: List[Tuple[String, Setting]]
     var env: List[Tuple[String, Setting]]
+    var groups: List[Group]
+    """Its worker groups (`morca._internal.groups`), from the file only."""
+    var group_settings: List[Tuple[String, Setting]]
+    """Each group's name and where it came from, its value `toml_text`."""
     var overrides: List[Tuple[String, String]]
     """The flags given over the file's values, key and value."""
 
@@ -978,6 +1013,8 @@ struct Resolved(Movable):
         self.values = Dict[String, Setting]()
         self.secrets = List[Tuple[String, Setting]]()
         self.env = List[Tuple[String, Setting]]()
+        self.groups = List[Group]()
+        self.group_settings = List[Tuple[String, Setting]]()
         self.overrides = List[Tuple[String, String]]()
 
     def text(self, key: String) -> String:
@@ -1001,6 +1038,10 @@ struct Resolved(Movable):
         """`env` as the JSON object Postgres keeps; empty for none."""
         return env_json(self.env_pairs())
 
+    def groups_json(self) -> String:
+        """`groups` as the JSON array Postgres keeps; empty for none."""
+        return groups_json(self.groups)
+
     def config_json(self, file: ProjectConfig) -> String:
         """`orca.pipelines.config`: where each value came from, and for a
         pipeline the file names, the file's hash, commit and the flags that
@@ -1019,6 +1060,12 @@ struct Resolved(Movable):
         for e in self.env:
             src.write(
                 "" if first else ", ", _source_json(String("env.", e[0]), e[1])
+            )
+            first = False
+        for e in self.group_settings:
+            src.write(
+                "" if first else ", ",
+                _source_json(String("groups.", e[0]), e[1]),
             )
             first = False
         src.write("}")
@@ -1132,6 +1179,20 @@ def resolve(
                         _set(r.secrets, kv[0], st^)
                     else:
                         _set(r.env, kv[0], st^)
+        # Groups are a pipeline's own (`groups_problem` refuses them in
+        # [defaults]), and no flag sets them.
+        r.groups = file.groups(name)
+        for g in r.groups:
+            r.group_settings.append(
+                (
+                    g.name,
+                    file.setting(
+                        g.toml_text(),
+                        ["pipelines", name, "groups", g.name],
+                        labels[1],
+                    ),
+                )
+            )
     for e in flags.values.items():
         if r.in_file:
             r.overrides.append((e.key, e.value))

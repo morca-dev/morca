@@ -43,6 +43,7 @@ hostname = "orca.mlake.dev"
 |---|---|
 | `[defaults]` | Values for every pipeline the file names. It doesn't apply to pipelines the file leaves out. |
 | `[pipelines.<name>]` | One pipeline's own values, by the name its `describe` gives. An empty table is allowed: the pipeline is then "in the file" and gets `[defaults]`. |
+| `[pipelines.<name>.groups.<group>]` | One group of the pipeline's workers, with its own size and GPUs. Recorded, not used yet: [Worker groups](#worker-groups). |
 | `[pools.<name>]` | A pool of workers: one morca grows and shrinks itself, or, without a `provider`, machines that join by hand. [Worker pools](#worker-pools). |
 | `[apps.<name>]` | An app beside the UI and what it gets: [Apps](#apps). |
 | `[datasets."<name>"]` | A dataset's settings: whether visitors see its data. [Datasets](#datasets). |
@@ -96,12 +97,13 @@ Each key can go in `[defaults]` or in `[pipelines.<name>]`.
 - `fills = "all"` for a keyed pipeline, a sensor, or one with no first partition. `morca register` refuses it with the file and line, because it has to see the pipeline first; see [Fills](#fills).
 - An `env` name that isn't a valid variable name.
 - An `env` name that looks like a secret (`*TOKEN*`, `*SECRET*`, `*PASSWORD*`, `*DATABASE_URL*`). Put those in `secrets` instead.
-- An `env` variable that morca sets itself: `MORCA_DATABASE_URL`, `MORCA_IMAGE`, `MORCA_SECRETS`, `MORCA_WORKERS`, `DISTA_ROLE`, `DISTA_HEAD`, `DISTA_ADVERTISE`, `MORCA_GRANT_CPUS`, `MORCA_GRANT_MEMORY_MB`, `MORCA_MEMORY_PRESSURE_FILE`.
+- An `env` variable that morca sets itself: `MORCA_DATABASE_URL`, `MORCA_IMAGE`, `MORCA_SECRETS`, `MORCA_WORKERS`, `DISTA_ROLE`, `DISTA_HEAD`, `DISTA_ADVERTISE`, `DISTA_TOKEN`, `DISTA_PORT`, `DISTA_GROUP`, `MORCA_GRANT_CPUS`, `MORCA_GRANT_MEMORY_MB`, `MORCA_MEMORY_PRESSURE_FILE`. `DISTA_WORKER_SLOTS` isn't one of them: a pipeline sets it (["auto" from the grant](#auto-from-the-grant)).
+- A [worker group](#worker-groups) without `workers`, with a key it doesn't have, with a name that isn't lowercase letters, digits, `-` and `_` starting with a letter (at most 32), or in `[defaults]`.
 
 Each refusal names the file and line, and nothing is registered:
 
 ```text
-morca.toml:7: [pipelines.gharchive] has no key workrs (it has placement, head_type, worker_type, workers, worker_procs, max_runs, keys_per_run, cpus, memory_gb, learn, fills, fill_order, fill_max_runs, fill_budget_per_day, fill_window, fill_lag, priority, concurrency, enabled, secrets and env)
+morca.toml:7: [pipelines.gharchive] has no key workrs (it has placement, head_type, worker_type, workers, worker_procs, max_runs, keys_per_run, cpus, memory_gb, learn, fills, fill_order, fill_max_runs, fill_budget_per_day, fill_window, fill_lag, priority, concurrency, enabled, groups, secrets and env)
 morca.toml:3: [pipelines.toy] workers: not a count or a range MIN..MAX: 4..2
 ```
 
@@ -318,6 +320,39 @@ env = { DISTA_WORKER_SLOTS = "auto", GHARCHIVE_PARALLEL = "auto" }
   memory peak, so offload never makes a learned request smaller. Offload
   needs swap on the host: without any, the setting does nothing, and the
   scheduler says so on its log (`morca: runs' swap: ...`).
+
+### Worker groups
+
+A pipeline may split its workers into named groups, each with its own size
+and GPUs ([groups.md](groups.md)). Groups are recorded, shown and exported,
+but nothing uses them yet: no worker is started with a group, and a run
+asks for its workers as before.
+
+```toml
+[pipelines.embed]
+workers = "1..4"           # the workers with no group, as before
+cpus = 4
+
+[pipelines.embed.groups.gpu]
+workers = "0..2"
+gpus = 1
+memory_gb = 16
+```
+
+| Key | Type | Default when absent | Notes |
+|---|---|---|---|
+| `workers` | integer `N` (at least 1), or string `"MIN..MAX"` | none: required | The group's workers, as the pipeline's `workers`. |
+| `gpus` | integer from 0 to 64 | 0 | Whole GPUs per worker. |
+| `cpus` | as the pipeline's `cpus` | the pipeline's `cpus` | CPUs per worker. |
+| `memory_gb` | as the pipeline's `memory_gb` | the pipeline's `memory_gb` | GB per worker. |
+
+A group's name is lowercase letters, digits, `-` and `_`, starting with a
+letter, at most 32 bytes. Groups are a pipeline's own: `[defaults]` can't
+have them, and no flag sets them. They are stored in
+`orca.pipelines.groups` (migration 70), and `morca config show` lists each
+as `groups.<group>`. The `ec2` placement ignores groups, and `morca
+register` and `morca config check` warn when a pipeline placed on it
+declares some.
 
 ### On Kubernetes
 

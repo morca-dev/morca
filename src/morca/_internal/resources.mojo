@@ -114,6 +114,25 @@ def parse_cpus(v: String) raises -> Tuple[Int, Int]:
     return (lo, hi)
 
 
+def parse_workers(v: String) raises -> Tuple[Int, Int]:
+    """`--workers`' value, `N` or `MIN..MAX`: the fewest (-1 for a fixed
+    count) and the most."""
+    try:
+        var dots = v.find("..").or_else(-1)
+        if dots >= 0:
+            var lo = Int(v[byte=:dots])
+            var hi = Int(v[byte = dots + 2 :])
+            if lo >= 0 and hi >= max(lo, 1):
+                return (lo, hi)
+        else:
+            var n = Int(v)
+            if n >= 1:
+                return (-1, n)
+    except:
+        pass
+    raise Error("not a count or a range MIN..MAX: ", v)
+
+
 def _mb_of_gb(gb: Float64) -> Int:
     return Int(gb * 1024.0 + 0.5)
 

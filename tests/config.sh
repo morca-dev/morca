@@ -23,6 +23,7 @@
 # - the pipeline page shows the registration and its overrides (and its
 #   JSON, `config`), and a run's settings link to it;
 # - `morca config export` writes back a file that registers to the same thing;
+# - worker groups are registered, shown and exported, with a warning on ec2;
 # - `morca aws register` sends the file with its commit (tests/aws.sh has the
 #   stand-ins; here only that the flags read back).
 #
@@ -321,6 +322,47 @@ cp ws.bak morca.toml
 "$morca" register "$root/build/toy" >> "$log" 2>&1 || fail "register without learn"
 [ "$(learnrow)" = "- - -" ] || fail "learn = working_set stayed: $(learnrow)"
 echo "ok   learn = \"working_set\" and probe_every are registered, shown and exported"
+
+# Worker groups (docs/groups.md, morca.groups): registered as one jsonb
+# column, shown, exported, and warned about on the ec2 placement, which
+# ignores them; taken out of the file, null again. Nothing runs with them.
+cp morca.toml groups.bak
+cat >> morca.toml << 'EOF'
+
+[pipelines.toy.groups.gpu]
+workers = "0..2"
+gpus = 1
+memory_gb = 16
+
+[pipelines.toy.groups.decode]
+workers = 2
+EOF
+"$morca" register "$root/build/toy" >> "$log" 2> groups.err || fail "register groups: $(cat groups.err)"
+if grep -q "ignores groups" groups.err; then fail "a warning off ec2: $(cat groups.err)"; fi
+grouprow() { q "SELECT coalesce((SELECT string_agg(concat_ws(':', g->>'name', g->>'workers', g->>'gpus', coalesce(g->>'memory_gb', '-')), ' ' ORDER BY n) FROM jsonb_array_elements(groups) WITH ORDINALITY AS x(g, n)), '-') FROM orca.pipelines WHERE name = 'toy'"; }
+[ "$(grouprow)" = "decode:2:0:- gpu:0..2:1:16" ] || fail "groups registered as: $(grouprow)"
+"$morca" config show toy > show.out 2>> "$log" || fail "config show groups"
+grep -Eq '^  groups\.gpu +\{ workers = "0\.\.2", gpus = 1, memory_gb = "16" \} +morca\.toml \[pipelines\.toy\]$' show.out \
+    || fail "show's groups: $(cat show.out)"
+grep -Eq '^  groups\.decode +\{ workers = 2 \} +morca\.toml' show.out || fail "show's decode group: $(cat show.out)"
+"$morca" config export --out - > groups-export.toml 2>> "$log" || fail "export groups"
+grep -q '^groups.gpu = { workers = "0..2", gpus = 1, memory_gb = "16" }$' groups-export.toml \
+    || fail "export's groups: $(cat groups-export.toml)"
+"$morca" register --config groups-export.toml "$root/build/toy" >> "$log" 2>&1 || fail "register the groups' export"
+[ "$(grouprow)" = "decode:2:0:- gpu:0..2:1:16" ] || fail "the export registered groups as: $(grouprow)"
+# On ec2 they're kept, with a warning, from register and from config check.
+"$morca" register --placement ec2 "$root/build/toy" >> "$log" 2> groups.err || fail "register groups on ec2"
+grep -q "toy declares groups (decode, gpu) but is placed on ec2: the ec2 placement ignores groups" groups.err \
+    || fail "no warning on ec2: $(cat groups.err)"
+[ "$(grouprow)" = "decode:2:0:- gpu:0..2:1:16" ] || fail "groups on ec2: $(grouprow)"
+printf '[pipelines.toy]\nplacement = "ec2"\n\n[pipelines.toy.groups.gpu]\nworkers = 1\n' > gec2.toml
+check gec2.toml > gec2.out 2>&1 || fail "config check of groups on ec2: $(cat gec2.out)"
+grep -q "gec2.toml:4: \[pipelines.toy\] toy declares groups (gpu) but is placed on ec2" gec2.out \
+    || fail "config check's warning: $(cat gec2.out)"
+cp groups.bak morca.toml
+"$morca" register "$root/build/toy" >> "$log" 2>&1 || fail "register without groups"
+[ "$(q "SELECT groups IS NULL FROM orca.pipelines WHERE name = 'toy'")" = t ] || fail "groups stayed: $(grouprow)"
+echo "ok   groups are registered, shown and exported, with a warning on ec2"
 
 # morca aws register sends the file and its commit to the control instance's
 # morca register, which reads it back.

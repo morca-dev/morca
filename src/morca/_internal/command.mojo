@@ -1273,6 +1273,9 @@ def _config_check(
                     sep="",
                     file=stderr,
                 )
+    # Worker groups a placement ignores (morca._internal.groups).
+    for w in file.group_warnings():
+        print("morca: warning: ", w, sep="", file=stderr)
     var secrets = file.entries("secrets")
     if read_secrets:
         for e in secrets:

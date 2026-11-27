@@ -17,7 +17,6 @@ from morca._internal.config import (
     parse_priority,
     parse_probe_every,
     parse_worker_procs,
-    parse_workers,
     resolve,
 )
 from morca._internal.fill import (
@@ -27,10 +26,12 @@ from morca._internal.fill import (
     parse_fill_max_runs,
 )
 from morca._common.paths import absolute
+from morca._internal.groups import ec2_ignores_groups
 from morca._internal.proc import (
     binary_seconds,
     capture,
 )
+from morca._internal.resources import parse_workers
 from morca._internal.secrets import secrets_json
 from morca._internal.version import (
     MISMATCH_HINT,
@@ -205,6 +206,7 @@ def register_pipeline(
             fill_auto,
             priority,
             probe_every,
+            r.groups_json(),
         ),
     )
     var name = res[0]
@@ -258,6 +260,9 @@ def register_pipeline(
         var twice = repeated_fill(q, now)
         if twice:
             print("morca: warning:", twice)
+        var ignored = ec2_ignores_groups(q.name, q.placement, q.groups)
+        if ignored:
+            print("morca: warning:", ignored, file=stderr)
         if q.fill.all and q.fill.budget < 0:
             print(
                 "morca: warning:",

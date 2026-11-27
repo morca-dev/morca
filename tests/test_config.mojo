@@ -11,9 +11,9 @@ from morca._internal.config import (
     ProjectConfig,
     RegisterFlags,
     canonical_flag,
-    parse_workers,
     resolve,
 )
+from morca._internal.resources import parse_workers
 from morca._internal.apps_config import apps_text
 from morca._internal.apps_kube import apps_kube
 from morca._internal.dataset_config import read_datasets
