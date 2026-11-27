@@ -1,0 +1,1 @@
+- **Worker groups in morca.toml**: a pipeline may declare `[pipelines.<name>.groups.<group>]` with `workers`, `gpus`, `cpus` and `memory_gb`, which `register` checks, records and `morca config show` lists, but nothing uses yet; `env` can no longer set `DISTA_TOKEN`, `DISTA_PORT` or `DISTA_GROUP`, and migration 70 is additive. (#606)
