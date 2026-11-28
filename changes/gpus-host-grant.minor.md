@@ -1,1 +1,0 @@
-- **GPUs on hosts and in grants**: `morca worker` counts its host's GPUs at start (`MORCA_HOST_GPUS`, else `nvidia-smi`) and reports them, which the host's page shows; on a host with GPUs a run granted none gets `MORCA_GRANT_GPUS` and `CUDA_VISIBLE_DEVICES` empty, `env` can no longer set either, and migration 71 is additive. (#PR)
