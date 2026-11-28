@@ -25,6 +25,9 @@ from morca._internal.groups import (
     Group,
     ec2_ignores_groups,
     group_name_problem,
+    local_gpus,
+    local_groups,
+    placement_warnings,
     groups_json,
     parse_groups,
 )
@@ -290,8 +293,44 @@ def test_ec2_ignores_groups() raises:
     assert_equal(ec2_ignores_groups("b", "control", f.groups("b")), "")
 
 
+def test_control_ignores_a_groups_sizes() raises:
+    """On the control host a run is granted as one: its groups' cpus and
+    memory_gb are said to be ignored, their workers and GPUs aren't."""
+    var sized: List[Group] = [
+        Group("gpu", 1, 1, 1, "", "16"),
+        Group("io", 2, 2, 0, "", ""),
+    ]
+    var w = placement_warnings("p", "control", sized)
+    assert_equal(len(w), 1)
+    assert_true("ignores the cpus and memory_gb of its groups (gpu)" in w[0])
+    assert_equal(len(placement_warnings("p", "", sized)), 0)
+    assert_equal(len(placement_warnings("p", "worker:batch", sized)), 0)
+    var e = placement_warnings("p", "ec2", sized)
+    assert_equal(len(e), 1)
+    assert_true("place it on a pool" in e[0])
+
+
+def test_local_groups() raises:
+    """What a run that forks its workers is told to fork, and the GPUs it
+    asks for: each group's MAX."""
+    assert_equal(local_groups(List[Group]()), "")
+    assert_equal(local_gpus(List[Group]()), 0)
+    var g: List[Group] = [
+        Group("io", 1, 1, 0, "", ""),
+        Group("gpu", 0, 2, 1, "4", "16"),
+    ]
+    assert_equal(local_groups(g), "gpu=2,io=1")
+    assert_equal(local_gpus(g), 2)
+
+
 def test_dista_names_are_reserved() raises:
-    for n in ["DISTA_TOKEN", "DISTA_PORT", "DISTA_GROUP", "DISTA_ROLE"]:
+    for n in [
+        "DISTA_TOKEN",
+        "DISTA_PORT",
+        "DISTA_GROUP",
+        "DISTA_ROLE",
+        "MORCA_GROUPS",
+    ]:
         assert_true("is set by morca itself" in env_name_problem(String(n)))
     # A pipeline sets this one (docs/morca-toml.md, "auto" from the grant).
     assert_equal(env_name_problem("DISTA_WORKER_SLOTS"), "")

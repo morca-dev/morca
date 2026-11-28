@@ -1,0 +1,1 @@
+- **Worker groups off pools**: the local runner, `control` and Kubernetes start each group's MAX of workers (GPUs from the scheduler's host, or `nvidia.com/gpu` on Kubernetes), every provider builds its dista environment through one contract, and `ec2` warns that it ignores groups. (#613)

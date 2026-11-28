@@ -4,7 +4,9 @@ settings, with the S3 keys from the stack's Secret, never as values; and
 their sizes, from the pipeline's request, with limits, and what a pod killed
 for its memory says (morca._internal.kube_size); where they go, pull secrets,
 node selectors, tolerations, anti-affinity and a priority class
-(morca._internal.kube_place), and why a pod can't start.
+(morca._internal.kube_place), and why a pod can't start; and the head's
+and workers' own variables, a worker group's pods, their GPUs and what they
+ask for in all (docs/groups.md, morca._internal.provider).
 tests/kind.sh runs it on a cluster.
 """
 
@@ -17,9 +19,12 @@ from morca._internal.kube import pod_env, s3_key_env, secret_env, secret_name
 from morca._internal.kube_size import (
     EVICTED,
     OOM_KILLED,
+    GroupPods,
     KubeDefaults,
     Killed,
     PodSize,
+    pod_slugs,
+    with_groups,
     killed_text,
     kube_sizes,
     next_memory_mb,
@@ -30,6 +35,14 @@ from morca._internal.kube_size import (
 )
 from morca._internal.kube_place import KubePlacement, Toleration
 from morca._internal.logs import mask_values
+from morca._internal.provider import (
+    KUBERNETES,
+    ClusterProcess,
+    cluster_env,
+    driver_env,
+    json_entries,
+    pod_devices,
+)
 from morca._internal.resources import Request
 
 
@@ -477,6 +490,101 @@ def test_pod_stuck() raises:
     )
     assert_true(t.endswith("..."), t)
     assert_true(t.byte_length() < 400, t)
+
+
+def test_cluster_pods_env_is_as_before() raises:
+    """The kubernetes provider gives the head and the workers with no group
+    what they had before it named the contract."""
+    assert_equal(
+        json_entries(cluster_env(KUBERNETES, ClusterProcess.head_at(6390))),
+        (
+            '{"name": "DISTA_ROLE", "value": "head"}, {"name":'
+            ' "DISTA_PORT", "value": "6390"}'
+        ),
+    )
+    assert_equal(
+        json_entries(
+            cluster_env(
+                KUBERNETES, ClusterProcess.worker_of("morca-1-1-head:6390")
+            )
+        ),
+        (
+            '{"name": "DISTA_ROLE", "value": "worker"}, {"name":'
+            ' "DISTA_HEAD", "value": "morca-1-1-head:6390"}, {"name":'
+            ' "DISTA_ADVERTISE", "valueFrom": {"fieldRef": {"fieldPath":'
+            ' "status.podIP"}}}'
+        ),
+    )
+    var d = driver_env(KUBERNETES, "morca-1-1-head:6390")
+    assert_equal(len(d), 1)
+    assert_equal(d[0].text(), "DISTA_HEAD=morca-1-1-head:6390")
+    assert_equal(len(driver_env(KUBERNETES, "")), 0)
+
+
+def test_a_group_pods_env() raises:
+    """A group's worker gets DISTA_GROUP and the GPUs it sees, from 0."""
+    var p = ClusterProcess.worker_of("h:6390", group="gpu")
+    p.gpus = True
+    p.devices = pod_devices(2)
+    var env = loads(String("[", json_entries(cluster_env(KUBERNETES, p)), "]"))
+    var got = Dict[String, String]()
+    for e in env.array_items():
+        var v = e.get("value")
+        got[
+            e["name"].string_value()
+        ] = v.value().string_value() if v else String("<field>")
+    assert_equal(got["DISTA_GROUP"], "gpu")
+    assert_equal(got["MORCA_GRANT_GPUS"], "0,1")
+    assert_equal(got["CUDA_VISIBLE_DEVICES"], "0,1")
+    assert_equal(got["DISTA_ADVERTISE"], "<field>")
+    assert_false("DISTA_TOKEN" in got)
+    # A group without GPUs sees none.
+    p.devices = pod_devices(0)
+    var none = loads(String("[", json_entries(cluster_env(KUBERNETES, p)), "]"))
+    for e in none.array_items():
+        if e["name"].string_value() == "CUDA_VISIBLE_DEVICES":
+            assert_equal(e["value"].string_value(), "")
+
+
+def test_a_groups_gpus_are_limits() raises:
+    var s = PodSize(1000, 2000, 1024, 2048)
+    var gpu = loads(s.resources(1)).at("/limits").get("nvidia.com/gpu")
+    assert_true(Bool(gpu))
+    assert_equal(gpu.value().string_value(), "1")
+    assert_false(Bool(loads(s.resources()).at("/limits").get("nvidia.com/gpu")))
+    assert_equal(s.resources(), s.resources(0))
+
+
+def test_group_pods_are_counted_with_the_run() raises:
+    var d = KubeDefaults(500, 250, 1000, 2000, 512)
+    var sizes = kube_sizes(Request(0, 0, 0, 0), 0, 0, d)
+    var g: List[GroupPods] = [
+        GroupPods("gpu", 2, 1, PodSize(4000, 4000, 16384, 16384)),
+        GroupPods("io", 0, 0, PodSize(1000, 2000, 512, 512)),
+    ]
+    var plain = with_groups(sizes, 2, List[GroupPods]())
+    assert_equal(plain.cpu_millis, sizes.requests(2).cpu_millis)
+    var both = with_groups(sizes, 2, g)
+    assert_equal(both.cpu_millis, sizes.requests(2).cpu_millis + 8000)
+    assert_equal(both.memory_mb, sizes.requests(2).memory_mb + 32768)
+    # Only groups have workers: the head is counted too.
+    var only = with_groups(sizes, 0, g)
+    assert_equal(only.cpu_millis, 500 + 250 + 8000)
+    # No worker at all: the driver alone, as before.
+    assert_equal(with_groups(sizes, 0, List[GroupPods]()).cpu_millis, 500)
+
+
+def test_group_pod_names() raises:
+    var z = PodSize(0, 0, 0, 0)
+    var g: List[GroupPods] = [
+        GroupPods("a-b", 1, 0, z),
+        GroupPods("a_b", 1, 0, z),
+        GroupPods("gpu_big", 1, 0, z),
+    ]
+    var slugs = pod_slugs(g)
+    assert_equal(slugs[0], "a-b")
+    assert_equal(slugs[1], "g1")
+    assert_equal(slugs[2], "gpu-big")
 
 
 def main() raises:

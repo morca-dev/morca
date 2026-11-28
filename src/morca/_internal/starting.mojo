@@ -34,7 +34,9 @@ from morca._internal.key_wait import key_room, started
 from morca._internal.kube import (
     RunSpec,
 )
-from morca._internal.kube_size import KubeSizes
+from morca._internal.kube_size import GroupPods, KubeSizes, with_groups
+from morca._internal.groups import Group, local_gpus, local_groups
+from morca._internal.provider import LOCAL, local_env
 from morca._internal.logs import (
     is_remote,
     run_dir,
@@ -67,6 +69,8 @@ from morca._internal.scheduler import (
 from morca._internal.registered import (
     Registered,
     _ec2_spec,
+    cluster_groups,
+    kube_groups_of,
     fill_pipeline,
     kube_sizes_of,
     recorded_cpus,
@@ -229,11 +233,14 @@ def _start(
     var need = 0
     var pod_memory = 0
     var pod_sizes = KubeSizes.none()
+    var pod_groups = List[GroupPods]()
     if control:
         need = 0  # no instance: nothing of the budget
     elif self.runner:
         pod_sizes = kube_sizes_of(p, sized)
-        var asks = pod_sizes.requests(p.workers)
+        # Its groups' pods too (docs/groups.md, morca._internal.provider).
+        pod_groups = kube_groups_of(p, sized)
+        var asks = with_groups(pod_sizes, p.workers, pod_groups)
         need = asks.cpu_millis
         # Its pods' memory, to price it (morca._internal.kube_price).
         pod_memory = asks.memory_mb
@@ -277,6 +284,11 @@ def _start(
     # minimum fits what the running runs weren't granted, each with its
     # grant. A pipeline without one is started as ever.
     var request = sized.request
+    # A run that forks its groups' workers here holds their GPUs, each
+    # group's for each of its MAX workers (docs/groups.md).
+    var groups = cluster_groups(p)
+    if local:
+        request.gpus = local_gpus(groups)
     if request.memory_min_mb > 0:
         # At least what an out-of-memory kill raised it to.
         request.memory_min_mb = raised_request(
@@ -305,7 +317,8 @@ def _start(
         # Across pipelines: one start at a time weighs the grants.
         starting_db.xact_lock(tx, _HOST_LOCK)
         var g = starting_db.granted(tx, self.stale, self._dead("$1"))
-        var got = admit(request, self.room, g[0], g[1], free)
+        var room = self.gpu_room() if request.gpus > 0 else self.room
+        var got = admit(request, room, g[0], g[1], free)
         grants = got[0].copy()
         if len(grants) < free:
             # The ones that don't start say why; those that do, not.
@@ -392,6 +405,7 @@ def _start(
                     self.instance if local else 0,
                     sized.source,
                     sized.runs,
+                    grant.gpus,
                 )
             )
             if pod_memory > 0:
@@ -418,6 +432,7 @@ def _start(
                 "CPUs and",
                 grant.memory_mb,
                 "MB (0: not asked for)",
+                String("and ", grant.gpus, " GPUs") if grant.gpus else String(),
                 sized.text(),
                 String(
                     "(", sized.cap_text(), ")"
@@ -426,7 +441,9 @@ def _start(
         elif sized.source == DEFAULT:
             print("run", id, "of", p.name, "requests", sized.text())
         if control:
-            _start_control(self, p, Int(id), starts[i], new_code[i], grant)
+            _start_control(
+                self, p, Int(id), starts[i], new_code[i], grant, groups
+            )
             continue
         if self.runner:
             try:
@@ -447,6 +464,7 @@ def _start(
                         p.env.copy(),
                         secrets^,
                         pod_sizes,
+                        pod_groups.copy(),
                     )
                 )
                 print("started", p.name, "run", id, "on its cluster")
@@ -472,7 +490,18 @@ def _start(
         # Its own variables, from morca.toml, its grant
         # (morca.resources), and its secrets, read now and named in
         # MORCA_SECRETS for masking; the rest it inherits.
-        var env = grant_env(p.env, grant, pressure_env(self.psi))
+        try:
+            # Its GPUs, held until its process is reaped.
+            grant = self.take_gpus(grant)
+        except e:
+            print("morca: run", id, "of", p.name, "can't start:", e)
+            starting_db.fail_start(self.db.conn, id, String("can't start: ", e))
+            continue
+        # How many workers its process forks, by group, as the local
+        # provider gives it (morca._internal.provider).
+        var extra = local_env(LOCAL, 0, local_groups(groups))
+        extra.extend(pressure_env(self.psi))
+        var env = grant_env(p.env, grant, extra)
         try:
             var secrets = List[Tuple[String, String]]()
             for s in p.secrets:
@@ -481,6 +510,7 @@ def _start(
         except e:
             # Retried as a run whose process failed is.
             print("morca: run", id, "of", p.name, "can't start:", e)
+            self.gpus.give_back(grant.device_list())
             starting_db.fail_start(self.db.conn, id, String("can't start: ", e))
             continue
         var log = String()
@@ -513,13 +543,19 @@ def _start(
                 with open(stage, "a") as f:
                     f.write("--- start ", starts[i], "\n")
         var cg = self._contain(p, Int(id), starts[i], grant, False)
-        var pid = spawn(
-            argv,
-            stage,
-            env=env,
-            nice=self.cgroups.nice_for(cg.path),
-            cgroup=cg.path,
-        )
+        var pid: Int
+        try:
+            pid = spawn(
+                argv,
+                stage,
+                env=env,
+                nice=self.cgroups.nice_for(cg.path),
+                cgroup=cg.path,
+            )
+        except e:
+            self.gpus.give_back(grant.device_list())
+            raise e^
+        self.hold_gpus(pid, grant)
         if cg.path:
             if probed(Int(id), starts[i], _probe_every(p)):
                 self._probe.watch(pid, cg)
@@ -563,7 +599,8 @@ def _start_control(
     id: Int,
     start: Int,
     new_code: Bool,
-    grant: Grant = Grant.none(),
+    var grant: Grant = Grant.none(),
+    groups: List[Group] = List[Group](),
 ):
     """Starts start `start` of `p`'s run `id` on this host
     (`morca._internal.control`): its binary's `resume`, in a process group of its
@@ -573,12 +610,24 @@ def _start_control(
     run whose process failed is."""
     var c: _ControlProc
     var pid: Int
+    try:
+        # Its GPUs, held until its process is reaped.
+        grant = self.take_gpus(grant)
+    except e:
+        print("morca: run", id, "of", p.name, "can't start:", e)
+        try:
+            starting_db.fail_start(
+                self.db.conn, Int64(id), String("can't start: ", e)
+            )
+        except e2:
+            print("morca: can't record run", id, "failing:", e2)
+        return
     var cg = self._contain(p, id, start, grant, True)
     try:
         var secrets = List[Tuple[String, String]]()
         for s in p.secrets:
             secrets.append((s[0], fetch_secret(s[1])))
-        var extra = run_env(self.limits, p.image, secrets)
+        var extra = run_env(self.limits, p.image, secrets, local_groups(groups))
         extra.extend(pressure_env(self.psi))
         var env = grant_env(p.env, grant, extra)
         var location = String()
@@ -607,6 +656,7 @@ def _start_control(
         c = _ControlProc(id, p.binary, stage, location, start, env^, "")
     except e:
         print("morca: run", id, "of", p.name, "can't start:", e)
+        self.gpus.give_back(grant.device_list())
         if cg.path and not Cgroups.remove(cg.path):
             self._unswept.append(cg.path)
         try:
@@ -617,6 +667,7 @@ def _start_control(
             print("morca: can't record run", id, "failing:", e2)
         return
     self._spawned[pid] = (id, start, c.stage)
+    self.hold_gpus(pid, grant)
     self._meters[pid] = Meter()
     if cg.path:
         if probed(id, start, _probe_every(p)):

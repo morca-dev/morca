@@ -43,7 +43,7 @@ hostname = "orca.mlake.dev"
 |---|---|
 | `[defaults]` | Values for every pipeline the file names. It doesn't apply to pipelines the file leaves out. |
 | `[pipelines.<name>]` | One pipeline's own values, by the name its `describe` gives. An empty table is allowed: the pipeline is then "in the file" and gets `[defaults]`. |
-| `[pipelines.<name>.groups.<group>]` | One group of the pipeline's workers, with its own size and GPUs, used on pools: [Worker groups](#worker-groups). |
+| `[pipelines.<name>.groups.<group>]` | One group of the pipeline's workers, with its own size and GPUs, used on pools, the local runner, `control` and Kubernetes: [Worker groups](#worker-groups). |
 | `[pools.<name>]` | A pool of workers: one morca grows and shrinks itself, or, without a `provider`, machines that join by hand. [Worker pools](#worker-pools). |
 | `[apps.<name>]` | An app beside the UI and what it gets: [Apps](#apps). |
 | `[datasets."<name>"]` | A dataset's settings: whether visitors see its data. [Datasets](#datasets). |
@@ -97,7 +97,7 @@ Each key can go in `[defaults]` or in `[pipelines.<name>]`.
 - `fills = "all"` for a keyed pipeline, a sensor, or one with no first partition. `morca register` refuses it with the file and line, because it has to see the pipeline first; see [Fills](#fills).
 - An `env` name that isn't a valid variable name.
 - An `env` name that looks like a secret (`*TOKEN*`, `*SECRET*`, `*PASSWORD*`, `*DATABASE_URL*`). Put those in `secrets` instead.
-- An `env` variable that morca sets itself: `MORCA_DATABASE_URL`, `MORCA_IMAGE`, `MORCA_SECRETS`, `MORCA_WORKERS`, `DISTA_ROLE`, `DISTA_HEAD`, `DISTA_ADVERTISE`, `DISTA_TOKEN`, `DISTA_PORT`, `DISTA_GROUP`, `MORCA_GRANT_CPUS`, `MORCA_GRANT_MEMORY_MB`, `MORCA_GRANT_GPUS`, `CUDA_VISIBLE_DEVICES`, `MORCA_MEMORY_PRESSURE_FILE`. `DISTA_WORKER_SLOTS` isn't one of them: a pipeline sets it (["auto" from the grant](#auto-from-the-grant)).
+- An `env` variable that morca sets itself: `MORCA_DATABASE_URL`, `MORCA_IMAGE`, `MORCA_SECRETS`, `MORCA_WORKERS`, `MORCA_GROUPS`, `DISTA_ROLE`, `DISTA_HEAD`, `DISTA_ADVERTISE`, `DISTA_TOKEN`, `DISTA_PORT`, `DISTA_GROUP`, `MORCA_GRANT_CPUS`, `MORCA_GRANT_MEMORY_MB`, `MORCA_GRANT_GPUS`, `CUDA_VISIBLE_DEVICES`, `MORCA_MEMORY_PRESSURE_FILE`. `DISTA_WORKER_SLOTS` isn't one of them: a pipeline sets it (["auto" from the grant](#auto-from-the-grant)).
 - A [worker group](#worker-groups) without `workers`, with a key it doesn't have, with a name that isn't lowercase letters, digits, `-` and `_` starting with a letter (at most 32), or in `[defaults]`.
 
 Each refusal names the file and line, and nothing is registered:
@@ -329,8 +329,12 @@ env = { DISTA_WORKER_SLOTS = "auto", GHARCHIVE_PARALLEL = "auto" }
   which free devices and passes their indexes in `MORCA_GRANT_GPUS` and
   `CUDA_VISIBLE_DEVICES` (`0,2`). On a host with GPUs, a start granted
   none gets both variables empty, so it sees no GPU; on a host without,
-  neither is set. Only a [group](#worker-groups) asks for GPUs, so only a
-  member of a group on a pool is granted any.
+  neither is set. Only a [group](#worker-groups) asks for GPUs: on a pool
+  a member of the group is granted them, and on the local runner and the
+  control host the run is granted those of all its groups from the
+  scheduler's host, counted the same way the first time a run asks for
+  some (an older scheduler, and a run that asks for none, set neither
+  variable there, as before).
 
 ### Worker groups
 
@@ -338,11 +342,12 @@ A pipeline may split its workers into named groups, each with its own size
 and GPUs ([groups.md](groups.md)). Groups are recorded, shown and exported,
 and used on a pool: a run of a pipeline placed `worker:<pool>` that
 declares groups spreads over the pool's workers as a cluster, and gets
-members of each group ([workers.md](workers.md#members-by-group)). A dista
-task names its group (`Task[..., group="gpu"]`) and runs only on a member
-of that group; a task that names none runs on the workers with no group.
-Every other placement ignores groups for now (local runs, `control`,
-Kubernetes and `ec2`).
+members of each group ([workers.md](workers.md#members-by-group)). The
+local runner, `control` and Kubernetes start each group's workers too, a
+fixed count of them ([Groups off a pool](#groups-off-a-pool)). A dista task
+names its group (`Task[..., group="gpu"]`) and runs only on a worker of
+that group; a task that names none runs on the workers with no group. The
+`ec2` placement ignores groups.
 
 ```toml
 [pipelines.embed]
@@ -366,9 +371,11 @@ A group's name is lowercase letters, digits, `-` and `_`, starting with a
 letter, at most 32 bytes. Groups are a pipeline's own: `[defaults]` can't
 have them, and no flag sets them. They are stored in
 `orca.pipelines.groups` (migration 70), and `morca config show` lists each
-as `groups.<group>`. The `ec2` placement ignores groups, and `morca
-register` and `morca config check` warn when a pipeline placed on it
-declares some.
+as `groups.<group>`. `morca register` and `morca config check` warn when
+a pipeline placed on `ec2` declares groups, which that placement ignores
+(its tasks of a group fail there: place it on a pool instead), and when a
+pipeline placed on `control` gives a group `cpus` or `memory_gb`, which
+the control host ignores.
 
 On a pool, each group's members are its own:
 
@@ -398,6 +405,34 @@ On a pool, each group's members are its own:
   groups is given only to a worker started with `--advertise`, since only
   such a worker starts a run as a cluster; one without stays queued, held
   saying so.
+
+#### Groups off a pool
+
+The local runner, the control host and Kubernetes start each group's
+workers beside the workers with no group, from the run's start to its end.
+None of them scales: each group gets its MAX (a count is its own), the
+MIN of a range is used only where demand is reported, on a pool.
+
+- **Local runner and `control`.** The run's process forks its dista
+  workers itself: as before, `MORCA_WORKERS` with no group (control's
+  `MORCA_CONTROL_WORKERS`), and now also each group's MAX, which it reads
+  from `MORCA_GROUPS` (`gpu=2,io=1`). The run is admitted and granted as
+  one: its groups' `gpus` for each of their MAX workers are part of its
+  request, held from the scheduler's host's GPUs (`MORCA_HOST_GPUS`, else
+  `nvidia-smi -L`) and given to the run's process in `MORCA_GRANT_GPUS`
+  and `CUDA_VISIBLE_DEVICES`, which all its workers see. A run that asks
+  for more GPUs than the host has waits, saying so ("waiting: needs 2
+  GPUs, more than the 1 this host grants at most"). A group's `cpus` and
+  `memory_gb` aren't used: the workers share the run's grant.
+- **Kubernetes.** Each worker of a group is a pod of its own,
+  `morca-<run>-<start>-worker-<group>-<i>` (an `_` in the name becomes
+  `-`), labelled `orca.group`, with `DISTA_GROUP=<group>`. It is sized as
+  the pipeline's workers are ([On Kubernetes](#on-kubernetes)) from the
+  group's `cpus` and `memory_gb`, the pipeline's where it sets none, and a
+  group's `gpus` are in its limits as `nvidia.com/gpu`, which a cluster
+  with NVIDIA's device plugin schedules; inside the pod they are numbered
+  from 0 in `MORCA_GRANT_GPUS` and `CUDA_VISIBLE_DEVICES`. The groups'
+  pods count towards the run's `cpu_millis` and the vCPU budget.
 
 ### On Kubernetes
 

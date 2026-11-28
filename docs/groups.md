@@ -1,18 +1,19 @@
 # Worker groups and GPUs on pools: a plan
 
-November 27, 2026 · a plan for step 4 of [layers.md](layers.md); PRs 1
-to 4b are built
+November 27, 2026 · a plan for step 4 of [layers.md](layers.md); all its
+PRs, 1 to 5, are built (November 28)
 
 dista now routes a task or an actor to the workers of a named group, reports
-demand per group and runs flows (dista #152 to #167). morca can't use any of
-it yet: a run asks for a count of workers, a host reports CPUs and memory
-only, and no worker is started with a group. This plan closes that for
+demand per group and runs flows (dista #152 to #167). Before this plan morca
+used none of it: a run asked for a count of workers, a host reported CPUs
+and memory only, and no worker was started with a group. This plan closes that for
 pools, which [layers.md](layers.md) makes the one model, and then for the
-other ways a run gets workers.
+other ways a run gets workers. Its PRs are built, so it now describes what
+exists.
 
-## What exists, and what is missing
+## What existed, and what was missing
 
-| Part | Today | Missing |
+| Part | Before | Added |
 |---|---|---|
 | Request | `workers`, `cpus`, `memory_gb` per pipeline (`Registered`, `Request`) | Workers per group, each group with its own size and GPUs |
 | Host facts | CPUs and memory, less a reserve (`host_room`), sent with each claim | GPUs |
@@ -139,26 +140,41 @@ memory_gb = 16
 ## One contract for every provider
 
 "Give run R a worker of group G, of this size, from this image, joined to
-this head with this token", and "take it back". After the PRs above the
-pool path is that contract, in `MemberSpec` and the stop list. The last PR
-names it and moves the other providers behind it:
+this head with this token", and "take it back". The pool path was that
+contract after the PRs above, in `MemberSpec` and the stop list. PR 5
+named it (`morca._internal.provider`) and moved the other providers behind
+it:
 
 | Provider | Give | Take back |
 |---|---|---|
 | Pool host (`morca worker`) | `join_claim` to `MemberSpec` | Drain, then kill |
-| Local and `control` | Fork with `Runtime(groups=...)`, sized from the run's grant | The run's end |
-| Kubernetes | A worker Pod per member, sized from the group, with `DISTA_GROUP` and `nvidia.com/gpu` | Delete the Pod after a drain |
+| Local and `control` | The run's process forks each group's workers (`Runtime(groups=...)`, from `MORCA_GROUPS`), all sharing the run's grant | The run's end |
+| Kubernetes | A worker Pod per worker, sized from the group, with `DISTA_GROUP` and `nvidia.com/gpu` | The run's end |
 
-- One function builds a dista worker's environment for all three.
-- Kubernetes and local get groups but no scaling in this plan: they start
-  each group at its MAX and MIN respectively. Scaling there follows if the
+- One function builds a dista process's environment for all of them,
+  selected by the provider's name (`cluster_env`, `driver_env`,
+  `local_env`, `gpu_env`): the `DISTA_*` names, the slots, and the GPUs.
+- Kubernetes, local and `control` get groups but no scaling: each starts
+  every group at its MAX, for the run's life. (This plan first said local
+  would start each group's MIN, which with no demand to grow it would
+  leave a group of `0..N` with no worker.) Scaling there follows if the
   gate needs it.
+- On local and `control` the run is admitted as one: its groups' GPUs, a
+  group's `gpus` for each of its MAX workers, are part of its request and
+  come from the scheduler's host, counted as a worker counts its own
+  (`MORCA_HOST_GPUS`, else `nvidia-smi`). Every forked worker sees all of
+  the run's GPUs, since dista forks them with one environment; dista's
+  groups keep the model's tasks on the group's workers. A group's `cpus`
+  and `memory_gb` aren't used there.
 - The `ec2` placement gets none of this. It is to be retired
-  ([layers.md](layers.md)), and `register` warns when a pipeline placed on
-  it declares groups.
-- `register` and `config check` warn about group keys a placement ignores.
-  The full table of keys per placement is
-  [#369](https://github.com/morca-dev/morca/issues/369), not this plan.
+  ([layers.md](layers.md)), and `register` and `config check` warn when a
+  pipeline placed on it declares groups.
+- `register` and `config check` also warn about a group's `cpus` and
+  `memory_gb` on `control`, which ignores them. A pipeline on the default
+  placement isn't warned: which runner that is is the scheduler's
+  `MORCA_RUNNER`, which neither command knows. The full table of keys per
+  placement is [#369](https://github.com/morca-dev/morca/issues/369), not
+  this plan.
 
 ## Not in this plan
 
@@ -179,7 +195,7 @@ names it and moves the other providers behind it:
 | 3 | Members by group on pools: `run_members`, `join_claim`, `DISTA_GROUP` (done) | `test-run-cluster` with a GPU group on a mixed pair of hosts: the group's task runs only there |
 | 4a | Demand per group: the head's status with the claim, `decide` per group, the wanted counts in `join_claim` and the pool's demand; MIN honoured; a host with GPUs leaves a run whose groups ask for GPUs to start on one without (done) | `test-run-cluster` with a group of `0..1` that grows from 0 once the head reports its tasks; unit tests of the decision |
 | 4b | Draining a member when `decide` says a group has too many, and `gpu_machines` in a growing pool; a bound on a host with GPUs deferring (done) | `test-pool-scale` with a mixed pool whose GPU machine grows for a group from 0, is drained when idle and removed while the run goes on; `test-run-cluster` with a member drained mid-run, and a deferral that ends |
-| 5 | The contract by name: one environment builder, groups on local, `control` and Kubernetes, warnings for the `ec2` placement | `test-kube`, and a local run with two groups |
+| 5 | The contract by name: one environment builder, groups on local, `control` and Kubernetes, warnings for the `ec2` placement (done) | `test-kube`, and `test-grants` with a local and a control-placed run with two groups |
 
 Each PR leaves a pipeline without groups behaving as it does today, except
 for the MIN fix in PR 4a.

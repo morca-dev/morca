@@ -126,6 +126,10 @@ def test_run_env() raises:
     assert_equal(e[2], "GITHUB_TOKEN=tok")
     assert_equal(e[3], "API_KEY=key")
     assert_equal(e[4], "MORCA_SECRETS=GITHUB_TOKEN,API_KEY")
+    # Its groups' workers, forked beside its own (docs/groups.md).
+    var g = run_env(l, "", List[Tuple[String, String]](), "gpu=1")
+    assert_equal(len(g), 2)
+    assert_equal(g[1], "MORCA_GROUPS=gpu=1")
 
 
 def test_stage() raises:

@@ -10,11 +10,23 @@ each with its own size and GPUs, from morca.toml.
 A group's name is lowercase letters, digits, `-` and `_`, starting with a
 letter, at most 32 bytes. `register` keeps the groups in
 `orca.pipelines.groups` (`groups_json`, by name, so the file's order
-doesn't matter), and `morca config show` and `export` show them. On a
-pool, a run's members are started by group (`morca._internal.member_wants`,
-`morca._internal.run_cluster`); the other placements ignore groups for
-now, and `register` warns of the `ec2` placement's
-(`ec2_ignores_groups`).
+doesn't matter), and `morca config show` and `export` show them. Each
+provider (`morca._internal.provider`) starts a run's workers by group:
+
+- On a pool, a run's members (`morca._internal.member_wants`,
+  `morca._internal.run_cluster`), each group's MIN growing to its MAX with
+  its head's demand.
+- On the local runner and the control host, the run's process forks each
+  group's MAX (`local_groups`), beside its workers with no group. The run
+  is admitted and granted as one, with the GPUs of all its groups
+  (`local_gpus`); a group's `cpus` and `memory_gb` aren't used there.
+- On Kubernetes, a worker Pod per worker of each group's MAX, sized from
+  the group, with `nvidia.com/gpu` for its GPUs
+  (`morca._internal.kube_size.GroupPods`).
+
+None of the last two scale. The `ec2` placement ignores groups, and
+`register` and `config check` warn of it, and of a group's sizes on the
+control host (`placement_warnings`).
 """
 
 from json import loads
@@ -341,6 +353,52 @@ def parse_groups(text: String) raises -> List[Group]:
     return out^
 
 
+def local_groups(groups: List[Group]) -> String:
+    """`MORCA_GROUPS` for a run that forks its workers (morca.tasks): each
+    group and its MAX, `gpu=2,io=1`; empty for none."""
+    var text = String()
+    for g in by_name(groups.copy()):
+        text.write("," if text else "", g.name, "=", g.max_workers)
+    return text^
+
+
+def local_gpus(groups: List[Group]) -> Int:
+    """The GPUs a run that forks its workers asks for: each group's GPUs
+    for each of its MAX workers."""
+    var n = 0
+    for g in groups:
+        n += g.gpus * g.max_workers
+    return n
+
+
+def placement_warnings(
+    pipeline: String, placement: String, groups: List[Group]
+) -> List[String]:
+    """What a pipeline's groups are ignored for where it's placed: all of
+    them on `ec2`, a group's `cpus` and `memory_gb` on the control host,
+    which grants the run as one."""
+    var out = List[String]()
+    var ec2 = ec2_ignores_groups(pipeline, placement, groups)
+    if ec2:
+        out.append(ec2)
+    if placement == "control":
+        var sized = String()
+        for g in groups:
+            if g.cpus or g.memory_gb:
+                sized.write(", " if sized else "", g.name)
+        if sized:
+            out.append(
+                String(
+                    pipeline,
+                    " is placed on control, which ignores the cpus and",
+                    " memory_gb of its groups (",
+                    sized,
+                    "): its workers share the run's grant",
+                )
+            )
+    return out^
+
+
 def ec2_ignores_groups(
     pipeline: String, placement: String, groups: List[Group]
 ) -> String:
@@ -355,5 +413,7 @@ def ec2_ignores_groups(
         pipeline,
         " declares groups (",
         names,
-        ") but is placed on ec2: the ec2 placement ignores groups",
+        ") but is placed on ec2: the ec2 placement ignores groups, so",
+        " its tasks of those groups fail; place it on a pool",
+        " (worker:<pool>) instead",
     )

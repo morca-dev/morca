@@ -87,6 +87,7 @@ from morca._internal.member_drain import MemberDrains
 from morca._internal.run_cluster import MemberSpec, member_spec_of
 from morca._internal.tokens import new_token
 from morca._internal.worker_demand import DemandReports, head_status
+from morca._internal.provider import POOL, driver_env, texts
 from morca._internal.worker_cluster import (
     free_port,
     start_dista_worker,
@@ -405,8 +406,11 @@ struct Worker(Movable):
                     False,
                 )
             )
-            env.append(String("DISTA_HEAD=127.0.0.1:", port))
-            env.append(String("DISTA_TOKEN=", cluster_token))
+            env.extend(
+                texts(
+                    driver_env(POOL, String("127.0.0.1:", port), cluster_token)
+                )
+            )
             cluster_head = String(self.advertise, ":", port)
         var argv: List[String] = [spec.binary, "resume", String(spec.run)]
         if spec.allow_new_code:

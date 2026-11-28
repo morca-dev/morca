@@ -24,7 +24,13 @@
 #   is granted none, its process sees none (MORCA_GRANT_GPUS and
 #   CUDA_VISIBLE_DEVICES empty) and nothing else changes; on hosts without
 #   GPUs neither variable is set; a bad MORCA_HOST_GPUS stops the worker at
-#   start.
+#   start;
+# - worker groups on the local runner and the control host (docs/groups.md):
+#   gpufan (tests/run_cluster/gpufan.mojo) with groups gpu ("1..2", a GPU
+#   each) and io waits while the host has fewer GPUs than its groups' MAX
+#   ask for, then forks each group's MAX beside its workers with no group:
+#   its model tasks run only in group gpu, its plain ones only in no group,
+#   and every worker of the run sees the run's GPUs.
 #
 # Needs MORCA_DATABASE_URL (pixi run test-grants starts a throwaway server),
 # curl and jq.
@@ -32,7 +38,7 @@ set -eu
 cd "$(dirname "$0")/.."
 . "$PWD/tests/port.sh"
 mkdir -p build
-scripts/pipelines.sh wide narrow plain
+scripts/pipelines.sh wide narrow plain gpufan
 # shellcheck disable=SC2086
 scripts/mojo-build.sh -I src $DEP_INC bin/scheduler.mojo -o build/morca
 log=build/grants.log
@@ -322,6 +328,65 @@ q "UPDATE orca.pipelines SET fills = NULL WHERE name = 'narrow'" > /dev/null
 [ "$most" -eq 4 ] || fail "$most of narrow's 2 GB fill runs ran at once in 8 GB, not 4"
 ./build/morca register --config build/grants.toml ./build/narrow >> "$log" 2>&1 || fail "register narrow back"
 echo "ok   fill_max_runs = \"auto\" runs as many fill runs at once as fit (4 of 2 GB in 8 GB)"
+
+# Worker groups on the local runner and the control host (docs/groups.md).
+gf=$PWD/build/grants-gpufan
+cat > build/grants-gpufan.toml << 'EOF'
+[pipelines.gpufan]
+
+[pipelines.gpufan.groups.gpu]
+workers = "1..2"
+gpus = 1
+
+[pipelines.gpufan.groups.io]
+workers = 1
+EOF
+./build/morca register --config build/grants-gpufan.toml ./build/gpufan >> "$log" 2>&1 || fail "register gpufan"
+export GPUFAN_OUT="$gf" GPUFAN_SLEEP=0.2 MORCA_HOST_GPUS=1
+start_sched
+./build/morca backfill gpufan 2024-01 >> "$log" 2>&1 || fail "backfill gpufan"
+g1=$(q "SELECT max(id) FROM orca.runs")
+want="waiting: needs 2 GPUs, more than the 1 this host grants at most"
+until_ 20 "gpufan's run wasn't held for GPUs: $(q "SELECT status, held FROM orca.runs WHERE id = $g1")" \
+    is "SELECT status || ' ' || held FROM orca.runs WHERE id = $g1" "queued $want"
+stop_sched
+echo "ok   a run whose groups ask for more GPUs than the host has waits, saying so"
+# groups_ran RUN PLACEMENT DEVICES: RUN succeeded at PLACEMENT holding
+# DEVICES, its model tasks in group gpu alone and its plain ones in no group.
+groups_ran() {
+    until_ 60 "gpufan's run $1 didn't succeed: $(q "SELECT status, error, held FROM orca.runs WHERE id = $1")" \
+        is "SELECT status FROM orca.runs WHERE id = $1" succeeded
+    is "SELECT placement || ' ' || grant_gpus FROM orca.runs WHERE id = $1" "$2 2" \
+        || fail "gpufan's run $1: $(q "SELECT placement, grant_gpus FROM orca.runs WHERE id = $1")"
+    n=$(find "$gf" -name 'model-*.env' | wc -l | tr -d ' ')
+    { [ "$n" -ge 1 ] && [ "$n" -le 2 ]; } || fail "model tasks ran in $n workers: $(ls "$gf")"
+    [ "$(find "$gf" -name 'plain-*.env' | wc -l | tr -d ' ')" -eq 1 ] || fail "plain tasks ran in: $(ls "$gf")"
+    for f in "$gf"/model-*.env; do
+        grep -qx "DISTA_GROUP=gpu" "$f" || fail "$f: $(cat "$f")"
+        grep -qx "CUDA_VISIBLE_DEVICES=$3" "$f" || fail "$f: $(cat "$f")"
+        grep -qx "MORCA_GRANT_GPUS=$3" "$f" || fail "$f: $(cat "$f")"
+    done
+    for f in "$gf"/plain-*.env; do
+        grep -qx "DISTA_GROUP=-" "$f" || fail "$f: $(cat "$f")"
+        grep -qx "CUDA_VISIBLE_DEVICES=$3" "$f" || fail "$f: $(cat "$f")"
+    done
+}
+rm -rf "$gf"
+mkdir -p "$gf"
+export MORCA_HOST_GPUS=3
+start_sched
+groups_ran "$g1" local 0,1
+echo "ok   a local run forks each group's MAX, which runs that group's tasks alone, with the run's GPUs"
+./build/morca register --config build/grants-gpufan.toml --placement control ./build/gpufan >> "$log" 2>&1 \
+    || fail "register gpufan on control"
+rm -rf "$gf"
+mkdir -p "$gf"
+./build/morca backfill gpufan 2024-02 >> "$log" 2>&1 || fail "backfill gpufan"
+g2=$(q "SELECT max(id) FROM orca.runs")
+groups_ran "$g2" control 0,1
+stop_sched
+unset MORCA_HOST_GPUS GPUFAN_OUT GPUFAN_SLEEP
+echo "ok   so does a control-placed run"
 
 # On a remote worker, against its own host.
 export MORCA_HOST_MEMORY_MB=8192

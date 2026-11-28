@@ -31,6 +31,18 @@ from morca._internal.resources import (
     parse_memory_gb,
     run_env,
 )
+from morca._internal.provider import (
+    CONTROL_PROVIDER,
+    KUBERNETES,
+    LOCAL,
+    POOL,
+    ClusterProcess,
+    cluster_env,
+    driver_env,
+    local_env,
+    provider_of,
+    texts,
+)
 from morca._internal.worker_cluster import worker_slots
 
 
@@ -215,6 +227,74 @@ def test_worker_slots() raises:
     var fixed: List[String] = ["DISTA_WORKER_SLOTS=4"]
     assert_equal(worker_slots(fixed, 3), "DISTA_WORKER_SLOTS=3")
     assert_equal(worker_slots(List[String](), 0), "DISTA_WORKER_SLOTS=0")
+
+
+def test_providers_by_name() raises:
+    """Each placement's provider, by its name; ec2 has none."""
+    assert_equal(provider_of("worker:batch"), POOL)
+    assert_equal(provider_of("local"), LOCAL)
+    assert_equal(provider_of("control"), CONTROL_PROVIDER)
+    assert_equal(provider_of("kubernetes"), KUBERNETES)
+    with assert_raises(contains="no provider"):
+        _ = provider_of("ec2")
+
+
+def test_pool_cluster_env_is_as_before() raises:
+    """A pool's head and workers get what start_head and start_dista_worker
+    gave them before the contract had a name, in that order."""
+    var head = texts(cluster_env(POOL, ClusterProcess.head_at(4100, "tok")))
+    assert_equal(len(head), 3)
+    assert_equal(head[0], "DISTA_ROLE=head")
+    assert_equal(head[1], "DISTA_PORT=4100")
+    assert_equal(head[2], "DISTA_TOKEN=tok")
+    var own = texts(
+        cluster_env(
+            POOL,
+            ClusterProcess.worker_of("127.0.0.1:4100", "10.0.0.2", "tok", "3"),
+        )
+    )
+    var want: List[String] = [
+        "DISTA_ROLE=worker",
+        "DISTA_HEAD=127.0.0.1:4100",
+        "DISTA_ADVERTISE=10.0.0.2",
+        "DISTA_TOKEN=tok",
+        "DISTA_WORKER_SLOTS=3",
+    ]
+    assert_equal(len(own), len(want))
+    for i in range(len(want)):
+        assert_equal(own[i], want[i])
+    var member = texts(
+        cluster_env(
+            POOL,
+            ClusterProcess.worker_of(
+                "10.0.0.1:4100", "10.0.0.2", "tok", "auto", True, "gpu"
+            ),
+        )
+    )
+    assert_equal(len(member), 7)
+    assert_equal(member[4], "DISTA_WORKER_SLOTS=auto")
+    assert_equal(member[5], "DISTA_CONNECT_TIMEOUT=10")
+    assert_equal(member[6], "DISTA_GROUP=gpu")
+    var d = texts(driver_env(POOL, "127.0.0.1:4100", "tok"))
+    assert_equal(len(d), 2)
+    assert_equal(d[1], "DISTA_TOKEN=tok")
+
+
+def test_local_providers_fork_their_workers() raises:
+    """local and control start no dista process: their run's process forks
+    its workers, by group."""
+    with assert_raises(contains="forks its workers"):
+        _ = cluster_env(LOCAL, ClusterProcess.head_at(1))
+    assert_equal(len(local_env(LOCAL, 0, "")), 0)
+    var l = local_env(LOCAL, 0, "gpu=2,io=1")
+    assert_equal(len(l), 1)
+    assert_equal(l[0], "MORCA_GROUPS=gpu=2,io=1")
+    var c = local_env(CONTROL_PROVIDER, 1, "")
+    assert_equal(len(c), 1)
+    assert_equal(c[0], "MORCA_WORKERS=1")
+    assert_equal(len(local_env(CONTROL_PROVIDER, 1, "gpu=1")), 2)
+    assert_equal(len(local_env(KUBERNETES, 1, "gpu=1")), 0)
+    assert_equal(len(driver_env(LOCAL, "h:1")), 0)
 
 
 def test_auto_count() raises:

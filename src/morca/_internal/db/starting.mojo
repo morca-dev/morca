@@ -287,6 +287,7 @@ def mark_started(
     instance: Int,
     request_source: String,
     request_runs: Int,
+    grant_gpus: Int = 0,
 ) raises -> Int:
     """Starts `run` as the scheduler's, with what it was given (empty
     texts and zeros recorded as none), and returns its new start. Its
@@ -303,7 +304,8 @@ def mark_started(
                 " = NULL, request_cpus = nullif($4, ''),"
                 " request_memory_gb = nullif($5, ''),"
                 " grant_cpus = nullif($6, 0), grant_memory_mb ="
-                " nullif($7, 0), grant_gpus = NULL, memory_limit_mb = NULL,"
+                " nullif($7, 0), grant_gpus = nullif($11, 0), memory_limit_mb ="
+                " NULL,"
                 " memory_max_mb = NULL, memory_bytes = NULL,"
                 " instance = nullif($8, 0), request_source ="
                 " nullif($9, ''), request_runs = nullif($10,"
@@ -319,7 +321,8 @@ def mark_started(
             .int64(Int64(grant_memory_mb))
             .int64(Int64(instance))
             .text(request_source)
-            .int64(Int64(request_runs)),
+            .int64(Int64(request_runs))
+            .int64(Int64(grant_gpus)),
         )
         .row(0)
         .int64("starts")

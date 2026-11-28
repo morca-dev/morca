@@ -29,6 +29,12 @@ the limit it was killed at (an eviction: the request it had), at most
 ask for at least that, requests and limits, until 20 of its runs have
 succeeded since. One killed at that maximum already fails, unretried.
 
+**Groups.** A worker group's pods (`GroupPods`) are sized the same way
+from the group's own `cpus` and `memory_gb`, each the pipeline's where
+the group sets none, and a group that asks for GPUs has them in its pods'
+limits as `nvidia.com/gpu`. Their requests are part of the run's
+`cpu_millis` (`with_groups`).
+
 **Stuck.** A `Pending` pod that no node will take (`Unschedulable`), or
 whose image can't be pulled or container made (`ImagePullBackOff`,
 `ErrImagePull`, `CreateContainerConfigError`, ...), is `pod_stuck`: its run
@@ -42,6 +48,9 @@ from json import Value
 from morca._internal.cgroup import raised_mb
 from morca._internal.resources import Request, gb_text
 
+comptime GPU_RESOURCE = "nvidia.com/gpu"
+"""The extended resource a group's GPUs are asked for by (NVIDIA's device
+plugin)."""
 comptime OOM_KILLED = "OOMKilled"
 comptime EVICTED = "Evicted"
 
@@ -89,8 +98,10 @@ struct PodSize(ImplicitlyCopyable, Movable):
     var memory_request_mb: Int
     var memory_limit_mb: Int
 
-    def resources(self) -> String:
-        """The container's `resources`, as JSON."""
+    def resources(self, gpus: Int = 0) -> String:
+        """The container's `resources`, as JSON; with `gpus`, that many
+        `nvidia.com/gpu` in its limits (Kubernetes takes them as the
+        request too)."""
         var out = String(
             '{"requests": {"cpu": "',
             self.cpu_request,
@@ -100,7 +111,10 @@ struct PodSize(ImplicitlyCopyable, Movable):
         )
         if self.cpu_limit > 0:
             out.write('"cpu": "', self.cpu_limit, 'm", ')
-        out.write('"memory": "', self.memory_limit_mb, 'Mi"}}')
+        out.write('"memory": "', self.memory_limit_mb, 'Mi"')
+        if gpus > 0:
+            out.write(', "', GPU_RESOURCE, '": "', gpus, '"')
+        out.write("}}")
         return out^
 
 
@@ -173,6 +187,49 @@ struct KubeSizes(ImplicitlyCopyable, Movable):
             + self.head.memory_request_mb
             + workers * self.worker.memory_request_mb,
         )
+
+
+@fieldwise_init
+struct GroupPods(Copyable, Movable):
+    """A worker group's pods on Kubernetes (docs/groups.md): `count` dista
+    workers of the group, each sized `size` and given `gpus` GPUs."""
+
+    var group: String
+    var count: Int
+    var gpus: Int
+    var size: PodSize
+
+
+def with_groups(
+    s: KubeSizes, workers: Int, groups: List[GroupPods]
+) -> KubeRequests:
+    """What a run with `workers` workers with no group and `groups`' pods
+    asks for in all: `s.requests`, with its head when only groups have
+    workers, and the groups' pods."""
+    var out = s.requests(workers)
+    var grouped = False
+    for g in groups:
+        out.cpu_millis += g.count * g.size.cpu_request
+        out.memory_mb += g.count * g.size.memory_request_mb
+        grouped = grouped or g.count > 0
+    if workers == 0 and grouped:
+        out.cpu_millis += s.head.cpu_request
+        out.memory_mb += s.head.memory_request_mb
+    return out
+
+
+def pod_slugs(groups: List[GroupPods]) -> List[String]:
+    """Each group's part of its pods' names: its name with `_` as `-`
+    (a pod's name has no `_`), or `g<k>` where that is another group's."""
+    var slugs = List[String]()
+    for g in groups:
+        slugs.append(g.group.replace("_", "-"))
+    for i in range(len(slugs)):
+        for j in range(len(slugs)):
+            if i != j and slugs[i] == slugs[j] and groups[i].group != slugs[i]:
+                slugs[i] = String("g", i)
+                break
+    return slugs^
 
 
 def _cpu(request: Request, default: Int, limit: Int) -> Tuple[Int, Int]:
