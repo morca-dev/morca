@@ -975,6 +975,12 @@ def _migrations() -> List[List[String]]:
             "ALTER TABLE orca.workers ADD COLUMN host_upgrade text",
             "ALTER TABLE orca.workers ADD COLUMN upgrade timestamptz",
         ],
+        # A pipeline's worker groups from morca.toml (docs/groups.md,
+        # `morca._internal.groups`): a JSON array, null for none. Additive:
+        # a nullable column the binaries before it neither read nor write.
+        [
+            "ALTER TABLE orca.pipelines ADD COLUMN groups jsonb",
+        ],
     ]
 
 
@@ -1046,6 +1052,9 @@ def _floor_raisers() -> List[Int]:
     69 (`workers.host_image`, `host_upgrade`, `upgrade`, #220) is additive:
     nullable columns the binaries before it neither read nor write. Their
     UI asks no host to upgrade, and the host lists no image of its own.
+    70 (`pipelines.groups`, docs/groups.md) is additive: a nullable column
+    the binaries before it neither read nor write. A registration one of
+    them makes leaves it as it was, and nothing reads it yet.
     """
     return [1, 24]
 

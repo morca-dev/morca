@@ -17,6 +17,7 @@ from morca._internal.fill import (
     Fill,
     FillPipeline,
 )
+from morca._internal.groups import Group, parse_groups
 from morca.cron import CronExpr
 from morca.day import Day
 from morca.hour import Hour
@@ -131,10 +132,21 @@ struct Registered(Copyable, Movable):
     memory comes from it."""
     var probe_every: Int
     """`probe_every`: about one run in this many is probed (1)."""
+    var groups: List[Group]
+    """Its worker groups in morca.toml (`morca._internal.groups`), by name;
+    recorded, not used yet."""
 
     def request(self) raises -> Request:
         """As declared: `auto` not resolved (`run_request` does)."""
         return Request.of(self.cpus, self.memory_gb)
+
+    def group(self, name: String) raises -> Group:
+        """Its group `name`, with the pipeline's `cpus` and `memory_gb`
+        where the group sets none; its `request()` is the group's."""
+        for g in self.groups:
+            if g.name == name:
+                return g.effective(self.cpus, self.memory_gb)
+        raise Error("morca: pipeline ", self.name, " has no group ", name)
 
 
 def recorded_cpus(p: Registered, sized: RunRequest) -> String:
@@ -337,6 +349,7 @@ def registered(mut db: State, only: String = "") raises -> List[Registered]:
                 r.concurrency_limit,
                 r.working_set,
                 r.probe_every,
+                parse_groups(r.groups),
             )
         )
     # A fixed count, or no tasks: no scaling.

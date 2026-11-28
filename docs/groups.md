@@ -134,7 +134,7 @@ names it and moves the other providers behind it:
 | # | What | Tests |
 |---|---|---|
 | 0 | Move the dista pin to the release with groups and flows | The existing suite |
-| 1 | Groups in `morca.toml`, `Registered`, the database and `describe`; `config check`; reserve the `DISTA_*` names. No change in what runs. | Unit tests of the parser and the stored form |
+| 1 | Groups in `morca.toml`, `Registered`, the database and `describe`; `config check`; reserve the `DISTA_*` names. No change in what runs. (done) | Unit tests of the parser and the stored form |
 | 2 | GPUs: the host's count, the claim, `Grant`, admission, the UI's host and run pages | `test-grants` with `MORCA_HOST_GPUS` |
 | 3 | Members by group on pools: `run_members`, `join_claim`, `DISTA_GROUP`, MIN honoured | `test-run-cluster` with a GPU group on a mixed pair of hosts: the group's task runs only there |
 | 4 | Demand per group: the head's status with the claim, `decide` per group, draining a member, `gpu_machines` in a growing pool | `test-pool-scale` with a group that grows from 0 and drains when idle |
@@ -143,7 +143,7 @@ names it and moves the other providers behind it:
 Each PR leaves a pipeline without groups behaving as it does today, except
 for the MIN fix in PR 3.
 
-## Defaults to confirm
+## Defaults (confirmed 2026-11-27)
 
 1. Groups are declared per pipeline in `morca.toml`, with the keys above,
    and the un-grouped keys keep meaning the workers with no group.

@@ -81,6 +81,7 @@ executor-workers:tests/test_hcloud.mojo:test-hcloud
 scheduler-ui:tests/test_toml.mojo:test-toml
 scheduler-ui:tests/test_upgrade.mojo:test-upgrade
 scheduler-ui:tests/test_config.mojo:test-config
+scheduler-ui:tests/test_groups.mojo:test-groups
 scheduler-ui:tests/test_fill.mojo:test-fill
 scheduler-ui:tests/test_metrics.mojo:test-metrics
 scheduler-ui:tests/test_terms.mojo:test-terms

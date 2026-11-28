@@ -102,11 +102,17 @@ comptime _RESERVED_ENV = [
     "DISTA_ROLE",
     "DISTA_HEAD",
     "DISTA_ADVERTISE",
+    "DISTA_TOKEN",
+    "DISTA_PORT",
+    "DISTA_GROUP",
     "MORCA_GRANT_CPUS",
     "MORCA_GRANT_MEMORY_MB",
     "MORCA_MEMORY_PRESSURE_FILE",
 ]
-"""Variables morca gives a run itself, which `env` can't set."""
+"""Variables morca gives a run itself, which `env` can't set. Of dista's,
+`DISTA_WORKER_SLOTS` isn't here: a pipeline sets it (`"auto"` or a count,
+docs/morca-toml.md), and a run cluster's worker reads it from `env`
+(`morca._internal.worker_cluster`)."""
 
 
 def env_name_problem(name: String) -> String:

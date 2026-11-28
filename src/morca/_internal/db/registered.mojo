@@ -68,6 +68,8 @@ struct Registration(Copyable, Movable):
     var working_set: Bool
     """`learn = "working_set"` (#281)."""
     var probe_every: Int
+    var groups: String
+    """`orca.pipelines.groups` (`morca._internal.groups`): JSON, or empty."""
 
 
 def registrations(
@@ -134,7 +136,8 @@ def registrations(
             " concurrency_key, coalesce(concurrency_limit, 0)::bigint AS"
             " concurrency_limit, learn_from IS NOT DISTINCT FROM"
             " 'working_set' AS working_set, coalesce(probe_every, 1)::bigint"
-            " AS probe_every FROM orca.pipelines WHERE binary_path IS"
+            " AS probe_every, coalesce(groups::text, '') AS groups FROM"
+            " orca.pipelines WHERE binary_path IS"
             " NOT NULL AND retired IS NULL AND ($1 = '' OR name = $1) ORDER BY"
             " priority DESC, name"
         ),
@@ -195,6 +198,7 @@ def registrations(
                 Int(r.int64("concurrency_limit")),
                 r.bool("working_set"),
                 Int(r.int64("probe_every")),
+                r.text("groups"),
             )
         )
     return out^

@@ -13,6 +13,7 @@ from morca._internal.concurrency import concurrency_toml
 from morca._internal.db.config_show import Settings
 from morca._internal.fill import fill_max_runs_text
 from morca._internal.fill import SINCE_REGISTRATION
+from morca._internal.groups import parse_groups
 from morca._internal.html import Html
 from morca._internal.json import quote
 from morca._internal.recommend import (
@@ -505,6 +506,11 @@ def shown(mut db: State, only: String = "") raises -> List[Shown]:
             else:
                 s.add("probe_every", "1", CODE_DEFAULT, "")
         _show_fills(s, r, sources)
+        # Worker groups (morca._internal.groups): recorded, not used yet.
+        for g in parse_groups(r.groups):
+            var key = String("groups.", g.name)
+            var w = _source(sources, key)
+            s.add(key, g.toml_text(), w[0], w[1])
         if r.image:
             s.add("image", r.image, FROM_FLAG, "--image")
         if r.spot:
@@ -712,4 +718,6 @@ def export_toml(mut db: State) raises -> String:
         var secrets = parse_secrets(r.secrets)
         if len(secrets) > 0:
             out.write("secrets = ", _inline(secrets), "\n")
+        for g in parse_groups(r.groups):
+            out.write("groups.", toml_key(g.name), " = ", g.toml_text(), "\n")
     return out^

@@ -823,8 +823,8 @@ jobs:
             test-recommend test-worker-api test-state test-formal-migrate \
             test-formal-fence test-cli test-logs test-remote \
             test-scheduler test-chaos test-hcloud test-aws test-autoscale \
-            test-compile-fail test-config test-fill test-chaos-sqlite test-crash \
-            test-ec2 test-ui; do
+            test-compile-fail test-config test-groups test-fill test-chaos-sqlite \
+            test-crash test-ec2 test-ui; do
             echo "::group::$t"
             pixi run -e default "$t"
             echo "::endgroup::"

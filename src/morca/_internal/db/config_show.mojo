@@ -21,7 +21,8 @@ comptime _SHOWN_SQL = (
     " '') AS cpus, coalesce(memory_gb, '') AS memory_gb, learn, priority,"
     " coalesce(concurrency_key, '') AS concurrency_key,"
     " coalesce(concurrency_limit, 0)::bigint AS concurrency_limit,"
-    " coalesce(learn_from, '') AS learn_from, probe_every FROM"
+    " coalesce(learn_from, '') AS learn_from, probe_every,"
+    " coalesce(groups::text, '') AS groups FROM"
     " orca.pipelines WHERE binary_path IS NOT NULL AND ($1 = '' OR name = $1)"
     " ORDER BY name"
 )
@@ -70,6 +71,8 @@ struct Settings(Copyable, Movable):
     var learn_from: String
     """`working_set` for `learn = "working_set"` (#281), or empty."""
     var probe_every: Optional[Int64]
+    var groups: String
+    """Its worker groups (`morca._internal.groups`): JSON, or empty."""
 
 
 def _text(r: Row, c: String) raises -> Optional[String]:
@@ -131,6 +134,7 @@ def settings(mut conn: Connection, only: String) raises -> List[Settings]:
                 r.int64("concurrency_limit"),
                 r.text("learn_from"),
                 _int(r, "probe_every"),
+                r.text("groups"),
             )
         )
     return out^
