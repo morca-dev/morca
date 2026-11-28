@@ -2,7 +2,7 @@
 code version, and a run's machines with their metrics.
 """
 
-from morca._internal.ui.cluster import cluster_json
+from morca._internal.ui.cluster import cluster_json, cluster_wants_json
 from morca._internal.json import quote
 from morca._internal.kube_price import kube_price
 from morca._internal.metrics import InstanceMetrics, peaks_json
@@ -301,6 +301,7 @@ def run_json(v: RunView) -> String:
     j.write(', "instances": ')
     json_instances(j, r.id, v.instances, v.metrics)
     j.write(', "cluster": ', cluster_json(v.cluster))
+    j.write(', "cluster_wants": ', cluster_wants_json(v.wants))
     j.write(', "sensed": [')
     for i in range(len(v.sensed)):
         j.write(", " if i else "", quote(String(v.sensed[i])))

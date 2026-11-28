@@ -7,8 +7,10 @@ MORCA_WORKER_TOKEN=orca_... morca worker --pool bgent --remote https://orca.mlak
 
 Every `--poll-seconds` (2) the worker posts its heartbeat to
 `/api/worker/claim` (`orca.workers`), its name, image, CPUs, memory, GPUs
-(`host_gpus`, counted once at start) and the runs it has, and, while it
-has fewer than `--max-runs` (1), asks for one. A run it's given starts
+(`host_gpus`, counted once at start) and the runs it has, with the status
+of the dista heads it runs (`morca._internal.worker_demand`, every
+`MORCA_SCALE_REPORT_SECONDS`), and, while it has fewer than `--max-runs`
+(1), asks for one. A run it's given starts
 as the local runner starts one: the
 pipeline's binary (the path it was registered with, which the worker's
 image has too) with `resume <run>`, in a process group of its own, its
@@ -83,6 +85,7 @@ from json import Value
 
 from morca._internal.run_cluster import MemberSpec, member_spec_of
 from morca._internal.tokens import new_token
+from morca._internal.worker_demand import DemandReports, head_status
 from morca._internal.worker_cluster import (
     free_port,
     start_dista_worker,
@@ -243,6 +246,9 @@ struct Worker(Movable):
     starts (`morca._internal.resources`)."""
     var holding: Dict[Int, List[Int]]
     """The GPUs each run's or member's process holds, by pid."""
+    var demand: DemandReports
+    """Its clustered runs' heads' statuses, sent with its claims
+    (`morca._internal.worker_demand`)."""
 
     def __init__(
         out self,
@@ -286,6 +292,7 @@ struct Worker(Movable):
         self.follow = Follow(host_image, host_service, image, dir)
         self.gpus = Gpus(0)
         self.holding = Dict[Int, List[Int]]()
+        self.demand = DemandReports()
 
     def _running_ids(self) -> String:
         var ids = String()
@@ -543,6 +550,22 @@ struct Worker(Movable):
             flush=True,
         )
         return pid
+
+    def _ask_heads(mut self, now: Float64):
+        """Every `MORCA_SCALE_REPORT_SECONDS`, the status of each of its
+        runs' heads, for its next claim."""
+        if not self.demand.due(now):
+            return
+        var got = List[Tuple[Int, Int, String]]()
+        for e in self.running.items():
+            ref r = e.value
+            if len(r.helpers) == 0:
+                continue
+            var status = head_status(r.spec.binary, r.env)
+            if status:
+                got.append((r.spec.run, r.spec.start, status.value()))
+        for a in got:
+            self.demand.add(a[0], a[1], a[2])
 
     def _stop_member(mut self, member: Int):
         for e in self.members.items():
@@ -803,6 +826,8 @@ struct Worker(Movable):
                     "s with none of its runs going: one at a time",
                     flush=True,
                 )
+            # Its heads' demand, every MORCA_SCALE_REPORT_SECONDS.
+            self._ask_heads(now)
             # With its GPUs, those its processes don't hold now (a member
             # just stopped holds its own until it's reaped), and that it
             # starts members of a group (`groups`, DISTA_GROUP).
@@ -824,6 +849,7 @@ struct Worker(Movable):
                     .bool("groups", True)
                     .text("host_image", self.follow.host_image)
                     .text("host_upgrade", self.follow.state())
+                    .raw("demand", self.demand.json())
                     .raw(
                         "pressure",
                         Report.of(self.psi, self.admission, now).json(),
@@ -844,6 +870,7 @@ struct Worker(Movable):
                 sleep(self.poll)
                 continue
             said = ""
+            self.demand.sent()
             self._settings(got)
             self.follow.observe(got, len(self.running))
             # Drained: nothing running, nothing just given to start.

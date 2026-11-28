@@ -25,6 +25,53 @@ comptime GROUP_MAX_SQL = (
 )
 """A group's MAX workers, of `g`, an element of `orca.pipelines.groups`
 (`morca._internal.groups.groups_json`: `N` or `MIN..MAX`)."""
+comptime GROUP_MIN_SQL = (
+    "(CASE WHEN g->>'workers' LIKE '%..%' THEN split_part(g->>'workers',"
+    " '..', 1) ELSE g->>'workers' END)::bigint"
+)
+"""And its MIN: equal to its MAX for a count."""
+
+
+def plain_min_sql(p: String) -> String:
+    """The MIN of the workers with no group of pipeline row `p`: its
+    `ec2_min_workers`, or its `ec2_workers` for a fixed count (-1 or
+    null), 0 when neither is set."""
+    return String(
+        "(CASE WHEN coalesce(",
+        p,
+        ".ec2_min_workers, -1) < 0 THEN coalesce(",
+        p,
+        ".ec2_workers, 0) ELSE least(",
+        p,
+        ".ec2_min_workers, coalesce(",
+        p,
+        ".ec2_workers, 0)) END)::bigint",
+    )
+
+
+def wanted_sql(r: String, group: String, lo: String, hi: String) -> String:
+    """What kind `group` (an SQL text, '' for the workers with no group)
+    of run row `r` wants at its start: its count decided from demand
+    (`orca.run_wants`), else its MIN, `lo`, within `lo`..`hi`
+    (`morca._internal.member_wants.kind_wanted`)."""
+    return String(
+        "least(greatest(coalesce((SELECT rw.wanted FROM orca.run_wants rw",
+        " WHERE rw.run = ",
+        r,
+        ".id AND rw.start = ",
+        r,
+        ".starts AND rw.worker_group = ",
+        group,
+        "), ",
+        lo,
+        "), ",
+        lo,
+        "), greatest(",
+        hi,
+        ", ",
+        lo,
+        "))",
+    )
 
 
 def spread(mut conn: Connection, pipeline: String) raises -> Int:
@@ -109,11 +156,16 @@ struct Joinable(Copyable, Movable):
     var head: String
     var token: String
     var workers: Int
-    """Its pipeline's `workers` (`ec2_workers`), the members with no group
-    it wants; 0 for unset."""
+    """Its pipeline's `workers` (`ec2_workers`), the most members with no
+    group it wants; 0 for unset."""
     var live: String
     """Its live members by group, as a JSON object of counts, `""` for
     those with no group: `{"": 1, "gpu": 1}`."""
+    var min_workers: Int
+    """The fewest members with no group it wants (`plain_min_sql`)."""
+    var decided: String
+    """What each kind was decided to want from demand at this start
+    (`orca.run_wants`), as `live` is: `{"gpu": 1}`."""
 
 
 def joinable(
@@ -122,8 +174,9 @@ def joinable(
     """The running runs placed `placement`, oldest first, with their head
     known on another worker than `worker`, none of whose live members is
     `worker`, and either fewer live members with no group than their
-    pipeline's `workers` or groups (docs/groups.md), which the caller
-    counts."""
+    pipeline's `workers` (its MAX) or groups (docs/groups.md); the caller
+    counts each kind's live members against what it wants now
+    (`morca._internal.member_wants.kinds_of`)."""
     var out = List[Joinable]()
     for c in conn.query(
         (
@@ -132,7 +185,11 @@ def joinable(
             " (SELECT coalesce(json_object_agg(x.g, x.n), '{}')::text FROM"
             " (SELECT coalesce(m.worker_group, '') AS g, count(*) AS n FROM"
             " orca.run_members m WHERE m.run = r.id AND m.start = r.starts AND"
-            " m.ended IS NULL GROUP BY 1) x) AS live FROM orca.runs r JOIN"
+            " m.ended IS NULL GROUP BY 1) x) AS live, "
+            + plain_min_sql("p")
+            + " AS lo, (SELECT coalesce(json_object_agg(rw.worker_group,"
+            " rw.wanted), '{}')::text FROM orca.run_wants rw WHERE rw.run ="
+            " r.id AND rw.start = r.starts) AS decided FROM orca.runs r JOIN"
             " orca.pipelines p ON p.name = r.pipeline WHERE r.status ="
             " 'running' AND p.placement = $1 AND r.cluster_head IS NOT NULL AND"
             " r.worker <> $2 AND (coalesce(p.ec2_workers, 0) > (SELECT"
@@ -153,6 +210,8 @@ def joinable(
                 c.text("cluster_token"),
                 Int(c.int64("workers")),
                 c.text("live"),
+                Int(c.int64("lo")),
+                c.text("decided"),
             )
         )
     return out^
@@ -250,3 +309,167 @@ def add_member(
     if len(got) != 1:
         return None
     return Int(got.row(0).int64("id"))
+
+
+# ── demand per group (`morca._internal.run_demand`) ──────────────────────
+
+
+@fieldwise_init
+struct KeptDemand(Copyable, Movable):
+    """A run whose head's status was kept: what deciding for it needs."""
+
+    var lo: Int
+    """The fewest members with no group (`plain_min_sql`)."""
+    var hi: Int
+    """The most (`ec2_workers`), 0 for unset."""
+    var groups: String
+    """Its pipeline's groups (`orca.pipelines.groups`), empty for none."""
+    var now: Float64
+    """The database's clock, in seconds since the epoch."""
+
+
+def keep_demand(
+    mut conn: Connection, run: Int, start: Int, worker: Int, status: String
+) raises -> Optional[KeptDemand]:
+    """Keeps `status`, its head's `dista status --json`, on `run`, with
+    when, if `run` is running at `start` on `worker` with its head known;
+    None, keeping nothing, otherwise."""
+    var got = conn.query(
+        String(
+            "UPDATE orca.runs r SET demand = $4::jsonb, demand_at = now() FROM",
+            " orca.pipelines p WHERE p.name = r.pipeline AND r.id = $1 AND",
+            " r.starts = $2 AND r.worker = $3 AND r.status = 'running' AND",
+            " r.cluster_head IS NOT NULL RETURNING ",
+            plain_min_sql("p"),
+            " AS lo, coalesce(p.ec2_workers, 0)::bigint AS hi,",
+            " coalesce(p.groups::text, '') AS groups, extract(epoch FROM",
+            " now())::float8 AS now",
+        ),
+        Params()
+        .int64(Int64(run))
+        .int64(Int64(start))
+        .int64(Int64(worker))
+        .text(status),
+    )
+    if len(got) != 1:
+        return None
+    var r = got.row(0)
+    return KeptDemand(
+        Int(r.int64("lo")),
+        Int(r.int64("hi")),
+        r.text("groups"),
+        r.float64("now"),
+    )
+
+
+@fieldwise_init
+struct WantRow(Copyable, Movable):
+    """A kind's last decision at a run's start (`orca.run_wants`)."""
+
+    var group: String
+    """"" for the workers with no group."""
+    var wanted: Int
+    var short_since: Float64
+    var at: Float64
+    """When it was decided, in seconds since the epoch."""
+
+
+def wants_of(
+    mut conn: Connection, run: Int, start: Int
+) raises -> List[WantRow]:
+    """The kinds decided for `run` at `start`."""
+    var out = List[WantRow]()
+    for r in conn.query(
+        (
+            "SELECT worker_group, wanted::bigint AS wanted, short_since,"
+            " extract(epoch FROM decided_at)::float8 AS at FROM"
+            " orca.run_wants WHERE run = $1 AND start = $2"
+        ),
+        Params().int64(Int64(run)).int64(Int64(start)),
+    ):
+        out.append(
+            WantRow(
+                r.text("worker_group"),
+                Int(r.int64("wanted")),
+                r.float64("short_since"),
+                r.float64("at"),
+            )
+        )
+    return out^
+
+
+def set_want(
+    mut conn: Connection,
+    run: Int,
+    start: Int,
+    group: String,
+    wanted: Int,
+    short_since: Float64,
+) raises:
+    """Keeps what kind `group` of `run` at `start` wants now, and since when
+    it's been short (0 for not)."""
+    _ = conn.execute(
+        (
+            "INSERT INTO orca.run_wants (run, start, worker_group, wanted,"
+            " short_since, decided_at) VALUES ($1, $2, $3, $4, $5, now()) ON"
+            " CONFLICT (run, start, worker_group) DO UPDATE SET wanted ="
+            " EXCLUDED.wanted, short_since = EXCLUDED.short_since,"
+            " decided_at = EXCLUDED.decided_at"
+        ),
+        Params()
+        .int64(Int64(run))
+        .int64(Int64(start))
+        .text(group)
+        .int64(Int64(wanted))
+        .float64(short_since),
+    )
+
+
+@fieldwise_init
+struct KindsRow(Copyable, Movable):
+    """What a run's Cluster card says of its kinds, at its current start."""
+
+    var lo: Int
+    var hi: Int
+    var groups: String
+    var live: String
+    """Live members by group, as `Joinable.live`."""
+    var decided: String
+    """Decided counts by group, as `Joinable.decided`."""
+    var demand_at: String
+    """When its head's status last came, UTC (`2026-11-27T10:00:00Z`);
+    empty for never."""
+
+
+def kinds_row(mut conn: Connection, run: Int) raises -> Optional[KindsRow]:
+    """`run`'s kinds of members at its current start, if it has a head."""
+    var got = conn.query(
+        String(
+            "SELECT ",
+            plain_min_sql("p"),
+            " AS lo, coalesce(p.ec2_workers, 0)::bigint AS hi,",
+            " coalesce(p.groups::text, '') AS groups, (SELECT",
+            " coalesce(json_object_agg(x.g, x.n), '{}')::text FROM (SELECT",
+            " coalesce(m.worker_group, '') AS g, count(*) AS n FROM",
+            " orca.run_members m WHERE m.run = r.id AND m.start = r.starts",
+            " AND m.ended IS NULL GROUP BY 1) x) AS live, (SELECT",
+            " coalesce(json_object_agg(rw.worker_group, rw.wanted),",
+            " '{}')::text FROM orca.run_wants rw WHERE rw.run = r.id AND",
+            " rw.start = r.starts) AS decided, coalesce(to_char(r.demand_at",
+            " AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"'), '') AS",
+            " demand_at FROM orca.runs r JOIN orca.pipelines p ON p.name =",
+            " r.pipeline WHERE r.id = $1 AND r.cluster_head IS NOT NULL",
+        ),
+        Params().int64(Int64(run)),
+    )
+    if len(got) != 1:
+        return None
+    var r = got.row(0)
+    return KindsRow(
+        Int(r.int64("lo")),
+        Int(r.int64("hi")),
+        r.text("groups"),
+        r.text("live"),
+        r.text("decided"),
+        r.text("demand_at"),
+    )

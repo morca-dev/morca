@@ -55,11 +55,14 @@ import morca._internal.db.scheduler as scheduler_db
 import morca._internal.db.starting as starting_db
 import morca._internal.db.workers as workers_db
 
+from morca._internal.run_demand import record_demand
 from morca._internal.run_cluster import (
+    head_elsewhere,
     join_claim,
     member_spec_json,
     members_of,
     members_to_stop,
+    say_gpu_head,
     stop_json,
 )
 from morca._internal.admission import (
@@ -494,6 +497,12 @@ def claim(mut db: State, w: WorkerAuth, v: Value) raises -> String:
     (`advertise`), a run to join (`morca._internal.run_cluster`); and always the
     members it has whose run has ended, to stop."""
     var stop = members_to_stop(db, w.id)
+    # Its runs' heads' demand, decided on before any worker is offered a
+    # member below (morca._internal.run_demand).
+    try:
+        _ = record_demand(db, w.id, v)
+    except e:
+        print("morca: worker", w.id, "demand skipped:", e)
     var settings = pool_settings(db, w.pool)
     var asked = workers_db.is_draining(db.conn, w.id)
     # A pool machine the autoscaler is draining (a deploy changed the
@@ -720,6 +729,14 @@ def _claim_run(
         if room_cpus >= 0:
             sized = run_request(db, p, most_cpus, most_mb, most_of)
             say_capped(db, p, sized)
+        # On a host with GPUs, a run with a group that asks for them starts
+        # on one without, if one could start it: the head's host serves no
+        # group (docs/groups.md).
+        var gpus = gpus_field(v, "gpus")
+        if head_elsewhere(
+            db, p, w.placement(), w.id, Int(id), gpus, sized.request
+        ):
+            continue
         var tx = db.conn.begin()
         starting_db.lock_pipeline(tx, p.name)
         # Its fill runs and its others are capped apart, as on the local
@@ -759,7 +776,6 @@ def _claim_run(
         var admitted = request.any() and room_cpus >= 0
         if admitted:
             var g = workers_db.granted_live(tx, w.id, stale, dead)
-            var gpus = gpus_field(v, "gpus")
             var fit = admit(
                 request,
                 Room(
@@ -812,7 +828,7 @@ def _claim_run(
             under_pool(settings.env, p.env),
             under_pool(settings.secrets, p.secrets),
             grant,
-            members_of(db, p.name) if p.workers > 0 else 0,
+            members_of(db, p.name) if p.workers > 0 or len(p.groups) > 0 else 0,
         )
         audit_db.add(
             tx,
@@ -830,6 +846,7 @@ def _claim_run(
             "worker",
         )
         tx.commit()
+        say_gpu_head(p, Int(id), gpus, name)
         return String('{"run": ', worker_run_json(spec), "}")
     if refused:
         return String('{"run": null, "refused": ', quote(refused), "}")

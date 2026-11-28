@@ -5,7 +5,12 @@ autoscaler (`morca._internal.pool_scale`) made for them, and
 
 from postgres import Connection, Params, Transaction
 
-from morca._internal.db.run_cluster import GROUP_MAX_SQL
+from morca._internal.db.run_cluster import (
+    GROUP_MAX_SQL,
+    GROUP_MIN_SQL,
+    plain_min_sql,
+    wanted_sql,
+)
 
 
 def upsert_pool(
@@ -213,7 +218,8 @@ def demand(mut conn: Connection, pool: String, after: Float64) raises -> Int:
     a worker could start: per pipeline at most `max_runs` less its running
     ones, and its fill runs; and the members its running runs that spread
     (#268) still want, once they've run `after` seconds: with no group, and
-    of each group that asks for no GPU, its MAX (docs/groups.md)."""
+    of each group that asks for no GPU, what it was decided to want from
+    its head's demand, else its MIN (docs/groups.md)."""
     var r = conn.query(
         (
             "SELECT (SELECT coalesce(sum(least(q.n,"
@@ -227,16 +233,20 @@ def demand(mut conn: Connection, pool: String, after: Float64) raises -> Int:
             " n FROM orca.runs WHERE status = 'running' AND trigger <> 'fill'"
             " GROUP BY pipeline) r ON r.pipeline = p.name WHERE p.placement ="
             " 'worker:' || $1 AND NOT p.paused AND p.binary_path IS NOT NULL)"
-            # Members a running run of the pool still wants (#268): its
-            # workers with no group, and each group's MAX that asks for no
-            # GPU (docs/groups.md; a machine with GPUs is gpu_machines',
-            # which pools don't have yet).
-            " + (SELECT coalesce(sum(greatest(coalesce(p2.ec2_workers, 0) -"
-            " (SELECT count(*) FROM orca.run_members m WHERE m.run = r2.id AND"
-            " m.start = r2.starts AND m.ended IS NULL AND m.worker_group IS"
-            " NULL), 0) + (SELECT coalesce(sum(greatest("
+            # Members a running run of the pool still wants (#268): of its
+            # workers with no group, and of each group that asks for no GPU
+            # (docs/groups.md; a machine with GPUs is gpu_machines', which
+            # pools don't have yet), what each was decided to want from
+            # demand, else its MIN.
+            " + (SELECT coalesce(sum(greatest("
         )
-        + GROUP_MAX_SQL
+        + wanted_sql(
+            "r2", "''", plain_min_sql("p2"), "coalesce(p2.ec2_workers, 0)"
+        )
+        + " - (SELECT count(*) FROM orca.run_members m WHERE m.run = r2.id AND"
+        " m.start = r2.starts AND m.ended IS NULL AND m.worker_group IS"
+        " NULL), 0) + (SELECT coalesce(sum(greatest("
+        + wanted_sql("r2", "g->>'name'", GROUP_MIN_SQL, GROUP_MAX_SQL)
         + " - (SELECT count(*) FROM orca.run_members m WHERE m.run = r2.id"
         " AND m.start = r2.starts AND m.ended IS NULL AND m.worker_group ="
         " g->>'name'), 0)), 0) FROM jsonb_array_elements(p2.groups) g"

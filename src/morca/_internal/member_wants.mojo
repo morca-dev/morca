@@ -1,13 +1,17 @@
 """Which members a running run of a pool wants, by group, and which a host
-is offered first (docs/groups.md, "Members by group"): the part of
-`morca._internal.run_cluster.join_claim` that reads no database.
+is offered first (docs/groups.md, "Members by group" and "Demand per
+group"): the part of `morca._internal.run_cluster.join_claim` that reads no
+database.
 
-- **The workers with no group** (`workers`, stored as `ec2_workers`) want
-  that many members, counted against the run's live members with no group,
-  as before groups.
-- **Each group** wants its MAX (`Group.max_workers`), counted against its
-  own live members, each sized by the group's request (`group_request`).
-  MIN is honoured once demand per group lands (PR 4 of docs/groups.md).
+- **Kinds.** A run's members come in kinds: the workers with no group
+  (`workers`, stored as `ec2_min_workers`..`ec2_workers`), and each of its
+  groups (`Group.min_workers`..`max_workers`). Each kind wants a count in
+  its range, counted against its own live members (`kinds_of`).
+- **What a kind wants** is what the scheduler last decided from the run's
+  head's demand (`morca._internal.member_demand`), within its range; before
+  the first decision of the run's start, its MIN (`kind_wanted`). A fixed
+  count has MIN = MAX, so it wants that count from the start. A kind with
+  more live members than it wants is given none; none is stopped yet.
 - **A worker that doesn't understand groups** (its claim doesn't say
   `"groups": true`) is offered only members with no group.
 - **A host with GPUs** is offered the members that ask for GPUs first
@@ -36,27 +40,78 @@ struct Want(Copyable, Movable):
     """How many more members it wants, from 1."""
 
 
-def wanted(
-    workers: Int,
+@fieldwise_init
+struct Kind(Copyable, Movable):
+    """One kind of a run's members: the workers with no group, or a group."""
+
+    var group: String
+    """The group's name; empty for the workers with no group."""
+    var gpus: Int
+    """The GPUs each of its members asks for."""
+    var min_workers: Int
+    var max_workers: Int
+    var wanted: Int
+    """How many members it wants now (`kind_wanted`)."""
+    var decided: Bool
+    """Whether `wanted` was decided from the head's demand, rather than
+    the MIN a run starts with."""
+    var live: Int
+    """Its live members."""
+
+
+def kind_wanted(lo: Int, hi: Int, decided: Optional[Int]) -> Int:
+    """What a kind of range `lo`..`hi` wants now: the count last `decided`
+    from its run's demand, kept within the range (re-registering may have
+    moved it), or `lo` before any decision."""
+    var n = decided.value() if decided else lo
+    return min(max(n, lo), max(hi, lo))
+
+
+def kinds_of(
+    lo: Int,
+    hi: Int,
     groups: List[Group],
+    decided: Dict[String, Int],
     live: Dict[String, Int],
-    understands_groups: Bool,
-) -> List[Want]:
-    """What a run wants that it hasn't got: `workers` members with no
-    group, and each group's MAX, less the run's live members of each
-    (`live`, by group, "" for none). Only the members with no group for a
-    worker that doesn't understand groups. The workers with no group first,
-    then the groups by name; none that is full."""
-    var out = List[Want]()
-    var plain = workers - live.get("", 0)
-    if plain > 0:
-        out.append(Want("", 0, plain))
-    if not understands_groups:
-        return out^
+) -> List[Kind]:
+    """A run's kinds: the workers with no group, `lo`..`hi` (none when
+    `hi` is 0), then each of `groups` in order. `decided` and `live` are by
+    group, "" for none."""
+    var out = List[Kind]()
+    if hi > 0:
+        var d = decided.get("")
+        out.append(
+            Kind(
+                "", 0, lo, hi, kind_wanted(lo, hi, d), Bool(d), live.get("", 0)
+            )
+        )
     for g in groups:
-        var short = g.max_workers - live.get(g.name, 0)
+        var d = decided.get(g.name)
+        out.append(
+            Kind(
+                g.name,
+                g.gpus,
+                g.min_workers,
+                g.max_workers,
+                kind_wanted(g.min_workers, g.max_workers, d),
+                Bool(d),
+                live.get(g.name, 0),
+            )
+        )
+    return out^
+
+
+def wanted(kinds: List[Kind], understands_groups: Bool) -> List[Want]:
+    """What a run wants that it hasn't got: each kind's wanted count less
+    its live members, in `kinds`' order; only the members with no group for
+    a worker that doesn't understand groups; none that is full."""
+    var out = List[Want]()
+    for k in kinds:
+        if k.group and not understands_groups:
+            continue
+        var short = k.wanted - k.live
         if short > 0:
-            out.append(Want(g.name, g.gpus, short))
+            out.append(Want(k.group, k.gpus, short))
     return out^
 
 
@@ -74,6 +129,14 @@ def offer_order(gpus: List[Int], host_gpus: Int) -> List[Int]:
         if host_gpus <= 0 or gpus[i] <= 0:
             out.append(i)
     return out^
+
+
+def groups_ask_gpus(groups: List[Group]) -> Bool:
+    """Whether one of `groups` asks for GPUs."""
+    for g in groups:
+        if g.gpus > 0:
+            return True
+    return False
 
 
 def wants_gpus_of(wants: List[Want], host_gpus: Int) -> Bool:

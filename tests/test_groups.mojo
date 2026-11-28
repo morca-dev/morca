@@ -1,11 +1,19 @@
 """Worker groups in morca.toml (`morca._internal.groups`, docs/groups.md):
 the keys a group takes and how they're checked, what falls back to the
 pipeline's, the canonical form `register` records, and its stored JSON read
-back; and the members a running run wants by group on a pool, and which
-a host is offered (`morca._internal.member_wants`)."""
+back; the members a running run wants by group on a pool, and which a
+host is offered (`morca._internal.member_wants`); and how many each kind
+wants from its head's demand (`morca._internal.member_demand`)."""
 
-from std.testing import TestSuite, assert_equal, assert_false, assert_true
+from std.testing import (
+    TestSuite,
+    assert_almost_equal,
+    assert_equal,
+    assert_false,
+    assert_true,
+)
 
+from dista.scale import Demand
 from json import loads
 
 from morca._internal.config import (
@@ -20,14 +28,25 @@ from morca._internal.groups import (
     groups_json,
     parse_groups,
 )
+from morca._internal.member_demand import (
+    DEMAND_STALE_SECONDS,
+    Prior,
+    decide_kind,
+    own_workers,
+)
 from morca._internal.member_wants import (
+    Kind,
     Want,
     group_request,
+    groups_ask_gpus,
     gpu_host_takes,
+    kind_wanted,
+    kinds_of,
     offer_order,
     wanted,
     wants_gpus_of,
 )
+from morca._internal.scale_policy import ScaleKnobs
 from morca._internal.secrets import env_name_problem
 
 comptime EXAMPLE = """[defaults]
@@ -292,49 +311,96 @@ def _groups() raises -> List[Group]:
     ]
 
 
-def test_a_run_wants_each_groups_max() raises:
-    # Each group its MAX (MIN waits for demand per group), less its live
-    # members; the workers with no group as before.
-    var live = Dict[String, Int]()
-    var w = wanted(2, _groups(), live, True)
-    assert_equal(len(w), 3)
+def _kinds(
+    lo: Int, hi: Int, decided: Dict[String, Int], live: Dict[String, Int]
+) raises -> List[Kind]:
+    return kinds_of(lo, hi, _groups(), decided, live)
+
+
+def test_each_kind_wants_its_min_before_demand() raises:
+    # Before its head reports demand, each kind wants its MIN: decode is a
+    # count (3), gpu a range (0..2), the workers with no group 1..2.
+    var k = _kinds(1, 2, Dict[String, Int](), Dict[String, Int]())
+    assert_equal(len(k), 3)
+    assert_equal(k[0].group, "")
+    assert_equal(k[0].wanted, 1)
+    assert_false(k[0].decided)
+    assert_equal(k[1].group, "decode")
+    assert_equal(k[1].wanted, 3)
+    assert_equal(k[2].group, "gpu")
+    assert_equal(k[2].wanted, 0)
+    assert_equal(k[2].gpus, 1)
+    var w = wanted(k, True)
+    assert_equal(len(w), 2)
     assert_equal(w[0].group, "")
-    assert_equal(w[0].short, 2)
-    assert_equal(w[0].gpus, 0)
+    assert_equal(w[0].short, 1)
     assert_equal(w[1].group, "decode")
     assert_equal(w[1].short, 3)
-    assert_equal(w[2].group, "gpu")
-    assert_equal(w[2].short, 2)
-    assert_equal(w[2].gpus, 1)
-    live[""] = 2
-    live["gpu"] = 1
+
+
+def test_each_kind_wants_what_was_decided() raises:
+    # Decided counts, kept within each kind's range, less its live members.
+    var decided = Dict[String, Int]()
+    decided[""] = 7
+    decided["gpu"] = 1
+    decided["decode"] = 0
+    var live = Dict[String, Int]()
     live["decode"] = 3
-    w = wanted(2, _groups(), live, True)
-    assert_equal(len(w), 1)
-    assert_equal(w[0].group, "gpu")
-    assert_equal(w[0].short, 1)
+    var k = _kinds(1, 2, decided, live)
+    assert_equal(k[0].wanted, 2)
+    assert_true(k[0].decided)
+    assert_equal(k[1].wanted, 3)
+    assert_equal(k[2].wanted, 1)
+    var w = wanted(k, True)
+    assert_equal(len(w), 2)
+    assert_equal(w[0].group, "")
+    assert_equal(w[0].short, 2)
+    assert_equal(w[1].group, "gpu")
+    assert_equal(w[1].short, 1)
+    assert_equal(w[1].gpus, 1)
+    # More live members than wanted: none more, none taken back.
+    live["gpu"] = 2
+    live[""] = 2
+    assert_equal(len(wanted(_kinds(1, 2, decided, live), True)), 0)
 
 
 def test_no_group_wants_as_before() raises:
-    # A pipeline without groups wants `workers` less its live members.
+    # A pipeline without groups and a fixed count wants that count from the
+    # start, less its live members, as before demand.
     var live = Dict[String, Int]()
     live[""] = 1
-    var w = wanted(3, List[Group](), live, True)
+    var none = List[Group]()
+    var w = wanted(kinds_of(3, 3, none, Dict[String, Int](), live), True)
     assert_equal(len(w), 1)
     assert_equal(w[0].short, 2)
-    assert_equal(len(wanted(1, List[Group](), live, True)), 0)
-    assert_equal(len(wanted(0, List[Group](), Dict[String, Int](), True)), 0)
-    # With groups and no workers of its own, only the groups' members.
-    var g = wanted(0, _groups(), Dict[String, Int](), True)
+    assert_equal(
+        len(wanted(kinds_of(1, 1, none, Dict[String, Int](), live), True)), 0
+    )
+    assert_equal(
+        len(kinds_of(0, 0, none, Dict[String, Int](), Dict[String, Int]())), 0
+    )
+    # With groups and no workers of its own, only the groups' kinds.
+    var g = _kinds(0, 0, Dict[String, Int](), Dict[String, Int]())
     assert_equal(len(g), 2)
     assert_equal(g[0].group, "decode")
+    assert_equal(kind_wanted(1, 4, None), 1)
+    assert_equal(kind_wanted(1, 4, 9), 4)
+    assert_equal(kind_wanted(2, 4, 0), 2)
 
 
 def test_an_older_worker_gets_no_group() raises:
-    var w = wanted(1, _groups(), Dict[String, Int](), False)
+    var k = _kinds(1, 1, Dict[String, Int](), Dict[String, Int]())
+    var w = wanted(k, False)
     assert_equal(len(w), 1)
     assert_equal(w[0].group, "")
-    assert_equal(len(wanted(0, _groups(), Dict[String, Int](), False)), 0)
+    assert_equal(
+        len(
+            wanted(
+                _kinds(0, 0, Dict[String, Int](), Dict[String, Int]()), False
+            )
+        ),
+        0,
+    )
 
 
 def test_gpu_hosts_are_offered_gpu_members_first() raises:
@@ -382,6 +448,147 @@ def test_a_groups_request() raises:
     var auto = group_request(Group("decode", 1, 1, 0, "auto", ""))
     assert_equal(auto.cpus_min, 0)
     assert_false(auto.any())
+
+
+# Demand per group (`morca._internal.member_demand`): `dista status --json`
+# as a pool run's head answers it (its shape taken from a gpufan run of
+# tests/run_cluster.sh), and what each kind wants from it.
+
+
+def _worker(address: String, group: String, running: Int, idle: Int) -> String:
+    return String(
+        '{"address":"',
+        address,
+        '","node":"h","registry":"0x1","running":',
+        running,
+        ',"slots":1,"group":"',
+        group,
+        '","idle_seconds":',
+        idle,
+        ',"held_bytes":0,"actor":0,"draining":false}',
+    )
+
+
+def _group(name: String, workers: Int, ready: Int, running: Int) -> String:
+    return String(
+        '{"group":"',
+        name,
+        '","workers":',
+        workers,
+        ',"slots":',
+        workers,
+        ',"tasks_ready":',
+        ready,
+        ',"tasks_waiting":0,"tasks_running":',
+        running,
+        ',"actors_waiting":0}',
+    )
+
+
+def _status(workers: List[String], groups: List[String]) raises -> Demand:
+    var out = String(
+        '{"tasks_ready":0,"tasks_waiting":0,"tasks_running":0,',
+        '"actors_waiting":0,"tasks_done":3,"tasks_failed":0,"drivers":1,',
+        '"pipeline":2,"checkpoints":false,"driver_objects":[{"driver":1,',
+        '"held":0,"client":false}],"workers":[',
+        ",".join(workers),
+        '],"groups":[',
+        ",".join(groups),
+        "]}\n",
+    )
+    return Demand.parse(out)
+
+
+def _knobs() -> ScaleKnobs:
+    return ScaleKnobs(5, 60, 4)
+
+
+def test_a_group_grows_from_none_at_once() raises:
+    # Group gpu (0..1) has 4 tasks ready and no worker: dista starts one at
+    # once, so it wants 1. Its MIN before any decision is 0.
+    var d = _status(
+        [_worker("h:1", "", 1, 0)],
+        [_group("", 1, 0, 1), _group("gpu", 0, 4, 0)],
+    )
+    var got = decide_kind(d, "gpu", 0, 1, _knobs(), 1000, None)
+    assert_equal(got.wanted, 1)
+    assert_equal(got.short_since, 0)
+    # Asked for again before it joined: pending, not asked for twice.
+    got = decide_kind(d, "gpu", 0, 1, _knobs(), 1005, Prior(1, 0, 1000))
+    assert_equal(got.wanted, 1)
+    # No tasks of the group: it stays at its MIN.
+    var idle = _status([_worker("h:1", "", 0, 3)], [_group("", 1, 0, 0)])
+    assert_equal(decide_kind(idle, "gpu", 0, 1, _knobs(), 1000, None).wanted, 0)
+
+
+def test_the_heads_own_worker_is_no_member() raises:
+    # The workers with no group, 1..4: the head's host's dista worker and
+    # one member, both busy, 10 tasks ready. dista counts 2 workers, and
+    # wants 6 (12 tasks, 2 a worker), at most 4 members + 1.
+    assert_equal(own_workers(""), 1)
+    assert_equal(own_workers("gpu"), 0)
+    var d = _status(
+        [_worker("h:1", "", 2, 0), _worker("m:1", "", 2, 0)],
+        [_group("", 2, 10, 4)],
+    )
+    # Short for the first time: it waits MORCA_SCALE_UP_AFTER.
+    var got = decide_kind(d, "", 1, 4, _knobs(), 1000, Prior(1, 0, 999))
+    assert_equal(got.wanted, 1)
+    assert_almost_equal(got.short_since, 1000)
+    # Still short 5 s later: 3 more dista workers, so 4 members, not 5.
+    got = decide_kind(d, "", 1, 4, _knobs(), 1005, Prior(1, 1000, 1000))
+    assert_equal(got.wanted, 4)
+    assert_equal(got.short_since, 0)
+    # MORCA_SCALE_STEP caps one decision: 1 more at a time.
+    got = decide_kind(
+        d, "", 1, 4, ScaleKnobs(5, 60, 1), 1005, Prior(1, 1000, 1000)
+    )
+    assert_equal(got.wanted, 2)
+
+
+def test_a_stale_decision_waits_again() raises:
+    var d = _status(
+        [_worker("h:1", "", 2, 0), _worker("m:1", "", 2, 0)],
+        [_group("", 2, 10, 4)],
+    )
+    var old = 1000.0 - DEMAND_STALE_SECONDS - 1
+    var got = decide_kind(d, "", 1, 4, _knobs(), 1000, Prior(1, old, old))
+    assert_equal(got.wanted, 1)
+    assert_almost_equal(got.short_since, 1000)
+
+
+def test_a_fixed_count_wants_it_whatever_the_demand() raises:
+    var busy = _status([], [_group("gpu", 0, 40, 0)])
+    assert_equal(decide_kind(busy, "gpu", 2, 2, _knobs(), 1000, None).wanted, 2)
+    var idle = _status([_worker("h:1", "", 0, 300)], [_group("", 1, 0, 0)])
+    assert_equal(decide_kind(idle, "", 1, 1, _knobs(), 1000, None).wanted, 1)
+    assert_equal(
+        decide_kind(idle, "", 3, 3, _knobs(), 1000, Prior(3, 0, 999)).wanted, 3
+    )
+
+
+def test_idle_members_are_wanted_no_more() raises:
+    # Two idle members of gpu (0..2) past MORCA_SCALE_IDLE and no tasks:
+    # dista would drain both, so it wants none (PR 4b stops them).
+    var d = _status(
+        [
+            _worker("h:1", "", 0, 90),
+            _worker("g:1", "gpu", 0, 90),
+            _worker("g:2", "gpu", 0, 90),
+        ],
+        [_group("", 1, 0, 0), _group("gpu", 2, 0, 0)],
+    )
+    assert_equal(
+        decide_kind(d, "gpu", 0, 2, _knobs(), 1000, Prior(2, 0, 999)).wanted, 0
+    )
+    # From a head before groups, the group is empty and the workers with no
+    # group are the whole demand.
+    var old = Demand.parse('{"tasks_ready":0,"pipeline":2,"workers":[]}')
+    assert_false(old.has_groups)
+    assert_equal(decide_kind(old, "gpu", 0, 2, _knobs(), 1000, None).wanted, 0)
+    assert_equal(decide_kind(old, "", 1, 2, _knobs(), 1000, None).wanted, 1)
+    assert_true(groups_ask_gpus(_groups()))
+    assert_false(groups_ask_gpus([Group("decode", 1, 1, 0, "", "")]))
 
 
 def main() raises:

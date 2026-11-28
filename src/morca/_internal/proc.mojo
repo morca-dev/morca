@@ -230,12 +230,23 @@ struct Capture(Copyable, Movable):
     """Its exit code once it has ended, else -1."""
 
     @staticmethod
-    def start(argv: List[String], nice: Int = 0) raises -> Capture:
+    def start(
+        argv: List[String], nice: Int = 0, env: List[String] = List[String]()
+    ) raises -> Capture:
         """Starts `argv` (`argv[0]` looked up on `PATH`), its stdout to a
         new file under `TMPDIR`, its stderr shared with this process; `nice`
-        lowers its CPU priority."""
+        lowers its CPU priority; `env`'s `NAME=VALUE`s are added to its
+        environment only, as `spawn`'s."""
         if len(argv) == 0:
             raise Error("capture: no program")
+        var names = List[List[UInt8]]()
+        var values = List[List[UInt8]]()
+        for kv in env:
+            var eq = kv.find("=").or_else(-1)
+            if eq <= 0:
+                raise Error("capture: an environment entry isn't NAME=VALUE")
+            names.append(_cstr(String(kv[byte=:eq])))
+            values.append(_cstr(String(kv[byte = eq + 1 :])))
         var what = String()
         for i in range(len(argv)):
             what.write(" " if i > 0 else "", argv[i])
@@ -265,6 +276,10 @@ struct Capture(Copyable, Movable):
                 _ = external_call["setpriority", c_int](
                     c_int(0), c_int(0), c_int(nice)
                 )
+            for k in range(len(names)):
+                _ = external_call["setenv", c_int](
+                    names[k].unsafe_ptr(), values[k].unsafe_ptr(), c_int(1)
+                )
             var f = external_call["fopen", Int](
                 path_c.unsafe_ptr(), mode.unsafe_ptr()
             )
@@ -278,6 +293,8 @@ struct Capture(Copyable, Movable):
             external_call["_exit", NoneType](c_int(127))
         _ = args^
         _ = ptrs^
+        _ = names^
+        _ = values^
         return Capture(Int(pid), path^, what^, t, -1)
 
     def seconds(self) -> Float64:
@@ -331,13 +348,16 @@ struct Capture(Copyable, Movable):
 
 
 def capture(
-    argv: List[String], timeout: Float64 = 0, nice: Int = 0
+    argv: List[String],
+    timeout: Float64 = 0,
+    nice: Int = 0,
+    env: List[String] = List[String](),
 ) raises -> Tuple[Int, String]:
     """Runs `argv` to the end and returns its exit code and standard output.
     With a `timeout` (seconds), a command still going then is killed, with
     what it started, and this raises saying so. `nice` lowers its CPU
-    priority."""
-    var c = Capture.start(argv, nice)
+    priority; `env` is added to its environment."""
+    var c = Capture.start(argv, nice, env)
     while not c.ended():
         if timeout > 0 and c.seconds() > timeout:
             c.kill()

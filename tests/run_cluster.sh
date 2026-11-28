@@ -23,6 +23,11 @@
 #   while gc had room, never joined as a member with no group;
 # - gb's GPU is free again once the first run ends: the second gets it.
 #
+# Then demand per group: gpufan on pool h with its group gpu at "0..1" and
+# no GPUs. Its head's host ha reports the head's status; hb joins as the
+# group's member only after that, once the gpu tasks wait; the run's JSON
+# says what the group wants; and the run gets the same answer.
+#
 # Needs MORCA_DATABASE_URL (pixi run test-run-cluster).
 set -eu
 cd "$(dirname "$0")/.."
@@ -223,4 +228,66 @@ jq -e '[.cluster[] | select(.role == "member")] | length == 2 and any(.group == 
 curl -fsS "$base/runs/$g1" | grep -qF '<code>gpu</code>' || fail "the Cluster card doesn't show the member's group"
 curl -fsS "$base/runs/$g1" | grep -qF '1 GPU' || fail "the Cluster card doesn't show the member's GPU"
 echo "ok   the run's page and JSON show each member's group and GPUs"
+
+# Demand per group: gpufan again, on pool h, with its group gpu a range of
+# 0..1 asking for no GPU, and no workers of its own. hb is idle beside the
+# head's host ha, and joins only once ha has reported that the head's gpu
+# tasks are waiting for a worker of their group.
+cat > build/run-cluster-demand.toml << 'EOF2'
+[pipelines.gpufan]
+placement = "worker:h"
+max_runs = 2
+
+[pipelines.gpufan.groups.gpu]
+workers = "0..1"
+EOF2
+./build/morca register --config build/run-cluster-demand.toml ./build/gpufan >> "$log" 2>&1 || fail "register gpufan on h"
+is "SELECT coalesce(ec2_workers, 0) || ' ' || (groups->0->>'workers') FROM orca.pipelines WHERE name = 'gpufan'" "0 0..1" \
+    || fail "gpufan's range: $(q "SELECT ec2_workers, groups FROM orca.pipelines WHERE name = 'gpufan'")"
+hta=$(./build/morca worker-token create --pool h --label ha 2>> "$log") || fail "token ha"
+htb=$(./build/morca worker-token create --pool h --label hb 2>> "$log") || fail "token hb"
+rm -f "$marks"/*.env
+export GPUFAN_SLEEP=3 MORCA_SCALE_REPORT_SECONDS=2
+worker ha "$hta" h 0
+./build/morca backfill gpufan 2024-03 >> "$log" 2>&1 || fail "backfill gpufan 2024-03"
+g3=$(q "SELECT max(id) FROM orca.runs")
+h_head() { is "SELECT count(*) FROM orca.runs r JOIN orca.workers w ON w.id = r.worker WHERE r.id = $g3 AND r.cluster_head IS NOT NULL AND w.label = 'ha'" 1; }
+until_ 30 "ha didn't start run $g3 as a cluster: $(q "SELECT status, held, cluster_head FROM orca.runs WHERE id = $g3")" h_head
+worker hb "$htb" h 0
+# Until the head's first status, the group wants its MIN, 0: no member.
+gpu_members() { q "SELECT count(*) FROM orca.run_members WHERE run = $g3 AND worker_group = 'gpu'"; }
+before=0
+reported() {
+    got=$(q "SELECT (demand_at IS NOT NULL)::int || ' ' || (SELECT count(*) FROM orca.run_members m WHERE m.run = r.id AND m.worker_group = 'gpu') FROM orca.runs r WHERE id = $g3")
+    case "$got" in
+    "0 0") before=$((before + 1)); return 1 ;;
+    "0 "*) fail "a member of gpu joined before any demand: $got" ;;
+    *) return 0 ;;
+    esac
+}
+until_ 30 "ha reported no demand for run $g3" reported
+echo "ok   no member of gpu joins run $g3 before its head reports demand ($before polls before)"
+until_ 30 "hb didn't join run $g3's gpu group: $(q "SELECT worker_group, wanted, short_since FROM orca.run_wants WHERE run = $g3") $(q "SELECT demand FROM orca.runs WHERE id = $g3")" \
+    is "SELECT count(*) FROM orca.run_members m JOIN orca.workers w ON w.id = m.worker WHERE m.run = $g3 AND m.worker_group = 'gpu' AND w.label = 'hb'" 1
+is "SELECT wanted FROM orca.run_wants WHERE run = $g3 AND worker_group = 'gpu'" 1 \
+    || fail "run $g3's gpu group doesn't want 1: $(q "SELECT worker_group, wanted FROM orca.run_wants WHERE run = $g3")"
+is "SELECT count(*) FROM orca.run_wants WHERE run = $g3 AND worker_group = ''" 0 \
+    || fail "run $g3 decided for workers with no group it doesn't have"
+q "SELECT demand FROM orca.runs WHERE id = $g3" >> "$log"
+q "SELECT demand FROM orca.runs WHERE id = $g3" | jq -e '.groups | any(.group == "gpu")' > /dev/null \
+    || fail "run $g3's kept demand has no gpu group: $(q "SELECT demand FROM orca.runs WHERE id = $g3")"
+curl -fsS -H 'Accept: application/json' "$base/runs/$g3" > "$dir/g3.json" || fail "run $g3's JSON"
+jq -e '.cluster_wants == [{"group": "gpu", "min": 0, "max": 1, "live": 1, "wanted": 1, "decided": true, "demand_at": .cluster_wants[0].demand_at}] and (.cluster_wants[0].demand_at | type == "string")' "$dir/g3.json" > /dev/null \
+    || fail "run $g3's JSON cluster_wants: $(jq -c .cluster_wants "$dir/g3.json")"
+curl -fsS "$base/runs/$g3" | grep -qF '<th>Wanted</th>' || fail "the Cluster card doesn't show what each kind wants"
+echo "ok   hb joins as gpu's member once the head reports its tasks waiting; the JSON shows it wanted ($(jq -c '.cluster_wants[0] | {live, wanted}' "$dir/g3.json"))"
+until_ 120 "run $g3 didn't succeed: $(q "SELECT status, error FROM orca.runs WHERE id = $g3")" \
+    is "SELECT status FROM orca.runs WHERE id = $g3" succeeded
+logged_g3() { grep -q "56 from plain and model tasks" "$MORCA_LOGS/gpufan/$g3/driver.log" 2> /dev/null; }
+until_ 30 "no total in run $g3's driver log" logged_g3
+for f in "$marks"/model-*.env; do
+    grep -qx 'DISTA_GROUP=gpu' "$f" && grep -qx 'HOSTNAME=whb' "$f" \
+        || fail "a gpu task of run $g3 ran in $(basename "$f"): $(tr '\n' ' ' < "$f")"
+done
+echo "ok   run $g3 grew its gpu group from 0 by demand and got the right answer (56)"
 echo "run cluster: ok"
