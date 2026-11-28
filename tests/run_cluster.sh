@@ -92,6 +92,16 @@ stop_worker() { # NAME
     kill "$p" 2> /dev/null || true
     wait "$p" 2> /dev/null || true
 }
+# A run's cluster is gone once no process has its token: its head and
+# dista worker, stopped by its worker once the run's process has been
+# reaped, and its members, stopped on their workers' next claims. A
+# worker killed before then leaves them running (they lead process groups
+# of their own), and one_cluster_test's lock with them.
+cluster_gone() { # RUN
+    tok=$(q "SELECT coalesce(cluster_token, '') FROM orca.runs WHERE id = $1")
+    [ -n "$tok" ] || return 0
+    ! ps axeww -o command 2> /dev/null | grep -F "DISTA_TOKEN=$tok" | grep -vq -e "grep -F"
+}
 
 # a starts the run as a cluster.
 worker a "$ta"
@@ -297,6 +307,7 @@ echo "ok   run $g3 grew its gpu group from 0 by demand and got the right answer 
 # as a worker from before demand): nothing would grow its group, so it
 # wants its MAX at once, as before demand.
 is "SELECT coalesce(reports_demand, false) FROM orca.workers WHERE label = 'ha'" t || fail "ha's claims don't say it reports demand"
+until_ 30 "run $g3's head or members are still running" cluster_gone "$g3"
 stop_worker ha
 stop_worker hb
 htc=$(./build/morca worker-token create --pool h --label hc 2>> "$log") || fail "token hc"
@@ -318,4 +329,10 @@ until_ 120 "run $g4 didn't succeed: $(q "SELECT status, error FROM orca.runs WHE
     is "SELECT status FROM orca.runs WHERE id = $g4" succeeded
 is "SELECT count(*) FROM orca.run_wants WHERE run = $g4" 0 || fail "run $g4 was decided on with no demand reported"
 echo "ok   a head whose worker reports no demand wants its group's MAX at once (run $g4)"
+# Nothing of pool h's runs is left once their workers have stopped them.
+until_ 30 "run $g4's head or members are still running" cluster_gone "$g4"
+stop_worker hb
+stop_worker hc
+for r in $g3 $g4; do cluster_gone "$r" || fail "run $r's head or members outlived its workers"; done
+echo "ok   pool h's runs leave no head, dista worker or member running"
 echo "run cluster: ok"
