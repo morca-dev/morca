@@ -20,9 +20,9 @@ the scheduler says.
   bound is killed (`overdue`).
 """
 
-from std.ffi import c_int, external_call
+from std.ffi import external_call
 from std.memory import stack_allocation
-from std.os import getenv, listdir
+from std.os import listdir
 from std.sys.info import CompilationTarget
 
 from dista.socket import resolve_ipv4
