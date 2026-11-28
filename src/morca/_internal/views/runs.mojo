@@ -21,7 +21,11 @@ from morca._internal.db.run_view import (
 )
 from morca._internal.db.runs_view import RunRecord, RunsFilter
 
-from morca._internal.views.cluster import cluster_rows
+from morca._internal.views.cluster import (
+    ClusterWants,
+    cluster_rows,
+    cluster_wants,
+)
 from morca._internal.handover import run_outdated
 from morca._internal.html import (
     query_param,
@@ -939,6 +943,8 @@ struct RunView(Movable):
     var instances: List[InstanceRow]
     var cluster: List[ClusterRow]
     """The workers its dista cluster spread over (`morca._internal.views.cluster`)."""
+    var wants: ClusterWants
+    """The members of each kind its cluster wants and has."""
     var metrics: List[InstanceMetrics]
     var prev: Int64
     """The pipeline's run before it, or 0."""
@@ -962,6 +968,7 @@ struct RunView(Movable):
         self.touches = List[Touch]()
         self.instances = List[InstanceRow]()
         self.cluster = List[ClusterRow]()
+        self.wants = ClusterWants.none()
         self.metrics = List[InstanceMetrics]()
         self.prev = 0
         self.next = 0
@@ -995,6 +1002,7 @@ def run_view(mut db: State, id: Int) raises -> Optional[RunView]:
         v.sensed.append(SnapshotRef(x[0], x[1]))
     v.instances = instance_rows(db, id)
     v.cluster = cluster_rows(db, id)
+    v.wants = cluster_wants(db, id)
     v.metrics = read_metrics(r.pipeline, id)
     # The pipeline's runs in order (all triggers, fills too).
     var nb = run_db.neighbours(db.conn, r.pipeline, r.id)

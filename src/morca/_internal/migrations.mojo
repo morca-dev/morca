@@ -1002,6 +1002,26 @@ def _migrations() -> List[List[String]]:
             "ALTER TABLE orca.workers ADD COLUMN slots integer",
             "ALTER TABLE orca.workers ADD COLUMN member_groups boolean",
         ],
+        # Demand per group on pools (docs/groups.md): a run's head's last
+        # status, as the worker that runs it reports it, and when; and the
+        # members of each kind (the workers with no group, '', and each
+        # group) it wants at each start, with `decide`'s memory
+        # (`morca._internal.run_demand`); and whether a worker's claims say
+        # it reports its heads' demand. Additive: nullable columns and a
+        # new table the binaries before it neither read nor write.
+        [
+            "ALTER TABLE orca.runs ADD COLUMN demand jsonb",
+            "ALTER TABLE orca.runs ADD COLUMN demand_at timestamptz",
+            "ALTER TABLE orca.workers ADD COLUMN reports_demand boolean",
+            (
+                "CREATE TABLE orca.run_wants (run bigint NOT NULL REFERENCES"
+                " orca.runs ON DELETE CASCADE, start integer NOT NULL,"
+                " worker_group text NOT NULL DEFAULT '', wanted integer NOT"
+                " NULL, short_since double precision NOT NULL DEFAULT 0,"
+                " decided_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY"
+                " (run, start, worker_group))"
+            ),
+        ],
     ]
 
 
@@ -1085,6 +1105,11 @@ def _floor_raisers() -> List[Int]:
     binaries before it neither read nor write. Their `join_claim` counts
     every live member against `workers`, grouped ones too, so it may offer
     a run fewer members than it wants, never a grouped one.
+    73 (`runs.demand`, `demand_at`, `workers.reports_demand`,
+    `orca.run_wants`, docs/groups.md) is
+    additive: nullable columns and a new table the binaries before it
+    neither read nor write. Their `join_claim` and pool demand want each
+    kind's MAX, as before, whatever was decided from demand.
     """
     return [1, 24]
 

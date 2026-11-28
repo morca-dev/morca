@@ -12,10 +12,12 @@ side: the run's head, the members that join it, and when they stop.
 - **Members.** A worker of the pool with room, and an address, that has no
   run to start is given one to join (`join_claim`): a running run of the
   pool whose head is known, that isn't already this worker's, and that
-  wants a member this worker can serve. A run wants its `workers` members
-  with no group, sized as a run of the pipeline would be on that machine,
-  and each of its groups' MAX (docs/groups.md), sized by the group's
-  request and of the group's GPUs (`morca._internal.member_wants`). A
+  wants a member this worker can serve. A run wants members with no group
+  (its `workers`), sized as a run of the pipeline would be on that machine,
+  and members of each of its groups (docs/groups.md), sized by the group's
+  request and of the group's GPUs (`morca._internal.member_wants`): of each
+  kind, what was last decided from its head's demand
+  (`morca._internal.run_demand`), else its MIN. A
   member is counted against the machine's room with its runs, and kept in
   `orca.run_members` with its group. The worker starts a dista worker
   against the head, with the token (dista's `DISTA_TOKEN`: nothing without
@@ -28,6 +30,9 @@ side: the run's head, the members that join it, and when they stop.
   and no other worker of the pool on a host without GPUs has room for it
   (`cluster_db.other_has_room`). The GPUs a claim says are free cap those
   offered, so a member still being stopped keeps its GPUs until reaped.
+  A run with a group that asks for GPUs isn't started as its head by a
+  host with GPUs while one without could start it (`head_elsewhere`): the
+  head's host serves no group, so its GPUs would sit idle for the run.
 - **Stopping.** Each claim's answer lists this worker's members whose run
   isn't running at that start any more (`members_to_stop`): the worker
   kills them, and they're ended "its run ended".
@@ -43,7 +48,9 @@ from morca._internal.http_store import Body
 from morca._internal.member_wants import (
     Want,
     group_request,
+    groups_ask_gpus,
     gpu_host_takes,
+    kinds_of,
     offer_order,
     wanted,
     wants_gpus_of,
@@ -57,8 +64,56 @@ from morca._internal.state import State
 def members_of(mut db: State, pipeline: String) raises -> Int:
     """How many more machines `pipeline`'s runs may spread over: its
     `workers` and each of its groups' MAX, when set for it; 0 (one
-    machine) when none is."""
+    machine) when none is. A run that may ever want a member starts its
+    head, whatever its kinds want at first."""
     return cluster_db.spread(db.conn, pipeline)
+
+
+def head_elsewhere(
+    mut db: State,
+    p: Registered,
+    placement: String,
+    worker: Int,
+    run: Int,
+    gpus: Int,
+    request: Request,
+) raises -> Bool:
+    """Whether a worker on a host with `gpus` GPUs leaves queued `run` of
+    `p` to another: when `p` has a group that asks for GPUs, and a worker
+    of the pool on a host without GPUs could start it now
+    (`cluster_db.other_has_room`, for `request`). The head's host serves
+    no group, so the run couldn't use this host's GPUs."""
+    if gpus <= 0 or not groups_ask_gpus(p.groups):
+        return False
+    return cluster_db.other_has_room(
+        db.conn,
+        placement,
+        worker,
+        run,
+        -1,
+        request.cpus_min,
+        request.memory_min_mb,
+        True,
+    )
+
+
+def say_gpu_head(p: Registered, run: Int, gpus: Int, name: String):
+    """Logs it when a host with GPUs starts a run whose groups ask for
+    them: no host without GPUs could, and the run's groups get none of
+    this host's."""
+    if gpus > 0 and groups_ask_gpus(p.groups):
+        print(
+            "morca: run",
+            run,
+            "of",
+            p.name,
+            "starts on",
+            name if name else String("a worker"),
+            "with",
+            gpus,
+            "GPUs, as no host of its pool without GPUs could: its groups",
+            "that ask for GPUs can't use this host's",
+        )
 
 
 def report_head(mut db: State, worker: Int, v: Value) raises -> String:
@@ -191,7 +246,8 @@ struct _Offer(Copyable, Movable):
 
 
 def live_by_group(text: String) raises -> Dict[String, Int]:
-    """`Joinable.live`'s JSON object of counts, by group."""
+    """`Joinable.live`'s (or `decided`'s) JSON object of counts, by
+    group."""
     var out = Dict[String, Int]()
     if not text:
         return out^
@@ -232,9 +288,14 @@ def join_claim(
             continue
         pipelines.append(ps[0].copy())
         var wants = wanted(
-            c.workers,
-            ps[0].groups,
-            live_by_group(c.live),
+            kinds_of(
+                c.min_workers,
+                c.workers,
+                ps[0].groups,
+                live_by_group(c.decided),
+                live_by_group(c.live),
+                c.reports,
+            ),
             understands_groups,
         )
         var gpus_wanted = wants_gpus_of(wants, gpus)

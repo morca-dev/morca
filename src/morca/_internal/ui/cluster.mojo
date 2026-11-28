@@ -6,6 +6,8 @@ from morca._internal.json import quote
 from morca._internal.resources import gpus_text
 from morca._internal.ui.layout import card_open
 from morca._internal.db.run_view import ClusterRow
+from morca._internal.member_wants import Kind
+from morca._internal.views.cluster import ClusterWants
 
 comptime _HELP = (
     "This run's dista cluster spread over several workers of its pool"
@@ -14,8 +16,57 @@ comptime _HELP = (
     " each member is a worker that joined it, running dista workers against"
     " that head with what its own machine granted. A member of a worker"
     " group runs only that group's tasks, and its grant may hold GPUs. A"
-    " member ends with its run, or when its process does."
+    " member ends with its run, or when its process does. Wanted is how many"
+    " members of each kind the run wants now: its MIN until its head reports"
+    " demand (its MAX if the head's worker doesn't report any), then what"
+    " morca decided from it, within the range (workers ="
+    ' "MIN..MAX"). A kind with more live members than it wants gets no new'
+    " ones."
 )
+
+
+def range_text(k: Kind) -> String:
+    """A kind's range: `2`, or `0..4`."""
+    if k.min_workers == k.max_workers:
+        return String(k.max_workers)
+    return String(k.min_workers, "..", k.max_workers)
+
+
+def _wants_html(mut h: Html, w: ClusterWants):
+    """The members of each kind the run wants and has."""
+    if len(w.kinds) == 0:
+        return
+    h.raw('<p class="muted">')
+    if w.demand_at:
+        h.text(String("Demand from its head at ", w.demand_at, "."))
+    else:
+        h.text(
+            "No demand from its head yet: each kind wants its MIN, or its MAX"
+            " when the head's worker doesn't report demand."
+        )
+    h.raw("</p>")
+    h.raw(
+        '<div class="scroll"><table><thead><tr><th>Group</th><th>Range</th>',
+        "<th>Live</th><th>Wanted</th></tr></thead><tbody>",
+    )
+    for k in w.kinds:
+        h.raw("<tr><td>")
+        if k.group:
+            h.raw("<code>")
+            h.text(k.group)
+            h.raw("</code>")
+        else:
+            h.text("-")
+        h.raw("</td><td>")
+        h.text(range_text(k))
+        h.raw("</td><td>")
+        h.text(String(k.live))
+        h.raw("</td><td>")
+        h.text(String(k.wanted))
+        if not k.decided and k.min_workers != k.max_workers:
+            h.text(" (MIN)" if k.wanted == k.min_workers else " (MAX)")
+        h.raw("</td></tr>")
+    h.raw("</tbody></table></div>")
 
 
 def grant_text(r: ClusterRow) -> String:
@@ -31,11 +82,12 @@ def grant_text(r: ClusterRow) -> String:
     return ", ".join(parts)
 
 
-def cluster_html(mut h: Html, rows: List[ClusterRow]):
+def cluster_html(mut h: Html, rows: List[ClusterRow], wants: ClusterWants):
     """The Cluster card; nothing for a run on one machine."""
     if len(rows) == 0:
         return
     card_open(h, "cluster", "Cluster", _HELP, "workers", facts=False)
+    _wants_html(h, wants)
     h.raw(
         '<div class="scroll"><table><thead><tr><th>Role</th><th>Worker</th>',
         "<th>Group</th><th>Start</th><th>Address</th><th>Grant</th>",
@@ -99,6 +151,35 @@ def cluster_json(rows: List[ClusterRow]) -> String:
             quote(r.ended) if r.ended else String("null"),
             ', "why": ',
             quote(r.why) if r.why else String("null"),
+            "}",
+        )
+    out.write("]")
+    return out^
+
+
+def cluster_wants_json(w: ClusterWants) -> String:
+    """The members of each kind the run wants and has, as JSON: a list,
+    empty for a run without a head. `group` is null for the workers with no
+    group; `decided` says whether `wanted` came from its head's demand."""
+    var out = String("[")
+    for i in range(len(w.kinds)):
+        ref k = w.kinds[i]
+        out.write(
+            ", " if i else "",
+            '{"group": ',
+            quote(k.group) if k.group else String("null"),
+            ', "min": ',
+            k.min_workers,
+            ', "max": ',
+            k.max_workers,
+            ', "live": ',
+            k.live,
+            ', "wanted": ',
+            k.wanted,
+            ', "decided": ',
+            "true" if k.decided else "false",
+            ', "demand_at": ',
+            quote(w.demand_at) if w.demand_at else String("null"),
             "}",
         )
     out.write("]")

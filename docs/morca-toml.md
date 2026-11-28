@@ -60,7 +60,7 @@ Each key can go in `[defaults]` or in `[pipelines.<name>]`.
 | `placement` | string: `"control"`, `"ec2"`, `"worker:<pool>"` or `"default"` | `default`, the scheduler's runner (`MORCA_RUNNER`) | `--placement` | `control` runs on the scheduler's host (`morca._internal.control`). `worker:<pool>` runs on a remote worker of that pool (`morca worker`), never the scheduler: [workers.md](workers.md). All four: [placement.md](placement.md). |
 | `head_type` | string, an instance type | `MORCA_EC2_HEAD_TYPE`, else `c7g.large` | `--head-type` | Only used on EC2. |
 | `worker_type` | string, an instance type | `MORCA_EC2_WORKER_TYPE`, else `c7g.xlarge` | `--worker-type` | Only used on EC2. |
-| `workers` | integer `N` (at least 1), or string `"MIN..MAX"` | the code's `workers`, else 2; 0 for a pipeline without tasks | `--workers` | With `MIN..MAX`, the run scales between the two. |
+| `workers` | integer `N` (at least 1), or string `"MIN..MAX"` | the code's `workers`, else 2; 0 for a pipeline without tasks; on a pool, none | `--workers` | With `MIN..MAX`, the run scales between the two. On a pool (`worker:<pool>`) only this registered value counts, not the code's, since every pipeline's code carries one (2 by default); a range starts with MIN members and grows by demand ([workers.md](workers.md#demand-on-a-pool)). |
 | `worker_procs` | integer from 1 to 256, or `"auto"` | 1 | `--worker-procs` | `auto` means one dista process per vCPU. |
 | `max_runs` | integer from 1 to 10000, or string `"auto"` or `"auto..N"` | the code's `Pipeline[..., max_runs=]`, else 1 | `--max-runs` (new) | Overrides the code's value. `auto`: [How many at once](#how-many-at-once). |
 | `cpus` | integer `N` from 1 to 1024, or string `"MIN..MAX"`, `"auto"` or `"auto..MAX"` | none: no request | `--cpus` | Whole CPUs the run asks for. See [Requests and grants](#requests-and-grants); `auto`: [Learned requests](#learned-requests). |
@@ -378,12 +378,19 @@ On a pool, each group's members are its own:
   none) and granted its `gpus` whole (`MORCA_GRANT_GPUS`,
   `CUDA_VISIBLE_DEVICES`). The worker that starts the run, with its head,
   driver and own dista worker, belongs to no group.
-- **Every group asks for its MAX**, as the workers with no group ask for
-  `workers` today: MIN is honoured once morca asks dista how many each
-  group needs ([groups.md](groups.md#demand-per-group)).
+- **Each group starts with its MIN** and grows to its MAX by demand, as
+  the workers with no group do with a range: the worker that runs the
+  run's head reports the head's status every `MORCA_SCALE_REPORT_SECONDS`
+  (5), and the scheduler asks dista's `decide` per group how many members
+  it wants (`MORCA_SCALE_UP_AFTER`, `MORCA_SCALE_IDLE`, `MORCA_SCALE_STEP`).
+  A count is its own MIN and MAX. A head on a worker that doesn't report
+  demand (`MORCA_SCALE_REPORT_SECONDS=0`) has each group want its MAX. No
+  member is stopped before its run ends yet
+  ([workers.md](workers.md#demand-on-a-pool)).
 - **Hosts.** A host with GPUs is offered the members that ask for GPUs
   first, and joins as one that asks for none only when no host without
-  GPUs has room for it.
+  GPUs has room for it. It doesn't start the run itself, as its head,
+  while a host without GPUs could.
 - **The run needs workers that advertise.** A run of a pipeline with
   groups is given only to a worker started with `--advertise`, since only
   such a worker starts a run as a cluster; one without stays queued, held

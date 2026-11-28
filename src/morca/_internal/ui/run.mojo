@@ -8,7 +8,7 @@ each machine's log.
 import morca._internal.db.run_view as run_db
 
 from morca._internal.ui.cluster import cluster_html
-from morca._internal.views.cluster import cluster_rows
+from morca._internal.views.cluster import cluster_rows, cluster_wants
 from morca._internal.dag import DagStep, aggregate, dag_svg
 from morca._internal.html import Html, url_encode
 from morca._internal.db.lineage import SnapshotRef
@@ -689,7 +689,7 @@ def _run_state(mut h: Html, mut db: State, r: RunRow, view: String = "") raises:
     var instances = instance_rows(db, r.id)
     if len(instances) > 0:
         instances_html(h, r.id, instances)
-    cluster_html(h, cluster_rows(db, r.id))
+    cluster_html(h, cluster_rows(db, r.id), cluster_wants(db, r.id))
 
 
 def run_live(mut db: State, id: Int) raises -> Page:

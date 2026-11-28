@@ -217,11 +217,18 @@ so the fill goes on on the other machine.
 A pipeline with dista tasks can spread one run's cluster over several
 workers of its pool (#268). `workers = N` (or `--workers N`) on a pipeline
 placed `worker:<pool>` lets each run use up to N more machines than the one
-that starts it; without it, a run stays on one machine, as before. This is
-what `Pipeline[workers=]` means on a pool. A local run forks `MORCA_WORKERS`
-dista workers (default 4) and ignores the pipeline's `workers`; `workers`
-applies on EC2 (worker instances), on Kubernetes (dista workers) and on a
-pool (extra machines).
+that starts it; without it, a run stays on one machine, as before. A range,
+`workers = "MIN..MAX"`, starts each run with MIN more machines and grows it
+to MAX as its head's demand asks ([Demand on a pool](#demand-on-a-pool)). A
+local run forks `MORCA_WORKERS` dista workers (default 4) and ignores the
+pipeline's `workers`; `workers` applies on EC2 (worker instances), on
+Kubernetes (dista workers) and on a pool (extra machines).
+
+On a pool only the registered `workers` counts: morca.toml's, or
+`--workers`. `Pipeline[workers=]` in the code isn't read there, because
+every pipeline's `describe` carries a `workers` (2 when the code sets
+none), so reading it would have every pool pipeline with tasks ask for two
+more machines for each run.
 
 ```toml
 [pipelines.fanout]
@@ -271,12 +278,13 @@ group:
   recorded in `orca.run_members` with its group (`worker_group`, migration
   72). The worker that started the run, with the head, the driver and its
   own dista worker, has no group, as before.
-- **How many.** The workers with no group want the pipeline's `workers`,
-  as before. Each group wants its MAX (`workers = "0..2"` wants 2), until
-  morca asks dista how many each group needs
-  ([groups.md](groups.md#demand-per-group)); a pool that grows counts the
-  missing members of the groups that ask for no GPU as its demand, as it
-  does those with no group.
+- **How many.** The workers with no group and each group are kinds of
+  member, each with its range: the pipeline's `workers` for those with no
+  group, the group's `workers` for a group. Each kind starts with its MIN
+  and grows by its head's demand ([Demand on a pool](#demand-on-a-pool)); a
+  count (`workers = 2`) is its own MIN and MAX, so it wants that many from
+  the start. A pool that grows counts the missing members of the groups
+  that ask for no GPU as its demand, as it does those with no group.
 - **Which host.** An idle worker is offered, of the oldest running run
   first, a member it can serve: one its room fits, with a free GPU if the
   group asks one. A host with GPUs is offered the members that ask for
@@ -289,6 +297,55 @@ group:
   from before them is offered only members with no group, as before.
 - **The run's page** lists each member's group and the GPUs it was
   granted in its Cluster card.
+- **The head's host.** A host with GPUs doesn't start a run of a pipeline
+  with a group that asks for GPUs while a live host of the pool without
+  GPUs could: the head's host serves no group, so its GPUs would sit idle
+  for the run. A pool of hosts with GPUs only still starts it; the
+  worker's log says the run's groups can't use that host's GPUs.
+
+### Demand on a pool
+
+A run that spreads over a pool grows by what its dista head says it needs,
+per kind of member ([groups.md](groups.md#demand-per-group)):
+
+- **Who reports.** The worker that started the run, which runs its head,
+  asks the head for its status (`<binary> dista-status`, `dista status
+  --json`) every `MORCA_SCALE_REPORT_SECONDS` (5; 0 turns it off), and
+  sends the answer with its next claim. A head that doesn't answer within
+  3 s is skipped. The scheduler can't always reach a head, and its host
+  can. Each claim says whether the worker reports (`"reports_demand"`,
+  kept as `orca.workers.reports_demand`).
+- **What the scheduler keeps.** The last answer and when it came, on the
+  run (`orca.runs.demand`, `demand_at`, migration 73), and an answer for a
+  run that isn't that worker's is ignored.
+- **Deciding.** With each answer, the scheduler asks dista's `decide`, once
+  per kind, how many dista workers that kind needs, with the kind's range
+  as the bounds: `MORCA_SCALE_UP_AFTER` (5 s) of tasks waiting before it
+  grows, `MORCA_SCALE_STEP` (4) members at most at once, and
+  `MORCA_SCALE_IDLE` (60 s) before an idle member counts as unneeded, the
+  knobs the `ec2` placement uses. A member is one dista worker. The workers
+  with no group also include the head's host's own, which isn't a member,
+  so they want one less than dista counts. What each kind wants is kept in
+  `orca.run_wants`, with `decide`'s memory, so a restarted UI goes on where
+  it was.
+- **MIN, then growth.** Until its head's first answer at a start, each kind
+  wants its MIN when the head's worker reports demand, and its MAX when it
+  doesn't (one from before demand, or with `MORCA_SCALE_REPORT_SECONDS=0`),
+  since nothing would grow it; if answers stop, it keeps what was last
+  decided. A run
+  whose kinds could ever want a member starts its head even when every MIN
+  is 0.
+- **No shrinking yet.** A kind that wants fewer members than it has is
+  given no new ones; none is stopped before its run ends. Draining a
+  member mid-run comes next ([groups.md](groups.md#prs), PR 4b).
+- **On the page.** The run's Cluster card, and its JSON's `cluster_wants`,
+  show each kind's range, live members and what it wants now.
+
+A behaviour change: a pool run with `workers = "MIN..MAX"` asked for MAX
+members as soon as it started. Now, when the worker that runs its head
+reports demand, it starts with MIN and grows by demand. With reporting
+turned off, or a head on a worker from before this, a range still asks for
+MAX at once.
 
 Only pools use groups for now: a local run, `control`, Kubernetes and the
 `ec2` placement start their workers as before, with no group.
@@ -299,8 +356,9 @@ Only pools use groups for now: a local run, `control`, Kubernetes and the
   (EC2: its private address);
 - its worker runs with host networking, so dista's ports are on that
   address;
-- a running run that wants more members than have joined counts as the
-  pool's demand, so the pool grows for it (up to `max_machines`), and the
+- a running run that wants more members than have joined (what each kind
+  wants now, [Demand on a pool](#demand-on-a-pool)) counts as the pool's
+  demand, so the pool grows for it (up to `max_machines`), and the
   new machine joins the run (a group's that asks for GPUs doesn't count
   yet: a pool has no machine type with GPUs until `gpu_machines`,
   [groups.md](groups.md#demand-per-group));

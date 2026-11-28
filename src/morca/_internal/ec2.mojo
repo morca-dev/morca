@@ -135,6 +135,7 @@ from morca._internal.config import (
 from morca._internal.json import quote
 from morca._internal.proc import capture
 from morca._internal.sample import sample_seconds
+from morca._internal.scale_policy import ScaleKnobs
 from morca._internal.secrets import parse_secrets
 from morca._internal.state import State
 
@@ -326,9 +327,8 @@ struct Ec2Runner(Movable):
     """How long a head may go on after its run ended, to shut itself
     down, before the sweep terminates it."""
     var env: List[String]
-    var up_after: Float64
-    var idle: Float64
-    var step: Int
+    var knobs: ScaleKnobs
+    """`MORCA_SCALE_*` (`morca._internal.scale_policy`)."""
     var short_since: Dict[String, Float64]
     """For each scaling run, `run-start`, since when it's been short of
     workers: `decide`'s memory between ticks."""
@@ -358,9 +358,7 @@ struct Ec2Runner(Movable):
         self.worker_type = getenv("MORCA_EC2_WORKER_TYPE", "c7g.xlarge")
         self.deadline = Int(getenv("MORCA_RUN_DEADLINE", "86400"))
         self.grace = Float64(getenv("MORCA_EC2_HEAD_GRACE", "60"))
-        self.up_after = Float64(getenv("MORCA_SCALE_UP_AFTER", "5"))
-        self.idle = Float64(getenv("MORCA_SCALE_IDLE", "60"))
-        self.step = Int(getenv("MORCA_SCALE_STEP", "4"))
+        self.knobs = ScaleKnobs.from_env()
         self.short_since = Dict[String, Float64]()
         self.no_workers = Int(getenv("MORCA_NO_WORKERS_SECONDS", "600"))
         self.pool_seconds = Float64(getenv("MORCA_EC2_POOL_SECONDS", "150"))
@@ -1281,13 +1279,7 @@ struct Ec2Runner(Movable):
     def policy(self, lo: Int, hi: Int, per: Int = 1) -> Policy:
         """The scaling policy over worker processes: `lo` to `hi` of them,
         and `MORCA_SCALE_STEP` instances of `per` at most at once."""
-        return Policy(
-            min_workers=lo,
-            max_workers=hi,
-            up_after=self.up_after,
-            idle_before_down=self.idle,
-            max_step=self.step * per,
-        )
+        return self.knobs.policy(lo, hi, per)
 
     def sweep(self, mut db: State) raises -> Int:
         """Terminates the instances of runs that aren't running at their

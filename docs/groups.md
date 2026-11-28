@@ -1,7 +1,7 @@
 # Worker groups and GPUs on pools: a plan
 
 November 27, 2026 · a plan for step 4 of [layers.md](layers.md); PRs 1
-to 3 are built
+to 3 and 4a are built
 
 dista now routes a task or an actor to the workers of a named group, reports
 demand per group and runs flows (dista #152 to #167). morca can't use any of
@@ -24,9 +24,12 @@ other ways a run gets workers.
 
 Two things found while reading that this plan fixes on the way:
 
-- On a pool, `workers = "MIN..MAX"` ignores MIN and asks for MAX members,
-  and `Pipeline[workers=]` in code is ignored (the SQL reads only the
-  registered column).
+- On a pool, `workers = "MIN..MAX"` ignores MIN and asks for MAX members
+  (fixed in PR 4a). `Pipeline[workers=]` in code is ignored there too (the
+  SQL reads only the registered column), and stays so: `describe` always
+  carries `workers` (2 by default), so reading it would have every pool
+  pipeline with tasks ask for two members. On a pool only the registered
+  `workers` counts.
 - The `DISTA_*` names morca sets aren't reserved in a pipeline's `env`.
 
 ## Requests: groups beside `workers`
@@ -95,8 +98,19 @@ memory_gb = 16
   The result is how many members of each group the run wants now.
 - `join_claim` and the pool's demand query use those wanted counts where
   they used `workers`. Before the first answer a run wants each group's
-  MIN, which is also the fix for the ignored MIN (PR 4; until then each
-  group wants its MAX).
+  MIN, which is also the fix for the ignored MIN (PR 4a; until then each
+  group wanted its MAX).
+- Units: dista counts its workers, and a member is one. The workers with
+  no group also count the head's host's own dista worker, which isn't a
+  member, so they want one less than `decide` says. `decide`'s memory
+  (since when a group is short) is kept per run, start and group in
+  `orca.run_wants`, so a restarted UI goes on where it was.
+- A host with GPUs doesn't start a run whose groups ask for GPUs as its
+  head while a host without GPUs could: the head's host serves no group.
+- A worker says in each claim whether it reports demand
+  (`reports_demand`). A run whose head is on one that doesn't (an older
+  worker, or reporting off) wants each kind's MAX until something is
+  decided, as before, since nothing would grow it from MIN.
 - When `decide` says a group has too many, the scheduler tells the member's
   host to stop it. The host drains the dista worker first (`dista-drain`)
   and kills it when it has left or after a timeout.
@@ -146,11 +160,12 @@ names it and moves the other providers behind it:
 | 1 | Groups in `morca.toml`, `Registered`, the database and `describe`; `config check`; reserve the `DISTA_*` names. No change in what runs. (done) | Unit tests of the parser and the stored form |
 | 2 | GPUs: the host's count, the claim, `Grant`, admission, the UI's host and run pages (done) | `test-grants` with `MORCA_HOST_GPUS` |
 | 3 | Members by group on pools: `run_members`, `join_claim`, `DISTA_GROUP` (done) | `test-run-cluster` with a GPU group on a mixed pair of hosts: the group's task runs only there |
-| 4 | Demand per group: the head's status with the claim, `decide` per group, draining a member, `gpu_machines` in a growing pool; MIN honoured, and `Pipeline[workers=]` read from code | `test-pool-scale` with a group that grows from 0 and drains when idle |
+| 4a | Demand per group: the head's status with the claim, `decide` per group, the wanted counts in `join_claim` and the pool's demand; MIN honoured; a host with GPUs leaves a run whose groups ask for GPUs to start on one without (done) | `test-run-cluster` with a group of `0..1` that grows from 0 once the head reports its tasks; unit tests of the decision |
+| 4b | Draining a member when `decide` says a group has too many, and `gpu_machines` in a growing pool | `test-pool-scale` with a group that grows from 0 and drains when idle |
 | 5 | The contract by name: one environment builder, groups on local, `control` and Kubernetes, warnings for the `ec2` placement | `test-kube`, and a local run with two groups |
 
 Each PR leaves a pipeline without groups behaving as it does today, except
-for the MIN fix in PR 4.
+for the MIN fix in PR 4a.
 
 ## Defaults (confirmed 2026-11-27)
 
