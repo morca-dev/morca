@@ -1,0 +1,1 @@
+- **Draining members and GPU machines on pools**: a pool run's idle members are now drained mid-run with dista's drain, down to each kind's MIN, a pool's new `gpu_machines` grow and shrink for the groups that ask for GPUs apart from its `machines`, and a host with GPUs defers to one without for `MORCA_GPU_DEFER_SECONDS` (60) at most; migration 74 is additive. (#612)
