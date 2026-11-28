@@ -1022,6 +1022,36 @@ def _migrations() -> List[List[String]]:
                 " (run, start, worker_group))"
             ),
         ],
+        # Draining members and GPU machines on pools (docs/groups.md, PR
+        # 4b): a member's dista worker address, as its host reports it,
+        # and when the scheduler asked it to drain; when hosts with GPUs
+        # first left a run's head or member to a host without them
+        # (`orca.gpu_defers`); a pool's `gpu_machines`, with their own
+        # trying state and status; and whether a pool machine was made
+        # from them. Additive: nullable columns, columns with defaults and
+        # a new table the binaries before it neither read nor write.
+        [
+            "ALTER TABLE orca.run_members ADD COLUMN address text",
+            "ALTER TABLE orca.run_members ADD COLUMN draining timestamptz",
+            (
+                "CREATE TABLE orca.gpu_defers (run bigint NOT NULL REFERENCES"
+                " orca.runs ON DELETE CASCADE, start integer NOT NULL, kind"
+                " text NOT NULL, since timestamptz NOT NULL DEFAULT now(),"
+                " PRIMARY KEY (run, start, kind))"
+            ),
+            "ALTER TABLE orca.pools ADD COLUMN gpu_machines jsonb",
+            (
+                "ALTER TABLE orca.pools ADD COLUMN gpu_trying integer NOT NULL"
+                " DEFAULT 0"
+            ),
+            "ALTER TABLE orca.pools ADD COLUMN gpu_trying_since timestamptz",
+            "ALTER TABLE orca.pools ADD COLUMN gpu_last_try timestamptz",
+            "ALTER TABLE orca.pools ADD COLUMN gpu_status text",
+            (
+                "ALTER TABLE orca.pool_machines ADD COLUMN gpu boolean NOT NULL"
+                " DEFAULT false"
+            ),
+        ],
     ]
 
 
@@ -1110,6 +1140,13 @@ def _floor_raisers() -> List[Int]:
     additive: nullable columns and a new table the binaries before it
     neither read nor write. Their `join_claim` and pool demand want each
     kind's MAX, as before, whatever was decided from demand.
+    74 (`run_members.address`, `draining`, `orca.gpu_defers`,
+    `pools.gpu_machines` and its `gpu_*` state, `pool_machines.gpu`,
+    docs/groups.md) is additive: nullable columns, columns with defaults
+    and a new table the binaries before it neither read nor write. Their
+    `join_claim` and pool demand count a member being drained as live until
+    it ends, and their autoscaler makes no GPU machine and removes an idle
+    one as any other.
     """
     return [1, 24]
 

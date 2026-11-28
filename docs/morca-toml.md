@@ -384,13 +384,16 @@ On a pool, each group's members are its own:
   (5), and the scheduler asks dista's `decide` per group how many members
   it wants (`MORCA_SCALE_UP_AFTER`, `MORCA_SCALE_IDLE`, `MORCA_SCALE_STEP`).
   A count is its own MIN and MAX. A head on a worker that doesn't report
-  demand (`MORCA_SCALE_REPORT_SECONDS=0`) has each group want its MAX. No
-  member is stopped before its run ends yet
-  ([workers.md](workers.md#demand-on-a-pool)).
+  demand (`MORCA_SCALE_REPORT_SECONDS=0`) has each group want its MAX. A
+  member that has gone idle is drained while the run goes on, never below
+  the group's MIN ([workers.md](workers.md#demand-on-a-pool)).
 - **Hosts.** A host with GPUs is offered the members that ask for GPUs
   first, and joins as one that asks for none only when no host without
   GPUs has room for it. It doesn't start the run itself, as its head,
-  while a host without GPUs could.
+  while a host without GPUs could. Either waits
+  `MORCA_GPU_DEFER_SECONDS` (60) at most, so a host without GPUs that
+  seems to have room but never takes the run (another image, say) can't
+  hold it for ever.
 - **The run needs workers that advertise.** A run of a pipeline with
   groups is given only to a worker started with `--advertise`, since only
   such a worker starts a run as a cluster; one without stays queued, held
@@ -883,6 +886,7 @@ idle_seconds = 900
 |---|---|---|---|
 | `provider` | `"hetzner"` or `"ec2"` | none | Where the machines are made; none for a self-hosted pool (below). |
 | `machines` | list of `{ type, wait }` | (required with a provider) | Machine types in order of preference. `wait` is how many seconds morca keeps trying a type before moving to the next; every entry but the last needs one. |
+| `gpu_machines` | list of `{ type, wait }` | none | A mixed pool's types with GPUs, as `machines` ([groups.md](groups.md)). Members of groups that ask for GPUs grow and shrink these, and nothing else does. |
 | `locations` | list of strings | none | Where to try each type, in order: Hetzner locations (required there), or EC2 subnet IDs (none: the default subnet, or `MORCA_EC2_SUBNET`). |
 | `max_machines` | 1 to 100 | 1 | The most machines the pool has at once. |
 | `idle_seconds` | 10 to 86400 | 900 | How long a machine may sit idle, with nothing queued for the pool, before it's removed. |
@@ -893,7 +897,7 @@ idle_seconds = 900
 
 A pool without a `provider` is self-hosted (#220): its machines join by
 hand (`morca worker-token create`, then `morca host join` or `morca
-worker` on each), and only `max_runs`, `env`, `secrets` and `volumes` apply; `machines`, `locations`,
+worker` on each), and only `max_runs`, `env`, `secrets` and `volumes` apply; `machines`, `gpu_machines`, `locations`,
 `max_machines` and `idle_seconds` are refused there. It's recorded in
 `orca.pool_settings`, not `orca.pools`, so the autoscaler leaves it alone.
 
@@ -917,6 +921,15 @@ The leading scheduler grows and shrinks each pool (`morca._internal.pool_scale`)
   in turn, keeps trying it for its `wait`, then moves to the next. It skips
   a type whose architecture (as the provider says) the worker image has no
   variant for. `orca.pools.status` says what the last try came to.
+- **GPU machines.** A pool with `gpu_machines` counts the members of
+  groups that ask for GPUs apart from the rest of its demand: they grow a
+  machine of `gpu_machines`, by the same rules, with a status of its own
+  (`gpu_status`, shown under the pool's on Ops > Pools), and the rest
+  grows one of `machines`. An idle GPU machine is removed once no member
+  wants a GPU, whatever else waits, and an idle machine without GPUs once
+  nothing else does. `max_machines` caps both together. On a real machine
+  the worker's container is started with `--gpus all`, which needs
+  NVIDIA's driver and container toolkit on the machine's image.
 - **Boot.** The machine's startup script holds only a worker token of its
   own. With it, the machine asks the UI's `/api/worker/boot` for the image
   it was made for, the login to pull it and the bucket's variables, then

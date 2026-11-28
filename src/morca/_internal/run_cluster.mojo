@@ -33,6 +33,17 @@ side: the run's head, the members that join it, and when they stop.
   A run with a group that asks for GPUs isn't started as its head by a
   host with GPUs while one without could start it (`head_elsewhere`): the
   head's host serves no group, so its GPUs would sit idle for the run.
+  Either deferral lasts `MORCA_GPU_DEFER_SECONDS` at most
+  (`member_wants.still_defers`, kept on `orca.gpu_defers`).
+- **Draining.** Each claim says the dista worker address of each of the
+  worker's members (`member_addresses`), so the scheduler can tell which
+  member `decide` drains (`morca._internal.run_demand`). Its answer lists
+  the members to drain (`"drain"`): the worker drains each with dista's
+  drain (`dista-drain`, which keeps a group's last worker while it has
+  tasks), then kills it if it hasn't left in time
+  (`morca._internal.member_drain`). One dista refuses to drain is reported
+  back (`kept`) and stays a live member. A drained member ends as any
+  member does, when its process exits, and its grant goes with it.
 - **Stopping.** Each claim's answer lists this worker's members whose run
   isn't running at that start any more (`members_to_stop`): the worker
   kills them, and they're ended "its run ended".
@@ -49,8 +60,10 @@ from morca._internal.member_wants import (
     Want,
     group_request,
     groups_ask_gpus,
+    gpu_defer_seconds,
     gpu_host_takes,
     kinds_of,
+    still_defers,
     offer_order,
     wanted,
     wants_gpus_of,
@@ -85,7 +98,7 @@ def head_elsewhere(
     no group, so the run couldn't use this host's GPUs."""
     if gpus <= 0 or not groups_ask_gpus(p.groups):
         return False
-    return cluster_db.other_has_room(
+    if not cluster_db.other_has_room(
         db.conn,
         placement,
         worker,
@@ -94,7 +107,24 @@ def head_elsewhere(
         request.cpus_min,
         request.memory_min_mb,
         True,
+    ):
+        return False
+    var bound = gpu_defer_seconds()
+    var waited = cluster_db.deferred_for(db.conn, run, -1, "head")
+    if still_defers(waited, bound):
+        return True
+    print(
+        "morca: run",
+        run,
+        "of",
+        p.name,
+        "waited",
+        Int(waited),
+        "s for a host of its pool without GPUs to start it: one with",
+        gpus,
+        "GPUs starts it",
     )
+    return False
 
 
 def say_gpu_head(p: Registered, run: Int, gpus: Int, name: String):
@@ -331,6 +361,11 @@ def join_claim(
                 request.memory_min_mb,
                 o.want.group != "",
             )
+            if other and not still_defers(
+                cluster_db.deferred_for(db.conn, c.run, c.start, o.want.group),
+                gpu_defer_seconds(),
+            ):
+                other = False  # waited long enough for one without GPUs
             if not gpu_host_takes(gpus, 0, o.run_wants_gpus, other):
                 continue
         var grant = Grant.none()
@@ -367,6 +402,7 @@ def join_claim(
         )
         if not got:
             continue
+        cluster_db.served(db.conn, c.run, c.start, o.want.group)
         return MemberSpec(
             got.value(),
             c.run,
@@ -381,6 +417,35 @@ def join_claim(
             o.want.group,
         )
     return None
+
+
+def member_reports(mut db: State, worker: Int, v: Value) raises:
+    """What a claim says of `worker`'s members: each one's dista worker
+    address (`member_addresses`: `[{"member": 5, "address":
+    "10.0.0.3:41234"}]`), and those dista wouldn't drain (`kept`:
+    `[{"member": 5, "why": "..."}]`), which stay live and undrained."""
+    if String("member_addresses") in v and v["member_addresses"].is_array():
+        for m in v["member_addresses"].array_items():
+            cluster_db.set_address(
+                db.conn,
+                worker,
+                Int(m["member"].int_value()),
+                m["address"].string_value(),
+            )
+    if String("kept") in v and v["kept"].is_array():
+        for m in v["kept"].array_items():
+            var why = m["why"].string_value()
+            cluster_db.keep_member(
+                db.conn,
+                worker,
+                Int(m["member"].int_value()),
+                String("not drained: ", why),
+            )
+
+
+def members_to_drain(mut db: State, worker: Int) raises -> List[Int]:
+    """This worker's live members the scheduler asked to drain."""
+    return cluster_db.to_drain(db.conn, worker)
 
 
 def stop_json(ids: List[Int]) -> String:

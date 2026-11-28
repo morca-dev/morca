@@ -30,6 +30,17 @@
 # whose worker reports no demand (MORCA_SCALE_REPORT_SECONDS=0) wants the
 # group's MAX at once, as before demand.
 #
+# Then draining a member mid-run (PR 4b): gpufan on pool d with its group
+# gpu at "0..1" and a tail with nothing to do. db joins as gpu's member
+# once its tasks wait, says its dista worker's address, and once idle
+# for MORCA_SCALE_IDLE is drained while the run goes on: its member ends
+# saying why, and the run gets the same answer.
+#
+# Then the bound on a host with GPUs deferring (PR 4b): on pool e a worker
+# that can't run gpufan (another image) looks like a host without GPUs
+# with room; ea, with a GPU, leaves the run's head to it for
+# MORCA_GPU_DEFER_SECONDS only, then starts it.
+#
 # Needs MORCA_DATABASE_URL (pixi run test-run-cluster).
 set -eu
 cd "$(dirname "$0")/.."
@@ -72,7 +83,8 @@ until_() {
 free_port uport
 base="http://127.0.0.1:$uport"
 MORCA_UI_ADDR="127.0.0.1:$uport" ./build/morca ui >> "$log" 2>&1 &
-pids="$pids $!"
+uipid=$!
+pids="$pids $uipid"
 until_ 10 "morca ui didn't start" curl -fs "$base/" -o /dev/null
 ./build/morca register --no-config --placement worker:t --workers 1 ./build/fanout >> "$log" 2>&1 || fail "register"
 is "SELECT ec2_workers FROM orca.pipelines WHERE name = 'fanout'" 1 || fail "fanout's workers"
@@ -335,4 +347,119 @@ stop_worker hb
 stop_worker hc
 for r in $g3 $g4; do cluster_gone "$r" || fail "run $r's head or members outlived its workers"; done
 echo "ok   pool h's runs leave no head, dista worker or member running"
+
+# Draining a member mid-run: the UI again, deciding with an idle time of
+# 2 s and deferring for GPUs 4 s at most.
+kill "$uipid" 2> /dev/null || true
+wait "$uipid" 2> /dev/null || true
+MORCA_SCALE_IDLE=2 MORCA_GPU_DEFER_SECONDS=4 MORCA_UI_ADDR="127.0.0.1:$uport" ./build/morca ui >> "$log" 2>&1 &
+uipid=$!
+pids="$pids $uipid"
+until_ 10 "morca ui didn't start again" curl -fs "$base/" -o /dev/null
+cat > build/run-cluster-drain.toml << 'EOF2'
+[pipelines.gpufan]
+placement = "worker:d"
+max_runs = 1
+
+[pipelines.gpufan.groups.gpu]
+workers = "0..1"
+EOF2
+./build/morca register --config build/run-cluster-drain.toml ./build/gpufan >> "$log" 2>&1 || fail "register gpufan on d"
+dta=$(./build/morca worker-token create --pool d --label da 2>> "$log") || fail "token da"
+dtb=$(./build/morca worker-token create --pool d --label db 2>> "$log") || fail "token db"
+rm -f "$marks"/*.env
+export GPUFAN_SLEEP=1 GPUFAN_TAIL=25 MORCA_SCALE_REPORT_SECONDS=1
+worker da "$dta" d 0
+./build/morca backfill gpufan 2024-05 >> "$log" 2>&1 || fail "backfill gpufan 2024-05"
+g5=$(q "SELECT max(id) FROM orca.runs")
+d_head() { is "SELECT count(*) FROM orca.runs r JOIN orca.workers w ON w.id = r.worker WHERE r.id = $g5 AND r.cluster_head IS NOT NULL AND w.label = 'da'" 1; }
+until_ 30 "da didn't start run $g5 as a cluster: $(q "SELECT status, held, cluster_head FROM orca.runs WHERE id = $g5")" d_head
+worker db "$dtb" d 0
+d_member() { [ -n "$(q "SELECT m.id FROM orca.run_members m JOIN orca.workers w ON w.id = m.worker WHERE m.run = $g5 AND m.worker_group = 'gpu' AND w.label = 'db'")" ]; }
+until_ 30 "db didn't join run $g5's gpu group: $(q "SELECT worker_group, wanted FROM orca.run_wants WHERE run = $g5")" d_member
+dm=$(q "SELECT m.id FROM orca.run_members m JOIN orca.workers w ON w.id = m.worker WHERE m.run = $g5 AND w.label = 'db'")
+addressed() { q "SELECT coalesce(address, '') FROM orca.run_members WHERE id = $dm" | grep -q '^127\.0\.0\.1:[0-9][0-9]*$'; }
+until_ 20 "db didn't say its member's address: $(q "SELECT address FROM orca.run_members WHERE id = $dm")" addressed
+echo "ok   db joins run $g5 as gpu's member and says its dista worker's address ($(q "SELECT address FROM orca.run_members WHERE id = $dm"))"
+# Idle once the gpu tasks are done, it's drained while the run goes on.
+drained_mid_run() {
+    got=$(q "SELECT (m.ended IS NOT NULL)::int || ' ' || r.status FROM orca.run_members m JOIN orca.runs r ON r.id = m.run WHERE m.id = $dm")
+    case "$got" in
+    "1 running") return 0 ;;
+    "1 "*) fail "member $dm ended only with its run: $got, $(q "SELECT why FROM orca.run_members WHERE id = $dm")" ;;
+    *) return 1 ;;
+    esac
+}
+until_ 60 "member $dm wasn't drained: $(q "SELECT ended, draining, why FROM orca.run_members WHERE id = $dm") / $(q "SELECT worker_group, wanted FROM orca.run_wants WHERE run = $g5")" drained_mid_run
+is "SELECT why FROM orca.run_members WHERE id = $dm" "drained: group gpu wants 0 (0..1)" \
+    || fail "member $dm's why: $(q "SELECT why FROM orca.run_members WHERE id = $dm")"
+is "SELECT draining IS NOT NULL FROM orca.run_members WHERE id = $dm" t || fail "member $dm wasn't marked draining"
+grep -q "^draining member $dm " build/run-cluster-db.out || fail "db didn't drain its member through dista: $(tail -5 build/run-cluster-db.out)"
+is "SELECT count(*) FROM orca.run_members m JOIN orca.workers w ON w.id = m.worker WHERE w.label = 'db' AND m.ended IS NULL" 0 \
+    || fail "db still has a live member"
+is "SELECT wanted FROM orca.run_wants WHERE run = $g5 AND worker_group = 'gpu'" 0 || fail "run $g5's gpu group still wants a member"
+curl -fsS -H 'Accept: application/json' "$base/runs/$g5" > "$dir/g5.json" || fail "run $g5's JSON"
+jq -e '[.cluster[] | select(.role == "member")] | length == 1 and (.[0] | .group == "gpu" and .draining != null and .ended != null and .why == "drained: group gpu wants 0 (0..1)" and (.address | test("^127.0.0.1:")))' "$dir/g5.json" > /dev/null \
+    || fail "run $g5's JSON cluster: $(jq -c .cluster "$dir/g5.json")"
+echo "ok   idle, db's member is drained while run $g5 goes on, and its grant is free ($(q "SELECT why FROM orca.run_members WHERE id = $dm"))"
+until_ 120 "run $g5 didn't succeed: $(q "SELECT status, error FROM orca.runs WHERE id = $g5")" \
+    is "SELECT status FROM orca.runs WHERE id = $g5" succeeded
+logged_g5() { grep -q "56 from plain and model tasks" "$MORCA_LOGS/gpufan/$g5/driver.log" 2> /dev/null; }
+until_ 30 "no total in run $g5's driver log" logged_g5
+echo "ok   run $g5 got the right answer (56) with its member drained mid-run"
+until_ 30 "run $g5's head or members are still running" cluster_gone "$g5"
+stop_worker da
+stop_worker db
+unset GPUFAN_TAIL
+
+# The bound on deferring: pool e, gpufan with a gpu group asking a GPU.
+cat > build/run-cluster-defer.toml << 'EOF2'
+[pipelines.gpufan]
+placement = "worker:e"
+max_runs = 1
+
+[pipelines.gpufan.groups.gpu]
+workers = 1
+gpus = 1
+EOF2
+./build/morca register --config build/run-cluster-defer.toml ./build/gpufan >> "$log" 2>&1 || fail "register gpufan on e"
+eta=$(./build/morca worker-token create --pool e --label ea 2>> "$log") || fail "token ea"
+etb=$(./build/morca worker-token create --pool e --label eb 2>> "$log") || fail "token eb"
+etc=$(./build/morca worker-token create --pool e --label ec 2>> "$log") || fail "token ec"
+# eb: claims as a host without GPUs with room that understands groups,
+# but runs another image, so it never starts the run.
+(
+    while :; do
+        curl -fsS -X POST -H "Authorization: Bearer $etb" -H 'Content-Type: application/json' \
+            -d '{"pool": "e", "name": "eb", "image": "elsewhere:1", "slots": 1, "running": "", "cpus": 4, "memory_mb": 8000, "room_cpus": 4, "room_memory_mb": 8000, "gpus": 0, "free_gpus": 0, "advertise": "127.0.0.1", "groups": true, "reports_demand": true, "demand": []}' \
+            "$base/api/worker/claim" > /dev/null 2>&1 || true
+        sleep 0.3
+    done
+) &
+ebloop=$!
+pids="$pids $ebloop"
+until_ 10 "eb didn't claim" is "SELECT (last_seen IS NOT NULL)::int FROM orca.workers WHERE label = 'eb'" 1
+./build/morca backfill gpufan 2024-06 >> "$log" 2>&1 || fail "backfill gpufan 2024-06"
+g6=$(q "SELECT max(id) FROM orca.runs")
+worker ea "$eta" e 1
+until_ 10 "ea didn't defer run $g6: $(q "SELECT run, start, kind FROM orca.gpu_defers")" \
+    is "SELECT count(*) FROM orca.gpu_defers WHERE run = $g6 AND kind = 'head'" 1
+sleep 1
+is "SELECT status FROM orca.runs WHERE id = $g6" queued || fail "ea started run $g6 at once, with eb seeming to have room"
+e_head() { is "SELECT count(*) FROM orca.runs r JOIN orca.workers w ON w.id = r.worker WHERE r.id = $g6 AND r.cluster_head IS NOT NULL AND w.label = 'ea'" 1; }
+until_ 30 "ea never started run $g6: $(q "SELECT status, held FROM orca.runs WHERE id = $g6")" e_head
+waited=$(q "SELECT extract(epoch FROM r.started - d.since)::int FROM orca.runs r JOIN orca.gpu_defers d ON d.run = r.id AND d.kind = 'head' WHERE r.id = $g6")
+[ "${waited:-0}" -ge 3 ] || fail "ea started run $g6 after $waited s, not after the bound"
+grep -q "run $g6 of gpufan waited" "$log" || fail "the UI doesn't say ea stopped waiting"
+echo "ok   a host with GPUs leaves a run's head to one without for MORCA_GPU_DEFER_SECONDS only (run $g6, $waited s)"
+kill "$ebloop" 2> /dev/null || true
+wait "$ebloop" 2> /dev/null || true
+worker ec "$etc" e 1
+until_ 120 "run $g6 didn't succeed: $(q "SELECT status, error FROM orca.runs WHERE id = $g6") $(q "SELECT w.label, m.worker_group, m.ended, m.why FROM orca.run_members m JOIN orca.workers w ON w.id = m.worker WHERE m.run = $g6")" \
+    is "SELECT status FROM orca.runs WHERE id = $g6" succeeded
+until_ 30 "run $g6's head or members are still running" cluster_gone "$g6"
+stop_worker ea
+stop_worker ec
+for r in $g5 $g6; do cluster_gone "$r" || fail "run $r's head or members outlived its workers"; done
+echo "ok   pools d and e leave no head, dista worker or member running"
 echo "run cluster: ok"

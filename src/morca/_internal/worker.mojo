@@ -83,6 +83,7 @@ from std.time import perf_counter_ns, sleep
 
 from json import Value
 
+from morca._internal.member_drain import MemberDrains
 from morca._internal.run_cluster import MemberSpec, member_spec_of
 from morca._internal.tokens import new_token
 from morca._internal.worker_demand import DemandReports, head_status
@@ -249,6 +250,9 @@ struct Worker(Movable):
     var demand: DemandReports
     """Its clustered runs' heads' statuses, sent with its claims
     (`morca._internal.worker_demand`)."""
+    var drains: MemberDrains
+    """Its members' dista workers' addresses, and their draining
+    (`morca._internal.member_drain`)."""
 
     def __init__(
         out self,
@@ -293,6 +297,7 @@ struct Worker(Movable):
         self.gpus = Gpus(0)
         self.holding = Dict[Int, List[Int]]()
         self.demand = DemandReports()
+        self.drains = MemberDrains()
 
     def _running_ids(self) -> String:
         var ids = String()
@@ -535,6 +540,7 @@ struct Worker(Movable):
             m.group,
         )
         self.members[pid] = m.member
+        self.drains.add(pid, m.member, m.binary, m.head, env, m.token)
         print(
             "joined",
             m.pipeline,
@@ -597,6 +603,7 @@ struct Worker(Movable):
             return
         if pid in self.members:
             var member = self.members.pop(pid)
+            self.drains.ended(pid)
             print("member", member, "pid", pid, "exited", code, flush=True)
             _ = self._post(
                 "/api/worker/left",
@@ -828,6 +835,11 @@ struct Worker(Movable):
                 )
             # Its heads' demand, every MORCA_SCALE_REPORT_SECONDS.
             self._ask_heads(now)
+            # Its members' addresses, and those drained that didn't leave.
+            self.drains.learn(self.advertise)
+            for pid in self.drains.overdue(now):
+                print("killing drained member pid", pid, flush=True)
+                _ = external_call["kill", c_int](c_int(-pid), c_int(9))
             # With its GPUs, those its processes don't hold now (a member
             # just stopped holds its own until it's reaped), and that it
             # starts members of a group (`groups`, DISTA_GROUP).
@@ -851,6 +863,8 @@ struct Worker(Movable):
                     .text("host_upgrade", self.follow.state())
                     .bool("reports_demand", self.demand.every > 0)
                     .raw("demand", self.demand.json())
+                    .raw("member_addresses", self.drains.addresses_json())
+                    .raw("kept", self.drains.kept_json())
                     .raw(
                         "pressure",
                         Report.of(self.psi, self.admission, now).json(),
@@ -872,6 +886,7 @@ struct Worker(Movable):
                 continue
             said = ""
             self.demand.sent()
+            self.drains.sent()
             self._settings(got)
             self.follow.observe(got, len(self.running))
             # Drained: nothing running, nothing just given to start.
@@ -893,6 +908,9 @@ struct Worker(Movable):
             if String("stop") in got:
                 for s in got["stop"].array_items():
                     self._stop_member(Int(s.int_value()))
+            if String("drain") in got and got["drain"].is_array():
+                for d in got["drain"].array_items():
+                    self.drains.drain(Int(d.int_value()), now)
             if String("join") in got and not got["join"].is_null():
                 var m = member_spec_of(got["join"])
                 try:

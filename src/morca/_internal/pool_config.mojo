@@ -16,6 +16,15 @@ morca only gives them the pool's settings.
     max_machines = 3
     idle_seconds = 900
 
+A mixed pool lists the types of its machines with GPUs apart, under
+`gpu_machines`, of the same shape (docs/groups.md):
+
+    gpu_machines = [{ type = "gex44" }]
+
+The members of a run's groups that ask for GPUs grow and shrink those, and
+everything else `machines`: the autoscaler counts the two demands apart,
+and `max_machines` caps them together.
+
 A pipeline runs on the pool with `placement = "worker:lab"`, as on a pool of
 workers started by hand. `machines` is the order of preference: morca tries
 the first type in each location in turn, retries it until its `wait`
@@ -64,6 +73,7 @@ from morca._internal.toml import (
 comptime PROVIDERS = ["hetzner", "ec2"]
 comptime GROWN_KEYS = [
     "machines",
+    "gpu_machines",
     "locations",
     "max_machines",
     "idle_seconds",
@@ -72,6 +82,7 @@ comptime GROWN_KEYS = [
 comptime POOL_KEYS = [
     "provider",
     "machines",
+    "gpu_machines",
     "locations",
     "max_machines",
     "idle_seconds",
@@ -107,6 +118,9 @@ struct PoolConfig(Copyable, Movable):
     var name: String
     var provider: String
     var machines: List[MachineChoice]
+    var gpu_machines: List[MachineChoice]
+    """The types of its machines with GPUs (docs/groups.md); none for a
+    pool without."""
     var locations: List[String]
     var max_machines: Int
     var idle_seconds: Int
@@ -127,15 +141,11 @@ struct PoolConfig(Copyable, Movable):
     def machines_json(self) -> String:
         """`machines` as orca.pools keeps it: `[{"type": .., "wait": ..}]`,
         `wait` left out for none."""
-        var out = String("[")
-        for i in range(len(self.machines)):
-            ref m = self.machines[i]
-            out.write(", " if i > 0 else "", '{"type": ', quote(m.type))
-            if m.wait != NO_WAIT:
-                out.write(', "wait": ', m.wait)
-            out.write("}")
-        out.write("]")
-        return out^
+        return choices_json(self.machines)
+
+    def gpu_machines_json(self) -> String:
+        """`gpu_machines`, as `machines_json`."""
+        return choices_json(self.gpu_machines)
 
     def locations_json(self) -> String:
         var out = String("[")
@@ -152,6 +162,20 @@ struct PoolConfig(Copyable, Movable):
 
     def volumes_json(self) -> String:
         return _names_json(self.volumes)
+
+
+def choices_json(machines: List[MachineChoice]) -> String:
+    """Machine types as orca.pools keeps them: `[{"type": .., "wait":
+    ..}]`, `wait` left out for none."""
+    var out = String("[")
+    for i in range(len(machines)):
+        ref m = machines[i]
+        out.write(", " if i > 0 else "", '{"type": ', quote(m.type))
+        if m.wait != NO_WAIT:
+            out.write(', "wait": ', m.wait)
+        out.write("}")
+    out.write("]")
+    return out^
 
 
 def pairs_json(pairs: List[Tuple[String, String]], b: String) -> String:
@@ -357,6 +381,76 @@ def _volumes(
     return out^
 
 
+def _machine_list(
+    doc: TomlDoc, base: List[String], r: _Reader, key: String
+) raises -> List[MachineChoice]:
+    """A pool's `machines` or `gpu_machines` (`key`), checked."""
+    var mp = base.copy()
+    mp.append(key)
+    var mv = doc.get(mp)
+    if not mv:
+        r.fail(
+            0, String("needs ", key, ': [{ type = "...", wait = 600 }, ...]')
+        )
+    ref m = mv.value()
+    if not doc.is_table_array(m):
+        r.fail(
+            m.line,
+            String(
+                key,
+                ' is a list of tables: [{ type = "...", wait = 600 }, ...]',
+            ),
+        )
+    var machines = List[MachineChoice]()
+    for i in range(len(m.items)):
+        var ep = mp.copy()
+        ep.append(m.items[i])
+        var line = m.line
+        for k in doc.keys(ep):
+            var kp = ep.copy()
+            kp.append(k)
+            line = doc.get(kp).value().line
+            if k != "type" and k != "wait":
+                r.fail(
+                    line,
+                    String(
+                        key,
+                        ": has no key ",
+                        toml_key(k),
+                        " (an entry has type and wait)",
+                    ),
+                )
+        var tp = ep.copy()
+        tp.append("type")
+        var tv = doc.get(tp)
+        if not tv or tv.value().kind != STRING:
+            r.fail(line, String(key, ": each entry has a type, a string"))
+        var t = tv.value().text
+        var tw = _type_problem(t)
+        if tw:
+            r.fail(tv.value().line, String(key, ": ", tw))
+        var wp = ep.copy()
+        wp.append("wait")
+        var last = i == len(m.items) - 1
+        var wait = _int(doc, wp, r, String(key, ": wait"), 0, 86400, NO_WAIT)
+        if wait == NO_WAIT and not last:
+            r.fail(
+                tv.value().line,
+                String(
+                    key,
+                    ": ",
+                    quote(t),
+                    " needs a wait (seconds to keep trying it before the",
+                    " next); only the last may leave it out",
+                ),
+            )
+        for seen in machines:
+            if seen.type == t:
+                r.fail(tv.value().line, String(key, ": ", quote(t), " twice"))
+        machines.append(MachineChoice(t, wait))
+    return machines^
+
+
 def read_pool(doc: TomlDoc, name: String) raises -> PoolConfig:
     """`[pools.<name>]` of `doc`, checked; raises `<line>: [pools.<name>]
     <why>`."""
@@ -383,8 +477,9 @@ def read_pool(doc: TomlDoc, name: String) raises -> PoolConfig:
                 String(
                     "has no key ",
                     toml_key(key),
-                    " (it has provider, machines, locations, max_machines,",
-                    " idle_seconds, max_runs, env, secrets and volumes)",
+                    " (it has provider, machines, gpu_machines, locations,",
+                    " max_machines, idle_seconds, max_runs, env, secrets and",
+                    " volumes)",
                 ),
             )
     # provider
@@ -418,6 +513,7 @@ def read_pool(doc: TomlDoc, name: String) raises -> PoolConfig:
             name,
             "",
             List[MachineChoice](),
+            List[MachineChoice](),
             List[String](),
             0,
             0,
@@ -437,65 +533,23 @@ def read_pool(doc: TomlDoc, name: String) raises -> PoolConfig:
             pv.value().line,
             String('provider is "hetzner" or "ec2", not ', quote(provider)),
         )
-    # machines
-    var mp = base.copy()
-    mp.append("machines")
-    var mv = doc.get(mp)
-    if not mv:
-        r.fail(0, 'needs machines: [{ type = "...", wait = 600 }, ...]')
-    ref m = mv.value()
-    if not doc.is_table_array(m):
-        r.fail(
-            m.line,
-            'machines is a list of tables: [{ type = "...", wait = 600 }, ...]',
-        )
-    var machines = List[MachineChoice]()
-    for i in range(len(m.items)):
-        var ep = mp.copy()
-        ep.append(m.items[i])
-        var line = m.line
-        for k in doc.keys(ep):
-            var kp = ep.copy()
-            kp.append(k)
-            line = doc.get(kp).value().line
-            if k != "type" and k != "wait":
-                r.fail(
-                    line,
-                    String(
-                        "machines: has no key ",
-                        toml_key(k),
-                        " (an entry has type and wait)",
-                    ),
-                )
-        var tp = ep.copy()
-        tp.append("type")
-        var tv = doc.get(tp)
-        if not tv or tv.value().kind != STRING:
-            r.fail(line, "machines: each entry has a type, a string")
-        var t = tv.value().text
-        var tw = _type_problem(t)
-        if tw:
-            r.fail(tv.value().line, String("machines: ", tw))
-        var wp = ep.copy()
-        wp.append("wait")
-        var last = i == len(m.items) - 1
-        var wait = _int(doc, wp, r, "machines: wait", 0, 86400, NO_WAIT)
-        if wait == NO_WAIT and not last:
-            r.fail(
-                tv.value().line,
-                String(
-                    "machines: ",
-                    quote(t),
-                    " needs a wait (seconds to keep trying it before the",
-                    " next); only the last may leave it out",
-                ),
-            )
-        for seen in machines:
-            if seen.type == t:
-                r.fail(
-                    tv.value().line, String("machines: ", quote(t), " twice")
-                )
-        machines.append(MachineChoice(t, wait))
+    var machines = _machine_list(doc, base, r, "machines")
+    var gpu_machines = List[MachineChoice]()
+    var gp = base.copy()
+    gp.append("gpu_machines")
+    if doc.get(gp):
+        gpu_machines = _machine_list(doc, base, r, "gpu_machines")
+        for g in gpu_machines:
+            for m in machines:
+                if m.type == g.type:
+                    r.fail(
+                        0,
+                        String(
+                            "gpu_machines: ",
+                            quote(g.type),
+                            " is in machines too",
+                        ),
+                    )
     # locations
     var lp = base.copy()
     lp.append("locations")
@@ -519,6 +573,7 @@ def read_pool(doc: TomlDoc, name: String) raises -> PoolConfig:
         name,
         provider,
         machines^,
+        gpu_machines^,
         locations^,
         _int(doc, xp, r, "max_machines", 1, MAX_MACHINES, DEFAULT_MAX_MACHINES),
         _int(doc, ip, r, "idle_seconds", 10, 86400, DEFAULT_IDLE_SECONDS),
@@ -566,6 +621,7 @@ def record_pools(mut db: State, pools: List[PoolConfig]) raises -> List[String]:
             p.name,
             p.provider,
             p.machines_json(),
+            p.gpu_machines_json(),
             p.locations_json(),
             p.max_machines,
             p.idle_seconds,

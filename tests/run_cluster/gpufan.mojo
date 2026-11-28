@@ -7,7 +7,10 @@ its workers.
 Each task writes `$GPUFAN_OUT/<kind>-<pid>.env`, `kind` `plain` or `model`
 and `pid` its dista worker's, with that process's `DISTA_GROUP`,
 `CUDA_VISIBLE_DEVICES`, `MORCA_GRANT_GPUS` (each `-` when unset) and
-`HOSTNAME`, then sleeps `GPUFAN_SLEEP` (1) seconds.
+`HOSTNAME`, then sleeps `GPUFAN_SLEEP` (1) seconds. With `GPUFAN_TAIL`
+set, the step then runs on for that many seconds with no task of either
+kind, holding none of their results: the run's members are idle, and may
+be drained while the run goes on.
 """
 
 from std.ffi import c_int, external_call
@@ -76,6 +79,12 @@ def gpufan(mut ctx: Ctx, m: Month) raises -> Int:
     for r in models:
         total += rt.get(r)
     ctx.log(String(total, " from plain and model tasks"))
+    plains.clear()
+    models.clear()
+    var tail = Float64(getenv("GPUFAN_TAIL", "0"))
+    if tail > 0:
+        ctx.log(String("idle for ", Int(tail), " s"))
+        sleep(tail)
     return total
 
 

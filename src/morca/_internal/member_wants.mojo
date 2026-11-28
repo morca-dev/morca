@@ -22,7 +22,15 @@ database.
   still wants a member of a group it could serve (`wants_gpus_of`): a host
   is one member of a run at most, so that one would keep it from the
   group for the rest of the run.
+- **A bound on deferring.** A host without GPUs that has room may still
+  never take what a host with GPUs leaves it (its image is another, its
+  pipeline's `max_runs` is reached, it is held for memory pressure). So a
+  host with GPUs leaves a run's head, or a member with no GPU, to such a
+  host for `MORCA_GPU_DEFER_SECONDS` (60) at most from the first time it
+  did, then takes it (`still_defers`).
 """
+
+from std.os import getenv
 
 from morca._internal.groups import Group
 from morca._internal.recommend import Recommendation, resolve_request
@@ -177,6 +185,21 @@ def gpu_host_takes(
     if host_gpus <= 0 or want_gpus > 0:
         return True
     return not run_wants_its_gpus and not other_host_has_room
+
+
+def gpu_defer_seconds() -> Float64:
+    """`MORCA_GPU_DEFER_SECONDS` (60): how long hosts with GPUs leave a
+    run's head or a member with no GPU to a host without them."""
+    try:
+        return max(Float64(getenv("MORCA_GPU_DEFER_SECONDS", "60")), 0.0)
+    except:
+        return 60.0
+
+
+def still_defers(waited: Float64, bound: Float64) -> Bool:
+    """Whether a host with GPUs still leaves what it has left to hosts
+    without them for `waited` seconds, at most `bound`."""
+    return waited < bound
 
 
 def group_request(g: Group) raises -> Request:

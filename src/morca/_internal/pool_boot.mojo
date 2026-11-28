@@ -65,10 +65,14 @@ def boot_script(
     name: String,
     token: String,
     command: String = "",
+    gpus: Bool = False,
 ) raises -> String:
     """The startup script of machine `name` of `pool`: ask `remote` (the
     UI) for what it needs with `token`, then run the worker, in Docker or
-    as `command` when given."""
+    as `command` when given. A machine of the pool's `gpu_machines`
+    (`gpus`) gives the container its GPUs (`--gpus all`, which needs
+    NVIDIA's container toolkit on the machine's image), so the worker
+    counts them."""
     for s in [remote, pool, name, token, command]:
         if not _plain(s):
             raise Error(
@@ -172,6 +176,7 @@ def boot_script(
         "mkdir -p /var/lib/orca/stage\n",
         "docker rm -f orca-worker > /dev/null 2>&1 || true\n",
         "docker run -d --name orca-worker --restart always --network host",
+        " --gpus all" if gpus else "",
         ' --env-file "$DIR/worker.env"',
         " --cap-add SYS_ADMIN --security-opt apparmor=unconfined",
         " --cgroupns private -v /var/lib/orca/stage:/var/lib/orca/stage",
