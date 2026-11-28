@@ -10,9 +10,10 @@ each with its own size and GPUs, from morca.toml.
 A group's name is lowercase letters, digits, `-` and `_`, starting with a
 letter, at most 32 bytes. `register` keeps the groups in
 `orca.pipelines.groups` (`groups_json`, by name, so the file's order
-doesn't matter), `morca config show` and `export` show them, and nothing
-uses them yet: no worker is started with a group, and no demand counts
-one (PR 1 of docs/groups.md). The `ec2` placement ignores them
+doesn't matter), and `morca config show` and `export` show them. On a
+pool, a run's members are started by group (`morca._internal.member_wants`,
+`morca._internal.run_cluster`); the other placements ignore groups for
+now, and `register` warns of the `ec2` placement's
 (`ec2_ignores_groups`).
 """
 

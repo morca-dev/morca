@@ -193,6 +193,10 @@ struct ClusterRow(Copyable, Movable):
     var joined: String
     var ended: String
     var why: String
+    var group: String
+    """The worker group a member serves (docs/groups.md); empty for none
+    and for the head."""
+    var grant_gpus: Int
 
 
 def cluster_rows(mut conn: Connection, run: Int) raises -> List[ClusterRow]:
@@ -204,7 +208,10 @@ def cluster_rows(mut conn: Connection, run: Int) raises -> List[ClusterRow]:
         String(
             "SELECT r.starts, coalesce(w.name, w.label, '') AS worker,",
             " r.cluster_head, coalesce(r.grant_cpus, 0) AS cpus,",
-            " coalesce(r.grant_memory_mb, 0) AS mb, coalesce(to_char(r.started",
+            (
+                " coalesce(r.grant_memory_mb, 0) AS mb, coalesce(r.grant_gpus,"
+                " 0)::bigint AS gpus, coalesce(to_char(r.started"
+            ),
             " AT TIME ZONE 'UTC', ",
             _TS,
             "), '') AS joined, coalesce(to_char(r.ended AT TIME ZONE 'UTC', ",
@@ -226,13 +233,17 @@ def cluster_rows(mut conn: Connection, run: Int) raises -> List[ClusterRow]:
                 r.text("joined"),
                 r.text("ended"),
                 "",
+                "",
+                Int(r.int64("gpus")),
             )
         )
     for r in conn.query(
         String(
             "SELECT m.start, coalesce(w.name, w.label, '') AS worker,",
             " coalesce(m.grant_cpus, 0) AS cpus, coalesce(m.grant_memory_mb,",
-            " 0) AS mb, to_char(m.joined AT TIME ZONE 'UTC', ",
+            " 0) AS mb, coalesce(m.grant_gpus, 0)::bigint AS gpus,",
+            " coalesce(m.worker_group, '') AS grp, to_char(m.joined AT TIME",
+            " ZONE 'UTC', ",
             _TS,
             ") AS joined, coalesce(to_char(m.ended AT TIME ZONE 'UTC', ",
             _TS,
@@ -253,6 +264,8 @@ def cluster_rows(mut conn: Connection, run: Int) raises -> List[ClusterRow]:
                 r.text("joined"),
                 r.text("ended"),
                 r.text("why"),
+                r.text("grp"),
+                Int(r.int64("gpus")),
             )
         )
     return out^

@@ -69,12 +69,15 @@ def start_dista_worker(
     token: String,
     slots: Int,
     member: Bool,
+    group: String = "",
 ) raises -> Int:
     """A dista worker of the run's cluster at `head`, reached at
     `advertise`, with `slots` (0: one per core), or `auto` when `env` has
     `DISTA_WORKER_SLOTS=auto` (dista then sizes it from the grant in `env`,
     all of it its own); its pid. A member's gives up on a head that's gone
-    within `MEMBER_CONNECT_SECONDS`."""
+    within `MEMBER_CONNECT_SECONDS`. One of a worker group (docs/groups.md)
+    gets `DISTA_GROUP`, so the head sends it that group's tasks alone; one
+    with none runs the tasks that name no group."""
     var extra: List[String] = [
         String("DISTA_ROLE=worker"),
         String("DISTA_HEAD=", head),
@@ -84,6 +87,8 @@ def start_dista_worker(
     ]
     if member:
         extra.append(String("DISTA_CONNECT_TIMEOUT=", MEMBER_CONNECT_SECONDS))
+    if group:
+        extra.append(String("DISTA_GROUP=", group))
     return spawn([binary], log, env=_with(env.copy(), extra), group=True)
 
 

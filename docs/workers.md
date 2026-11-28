@@ -249,7 +249,49 @@ workers = 2      # up to 2 more machines join each run
   grant, and when and why it ended.
 
 A worker without `--advertise` neither starts a run as a cluster nor joins
-one: such a run runs on its machine alone.
+one: such a run runs on its machine alone. A run of a pipeline with
+[groups](#members-by-group) isn't given to such a worker at all: it stays
+queued, held "its worker groups need a worker that runs it over the pool,
+started with --advertise", for one that has an address.
+
+### Members by group
+
+A pipeline may declare [worker groups](morca-toml.md#worker-groups), each
+with its own `workers`, size and GPUs ([groups.md](groups.md)). On a pool,
+a run of it spreads over the pool's workers as a cluster even when its own
+`workers` is unset, and wants members of each group beside those with no
+group:
+
+- **A member of a group** is a worker of the pool that joins the run with
+  a dista worker started with `DISTA_GROUP=<group>`, so dista's head sends
+  it that group's tasks (`Task[..., group="gpu"]`) and no others. It is
+  sized by the group's `cpus` and `memory_gb` (the pipeline's where it
+  sets none), granted the group's `gpus` whole from those its host has
+  free (`MORCA_GRANT_GPUS` and `CUDA_VISIBLE_DEVICES` on its process), and
+  recorded in `orca.run_members` with its group (`worker_group`, migration
+  72). The worker that started the run, with the head, the driver and its
+  own dista worker, has no group, as before.
+- **How many.** The workers with no group want the pipeline's `workers`,
+  as before. Each group wants its MAX (`workers = "0..2"` wants 2), until
+  morca asks dista how many each group needs
+  ([groups.md](groups.md#demand-per-group)); a pool that grows counts the
+  missing members of the groups that ask for no GPU as its demand, as it
+  does those with no group.
+- **Which host.** An idle worker is offered, of the oldest running run
+  first, a member it can serve: one its room fits, with a free GPU if the
+  group asks one. A host with GPUs is offered the members that ask for
+  GPUs first. It joins as one that asks for none only when its run wants
+  no member of a group the host could serve, and no other live worker of
+  the pool on a host without GPUs (one that has an address, a free slot
+  and room for it) could take it, so a member that needs no GPU doesn't
+  take the place a model needs. A machine is one member of a run at most.
+- **Older workers.** A worker's claim says it understands groups; one
+  from before them is offered only members with no group, as before.
+- **The run's page** lists each member's group and the GPUs it was
+  granted in its Cluster card.
+
+Only pools use groups for now: a local run, `control`, Kubernetes and the
+`ec2` placement start their workers as before, with no group.
 
 **On a pool morca grows** (`[pools.<name>]`), this is set up for you:
 - every Hetzner machine joins a private network of the stack's, and its
@@ -259,7 +301,9 @@ one: such a run runs on its machine alone.
   address;
 - a running run that wants more members than have joined counts as the
   pool's demand, so the pool grows for it (up to `max_machines`), and the
-  new machine joins the run;
+  new machine joins the run (a group's that asks for GPUs doesn't count
+  yet: a pool has no machine type with GPUs until `gpu_machines`,
+  [groups.md](groups.md#demand-per-group));
 - a machine running only a member is busy, not idle.
 
 ## Tokens

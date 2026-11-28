@@ -53,6 +53,7 @@ ds-replacer:tests/datasets/replacer.mojo
 hog:tests/usage/hog.mojo
 grower:tests/cgroups/grower.mojo
 fillwk:tests/pool/fillwk.mojo
+gpufan:tests/run_cluster/gpufan.mojo
 presser:tests/pressure/presser.mojo
 wide:tests/grants/grantee.mojo:run["wide"]
 narrow:tests/grants/grantee.mojo:run["narrow"]

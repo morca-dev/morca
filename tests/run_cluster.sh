@@ -9,13 +9,27 @@
 # - a dista worker without the run's cluster token can't join;
 # - once the run ends, b's member is ended and its process gone.
 #
+# Then worker groups (docs/groups.md): gpufan has tasks with no group and
+# tasks of group gpu, `workers = 1` and `[pipelines.gpufan.groups.gpu]`
+# with `workers = 1, gpus = 1`, on pool g:
+#
+# - a worker without --advertise isn't given its run, which says why;
+# - ga (no GPUs) starts two runs as clusters; gb (MORCA_HOST_GPUS=1) joins
+#   each as the member of group gpu, granted its GPU, and gc (no GPUs) as
+#   the member with no group, both runs at once;
+# - the gpu tasks ran only in gb's members, with DISTA_GROUP=gpu and
+#   CUDA_VISIBLE_DEVICES=0, and no task without a group ran there;
+# - orca.run_members records the group and the GPU; gb, with a slot free
+#   while gc had room, never joined as a member with no group;
+# - gb's GPU is free again once the first run ends: the second gets it.
+#
 # Needs MORCA_DATABASE_URL (pixi run test-run-cluster).
 set -eu
 cd "$(dirname "$0")/.."
 . "$PWD/tests/port.sh"
 one_cluster_test
 mkdir -p build
-scripts/pipelines.sh fanout
+scripts/pipelines.sh fanout gpufan
 # shellcheck disable=SC2086
 scripts/mojo-build.sh -I src $DEP_INC bin/scheduler.mojo -o build/morca
 log=build/run-cluster.log
@@ -59,11 +73,17 @@ ta=$(./build/morca worker-token create --pool t --label a 2>> "$log") || fail "t
 tb=$(./build/morca worker-token create --pool t --label b 2>> "$log") || fail "token b"
 ./build/morca scheduler > build/run-cluster-sched.out 2>&1 &
 pids="$pids $!"
-worker() { # NAME TOKEN
-    env -u MORCA_DATABASE_URL HOSTNAME="w$1" MORCA_WORKER_TOKEN="$2" \
-        ./build/morca worker --pool t --remote "$base" --poll-seconds 0.3 --name "$1" \
-        --advertise 127.0.0.1 --max-runs 2 --dir "$dir/$1" > "build/run-cluster-$1.out" 2>&1 &
+worker() { # NAME TOKEN [POOL [GPUS [ADVERTISE]]]
+    env -u MORCA_DATABASE_URL HOSTNAME="w$1" MORCA_WORKER_TOKEN="$2" MORCA_HOST_GPUS="${4:-0}" \
+        ./build/morca worker --pool "${3:-t}" --remote "$base" --poll-seconds 0.3 --name "$1" \
+        --advertise "${5-127.0.0.1}" --max-runs 2 --dir "$dir/$1" > "build/run-cluster-$1.out" 2>&1 &
     pids="$pids $!"
+    eval "pid_$1=$!"
+}
+stop_worker() { # NAME
+    eval "p=\$pid_$1"
+    kill "$p" 2> /dev/null || true
+    wait "$p" 2> /dev/null || true
 }
 
 # a starts the run as a cluster.
@@ -122,4 +142,85 @@ jq -e --arg h "$head" '.cluster | length == 2 and .[0].role == "head" and .[0].a
 alone_page=$(curl -fsS -H 'Accept: application/json' "$base/runs/$(q "SELECT min(id) FROM orca.runs WHERE cluster_head IS NULL")" 2> /dev/null || echo '{"cluster": []}')
 echo "$alone_page" | jq -e '.cluster == [] or .cluster == null' > /dev/null || fail "a run on one machine shows a cluster"
 echo "ok   the run's page and JSON show its cluster: the head and its member"
+
+# Worker groups (docs/groups.md), on pool g.
+stop_worker a
+stop_worker b
+cat > build/run-cluster-gpufan.toml << 'EOF2'
+[pipelines.gpufan]
+placement = "worker:g"
+workers = 1
+max_runs = 2
+
+[pipelines.gpufan.groups.gpu]
+workers = 1
+gpus = 1
+EOF2
+./build/morca register --config build/run-cluster-gpufan.toml ./build/gpufan >> "$log" 2>&1 || fail "register gpufan"
+is "SELECT ec2_workers || ' ' || (groups->0->>'name') || ' ' || (groups->0->>'gpus') FROM orca.pipelines WHERE name = 'gpufan'" "1 gpu 1" \
+    || fail "gpufan's groups: $(q "SELECT ec2_workers, groups FROM orca.pipelines WHERE name = 'gpufan'")"
+gna=$(./build/morca worker-token create --pool g --label gn 2>> "$log") || fail "token gn"
+gta=$(./build/morca worker-token create --pool g --label ga 2>> "$log") || fail "token ga"
+gtb=$(./build/morca worker-token create --pool g --label gb 2>> "$log") || fail "token gb"
+gtc=$(./build/morca worker-token create --pool g --label gc 2>> "$log") || fail "token gc"
+marks=$dir/marks
+mkdir -p "$marks"
+export GPUFAN_OUT="$marks" GPUFAN_SLEEP=2
+
+# A worker without an address can't run a pipeline with groups.
+worker gn "$gna" g 0 ""
+./build/morca backfill gpufan 2024-01 >> "$log" 2>&1 || fail "backfill gpufan 2024-01"
+g1=$(q "SELECT max(id) FROM orca.runs")
+held_why() { q "SELECT coalesce(held, '') FROM orca.runs WHERE id = $g1" | grep -q "started with --advertise"; }
+until_ 20 "gpufan's run isn't held for an address: $(q "SELECT status, held FROM orca.runs WHERE id = $g1")" held_why
+is "SELECT status FROM orca.runs WHERE id = $g1" queued || fail "a worker without --advertise ran gpufan"
+stop_worker gn
+echo "ok   a worker without --advertise isn't given a run with groups ($(q "SELECT held FROM orca.runs WHERE id = $g1"))"
+
+# ga starts both runs as clusters; gb and gc join them.
+worker ga "$gta" g 0
+./build/morca backfill gpufan 2024-02 >> "$log" 2>&1 || fail "backfill gpufan 2024-02"
+g2=$(q "SELECT max(id) FROM orca.runs")
+heads() { is "SELECT count(*) FROM orca.runs r JOIN orca.workers w ON w.id = r.worker WHERE r.id IN ($g1, $g2) AND r.cluster_head IS NOT NULL AND w.label = 'ga'" 2; }
+until_ 30 "ga didn't start both runs: $(q "SELECT id, status, held, cluster_head FROM orca.runs WHERE id IN ($g1, $g2)")" heads
+worker gb "$gtb" g 1
+worker gc "$gtc" g 0
+for r in $g1 $g2; do
+    until_ 120 "gpufan's run $r didn't succeed: $(q "SELECT status, error FROM orca.runs WHERE id = $r") $(q "SELECT m.id, w.label, m.worker_group, m.grant_gpus, m.ended, m.why FROM orca.run_members m JOIN orca.workers w ON w.id = m.worker WHERE m.run = $r")" \
+        is "SELECT status FROM orca.runs WHERE id = $r" succeeded
+done
+members() { # RUN
+    q "SELECT w.label || ':' || coalesce(m.worker_group, '-') || ':' || coalesce(m.grant_gpus, 0) FROM orca.run_members m JOIN orca.workers w ON w.id = m.worker WHERE m.run = $1 ORDER BY w.label"
+}
+for r in $g1 $g2; do
+    got=$(members "$r" | tr '\n' ' ')
+    [ "$got" = "gb:gpu:1 gc:-:0 " ] || fail "run $r's members: $got"
+done
+echo "ok   gb joins each run as its member of group gpu with its GPU, gc as the one with no group"
+is "SELECT count(*) FROM orca.run_members m JOIN orca.workers w ON w.id = m.worker WHERE w.label = 'gb' AND m.worker_group IS NULL" 0 \
+    || fail "gb joined as a member with no group: $(members "$g1") / $(members "$g2")"
+echo "ok   gb, with a slot free while gc had room, never joined as a member with no group"
+models=$(ls "$marks"/model-*.env 2> /dev/null | wc -l | tr -d ' ')
+[ "$models" -ge 2 ] || fail "the gpu tasks ran in $models processes: $(ls "$marks")"
+for f in "$marks"/model-*.env; do
+    printf 'DISTA_GROUP=gpu\nCUDA_VISIBLE_DEVICES=0\nMORCA_GRANT_GPUS=0\nHOSTNAME=wgb\n' | cmp -s - "$f" \
+        || fail "a gpu task ran in $(basename "$f"): $(tr '\n' ' ' < "$f")"
+done
+for f in "$marks"/plain-*.env; do
+    grep -qx 'DISTA_GROUP=-' "$f" && ! grep -qx 'HOSTNAME=wgb' "$f" \
+        || fail "a task with no group ran in $(basename "$f"): $(tr '\n' ' ' < "$f")"
+done
+echo "ok   the gpu tasks ran only in gb's members (DISTA_GROUP=gpu, CUDA_VISIBLE_DEVICES=0, $models processes), the others never there"
+grep -q "of group gpu" build/run-cluster-gb.out || fail "gb's log doesn't say its member's group"
+for r in $g1 $g2; do
+    logged_g() { grep -q "56 from plain and model tasks" "$MORCA_LOGS/gpufan/$r/driver.log" 2> /dev/null; }
+    until_ 30 "no total in run $r's driver log" logged_g
+done
+echo "ok   both runs got the gpu member in turn: gb's GPU was free again once the first ended"
+curl -fsS -H 'Accept: application/json' "$base/runs/$g1" > "$dir/g1.json" || fail "gpufan's run's JSON"
+jq -e '[.cluster[] | select(.role == "member")] | length == 2 and any(.group == "gpu" and .grant.gpus == 1 and .worker == "gb") and any(.group == null and .grant.gpus == null and .worker == "gc")' "$dir/g1.json" > /dev/null \
+    || fail "gpufan's run's JSON cluster: $(jq -c .cluster "$dir/g1.json")"
+curl -fsS "$base/runs/$g1" | grep -qF '<code>gpu</code>' || fail "the Cluster card doesn't show the member's group"
+curl -fsS "$base/runs/$g1" | grep -qF '1 GPU' || fail "the Cluster card doesn't show the member's GPU"
+echo "ok   the run's page and JSON show each member's group and GPUs"
 echo "run cluster: ok"
