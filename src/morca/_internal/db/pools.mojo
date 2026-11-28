@@ -219,7 +219,8 @@ def demand(mut conn: Connection, pool: String, after: Float64) raises -> Int:
     ones, and its fill runs; and the members its running runs that spread
     (#268) still want, once they've run `after` seconds: with no group, and
     of each group that asks for no GPU, what it was decided to want from
-    its head's demand, else its MIN (docs/groups.md)."""
+    its head's demand, else its MIN (its MAX when the head's worker
+    doesn't report demand; docs/groups.md)."""
     var r = conn.query(
         (
             "SELECT (SELECT coalesce(sum(least(q.n,"
@@ -237,7 +238,8 @@ def demand(mut conn: Connection, pool: String, after: Float64) raises -> Int:
             # workers with no group, and of each group that asks for no GPU
             # (docs/groups.md; a machine with GPUs is gpu_machines', which
             # pools don't have yet), what each was decided to want from
-            # demand, else its MIN.
+            # demand, else its MIN (MAX if its head's worker doesn't report
+            # demand).
             " + (SELECT coalesce(sum(greatest("
         )
         + wanted_sql(

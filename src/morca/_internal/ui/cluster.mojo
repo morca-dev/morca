@@ -18,7 +18,8 @@ comptime _HELP = (
     " group runs only that group's tasks, and its grant may hold GPUs. A"
     " member ends with its run, or when its process does. Wanted is how many"
     " members of each kind the run wants now: its MIN until its head reports"
-    " demand, then what morca decided from it, within the range (workers ="
+    " demand (its MAX if the head's worker doesn't report any), then what"
+    " morca decided from it, within the range (workers ="
     ' "MIN..MAX"). A kind with more live members than it wants gets no new'
     " ones."
 )
@@ -39,7 +40,10 @@ def _wants_html(mut h: Html, w: ClusterWants):
     if w.demand_at:
         h.text(String("Demand from its head at ", w.demand_at, "."))
     else:
-        h.text("No demand from its head yet: each kind wants its MIN.")
+        h.text(
+            "No demand from its head yet: each kind wants its MIN, or its MAX"
+            " when the head's worker doesn't report demand."
+        )
     h.raw("</p>")
     h.raw(
         '<div class="scroll"><table><thead><tr><th>Group</th><th>Range</th>',
@@ -60,7 +64,7 @@ def _wants_html(mut h: Html, w: ClusterWants):
         h.raw("</td><td>")
         h.text(String(k.wanted))
         if not k.decided and k.min_workers != k.max_workers:
-            h.text(" (MIN)")
+            h.text(" (MIN)" if k.wanted == k.min_workers else " (MAX)")
         h.raw("</td></tr>")
     h.raw("</tbody></table></div>")
 

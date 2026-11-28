@@ -294,6 +294,7 @@ def join_claim(
                 ps[0].groups,
                 live_by_group(c.decided),
                 live_by_group(c.live),
+                c.reports,
             ),
             understands_groups,
         )

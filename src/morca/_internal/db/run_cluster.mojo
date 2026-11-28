@@ -49,11 +49,25 @@ def plain_min_sql(p: String) -> String:
     )
 
 
+def head_reports_sql(r: String) -> String:
+    """Whether the worker that runs run row `r`'s head says it reports its
+    heads' demand (`orca.workers.reports_demand`)."""
+    return String(
+        (
+            "coalesce((SELECT hw.reports_demand FROM orca.workers hw WHERE"
+            " hw.id = "
+        ),
+        r,
+        ".worker), false)",
+    )
+
+
 def wanted_sql(r: String, group: String, lo: String, hi: String) -> String:
     """What kind `group` (an SQL text, '' for the workers with no group)
     of run row `r` wants at its start: its count decided from demand
-    (`orca.run_wants`), else its MIN, `lo`, within `lo`..`hi`
-    (`morca._internal.member_wants.kind_wanted`)."""
+    (`orca.run_wants`), else its MIN, `lo`, when its head's worker reports
+    demand (`head_reports_sql`) and its MAX, `hi`, when it doesn't; within
+    `lo`..`hi` (`morca._internal.member_wants.kind_wanted`)."""
     return String(
         "least(greatest(coalesce((SELECT rw.wanted FROM orca.run_wants rw",
         " WHERE rw.run = ",
@@ -62,9 +76,13 @@ def wanted_sql(r: String, group: String, lo: String, hi: String) -> String:
         r,
         ".starts AND rw.worker_group = ",
         group,
-        "), ",
+        "), CASE WHEN ",
+        head_reports_sql(r),
+        " THEN ",
         lo,
-        "), ",
+        " ELSE ",
+        hi,
+        " END), ",
         lo,
         "), greatest(",
         hi,
@@ -166,6 +184,8 @@ struct Joinable(Copyable, Movable):
     var decided: String
     """What each kind was decided to want from demand at this start
     (`orca.run_wants`), as `live` is: `{"gpu": 1}`."""
+    var reports: Bool
+    """Whether the worker that runs its head reports demand."""
 
 
 def joinable(
@@ -189,7 +209,9 @@ def joinable(
             + plain_min_sql("p")
             + " AS lo, (SELECT coalesce(json_object_agg(rw.worker_group,"
             " rw.wanted), '{}')::text FROM orca.run_wants rw WHERE rw.run ="
-            " r.id AND rw.start = r.starts) AS decided FROM orca.runs r JOIN"
+            " r.id AND rw.start = r.starts) AS decided, "
+            + head_reports_sql("r")
+            + " AS reports FROM orca.runs r JOIN"
             " orca.pipelines p ON p.name = r.pipeline WHERE r.status ="
             " 'running' AND p.placement = $1 AND r.cluster_head IS NOT NULL AND"
             " r.worker <> $2 AND (coalesce(p.ec2_workers, 0) > (SELECT"
@@ -212,6 +234,7 @@ def joinable(
                 c.text("live"),
                 Int(c.int64("lo")),
                 c.text("decided"),
+                c.bool("reports"),
             )
         )
     return out^
@@ -436,6 +459,8 @@ struct KindsRow(Copyable, Movable):
     """Live members by group, as `Joinable.live`."""
     var decided: String
     """Decided counts by group, as `Joinable.decided`."""
+    var reports: Bool
+    """Whether the worker that runs its head reports demand."""
     var demand_at: String
     """When its head's status last came, UTC (`2026-11-27T10:00:00Z`);
     empty for never."""
@@ -455,7 +480,9 @@ def kinds_row(mut conn: Connection, run: Int) raises -> Optional[KindsRow]:
             " AND m.ended IS NULL GROUP BY 1) x) AS live, (SELECT",
             " coalesce(json_object_agg(rw.worker_group, rw.wanted),",
             " '{}')::text FROM orca.run_wants rw WHERE rw.run = r.id AND",
-            " rw.start = r.starts) AS decided, coalesce(to_char(r.demand_at",
+            " rw.start = r.starts) AS decided, ",
+            head_reports_sql("r"),
+            " AS reports, coalesce(to_char(r.demand_at",
             " AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"'), '') AS",
             " demand_at FROM orca.runs r JOIN orca.pipelines p ON p.name =",
             " r.pipeline WHERE r.id = $1 AND r.cluster_head IS NOT NULL",
@@ -471,5 +498,6 @@ def kinds_row(mut conn: Connection, run: Int) raises -> Optional[KindsRow]:
         r.text("groups"),
         r.text("live"),
         r.text("decided"),
+        r.bool("reports"),
         r.text("demand_at"),
     )

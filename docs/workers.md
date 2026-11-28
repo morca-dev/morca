@@ -313,7 +313,8 @@ per kind of member ([groups.md](groups.md#demand-per-group)):
   --json`) every `MORCA_SCALE_REPORT_SECONDS` (5; 0 turns it off), and
   sends the answer with its next claim. A head that doesn't answer within
   3 s is skipped. The scheduler can't always reach a head, and its host
-  can.
+  can. Each claim says whether the worker reports (`"reports_demand"`,
+  kept as `orca.workers.reports_demand`).
 - **What the scheduler keeps.** The last answer and when it came, on the
   run (`orca.runs.demand`, `demand_at`, migration 73), and an answer for a
   run that isn't that worker's is ignored.
@@ -328,7 +329,10 @@ per kind of member ([groups.md](groups.md#demand-per-group)):
   `orca.run_wants`, with `decide`'s memory, so a restarted UI goes on where
   it was.
 - **MIN, then growth.** Until its head's first answer at a start, each kind
-  wants its MIN; if answers stop, it keeps what was last decided. A run
+  wants its MIN when the head's worker reports demand, and its MAX when it
+  doesn't (one from before demand, or with `MORCA_SCALE_REPORT_SECONDS=0`),
+  since nothing would grow it; if answers stop, it keeps what was last
+  decided. A run
   whose kinds could ever want a member starts its head even when every MIN
   is 0.
 - **No shrinking yet.** A kind that wants fewer members than it has is
@@ -338,7 +342,10 @@ per kind of member ([groups.md](groups.md#demand-per-group)):
   show each kind's range, live members and what it wants now.
 
 A behaviour change: a pool run with `workers = "MIN..MAX"` asked for MAX
-members as soon as it started. Now it starts with MIN and grows by demand.
+members as soon as it started. Now, when the worker that runs its head
+reports demand, it starts with MIN and grows by demand. With reporting
+turned off, or a head on a worker from before this, a range still asks for
+MAX at once.
 
 Only pools use groups for now: a local run, `control`, Kubernetes and the
 `ec2` placement start their workers as before, with no group.

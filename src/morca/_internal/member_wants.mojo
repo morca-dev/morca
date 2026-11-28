@@ -9,8 +9,9 @@ database.
   its range, counted against its own live members (`kinds_of`).
 - **What a kind wants** is what the scheduler last decided from the run's
   head's demand (`morca._internal.member_demand`), within its range; before
-  the first decision of the run's start, its MIN (`kind_wanted`). A fixed
-  count has MIN = MAX, so it wants that count from the start. A kind with
+  the first decision of the run's start, its MIN when the worker that runs
+  the head reports demand, else its MAX, as before demand (`kind_wanted`).
+  A fixed count has MIN = MAX, so it wants that count from the start. A kind with
   more live members than it wants is given none; none is stopped yet.
 - **A worker that doesn't understand groups** (its claim doesn't say
   `"groups": true`) is offered only members with no group.
@@ -59,11 +60,14 @@ struct Kind(Copyable, Movable):
     """Its live members."""
 
 
-def kind_wanted(lo: Int, hi: Int, decided: Optional[Int]) -> Int:
+def kind_wanted(
+    lo: Int, hi: Int, decided: Optional[Int], reports: Bool = True
+) -> Int:
     """What a kind of range `lo`..`hi` wants now: the count last `decided`
     from its run's demand, kept within the range (re-registering may have
-    moved it), or `lo` before any decision."""
-    var n = decided.value() if decided else lo
+    moved it); before any decision, `lo` when the head's worker `reports`
+    demand, else `hi`, since nothing would ever grow it."""
+    var n = decided.value() if decided else (lo if reports else hi)
     return min(max(n, lo), max(hi, lo))
 
 
@@ -73,16 +77,24 @@ def kinds_of(
     groups: List[Group],
     decided: Dict[String, Int],
     live: Dict[String, Int],
+    reports: Bool = True,
 ) -> List[Kind]:
     """A run's kinds: the workers with no group, `lo`..`hi` (none when
     `hi` is 0), then each of `groups` in order. `decided` and `live` are by
-    group, "" for none."""
+    group, "" for none; `reports`, whether the worker that runs its head
+    reports demand (`kind_wanted`)."""
     var out = List[Kind]()
     if hi > 0:
         var d = decided.get("")
         out.append(
             Kind(
-                "", 0, lo, hi, kind_wanted(lo, hi, d), Bool(d), live.get("", 0)
+                "",
+                0,
+                lo,
+                hi,
+                kind_wanted(lo, hi, d, reports),
+                Bool(d),
+                live.get("", 0),
             )
         )
     for g in groups:
@@ -93,7 +105,7 @@ def kinds_of(
                 g.gpus,
                 g.min_workers,
                 g.max_workers,
-                kind_wanted(g.min_workers, g.max_workers, d),
+                kind_wanted(g.min_workers, g.max_workers, d, reports),
                 Bool(d),
                 live.get(g.name, 0),
             )

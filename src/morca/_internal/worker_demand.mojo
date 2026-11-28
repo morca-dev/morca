@@ -10,6 +10,11 @@ sockets can't share morca's binary), run with the run's environment, which
 holds its cluster token, and given `STATUS_SECONDS` at most. A failure (a
 head not up yet, or gone) is skipped: the scheduler keeps what it decided
 last.
+
+Each claim says `"reports_demand": true` while reporting is on, so the
+scheduler knows a run whose head is here will be decided on: until then
+its kinds want their MIN. With `MORCA_SCALE_REPORT_SECONDS=0` the claim
+says false, and such a run's kinds want their MAX, as before demand.
 """
 
 from std.os import getenv

@@ -849,6 +849,7 @@ struct Worker(Movable):
                     .bool("groups", True)
                     .text("host_image", self.follow.host_image)
                     .text("host_upgrade", self.follow.state())
+                    .bool("reports_demand", self.demand.every > 0)
                     .raw("demand", self.demand.json())
                     .raw(
                         "pressure",

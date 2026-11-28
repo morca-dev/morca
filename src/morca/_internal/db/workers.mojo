@@ -275,11 +275,13 @@ def set_seen(
     advertise: String = "",
     slots: Int = 0,
     member_groups: Bool = False,
+    reports_demand: Bool = False,
 ) raises:
     """Keeps what worker `id` says of itself (empty or 0 for unsaid; -1
     for the room it can grant a run): also the address it joins runs at,
-    its free slots and whether it understands members by group
-    (`morca._internal.run_cluster`)."""
+    its free slots, whether it understands members by group
+    (`morca._internal.run_cluster`), and whether it reports its runs'
+    heads' demand (`morca._internal.run_demand`)."""
     _ = conn.execute(
         (
             "UPDATE orca.workers SET name = nullif($2, ''), image ="
@@ -288,7 +290,7 @@ def set_seen(
             " room_memory_mb = nullif($8, -1), host_image = nullif($9, ''),"
             " host_upgrade = nullif($10, ''), gpus = nullif($11, 0), advertise"
             " = nullif($12, ''), slots = $13, member_groups = nullif($14,"
-            " false) WHERE id = $1"
+            " false), reports_demand = nullif($15, false) WHERE id = $1"
         ),
         Params()
         .int64(Int64(id))
@@ -304,7 +306,8 @@ def set_seen(
         .int32(Int32(gpus))
         .text(advertise)
         .int32(Int32(slots))
-        .bool(member_groups),
+        .bool(member_groups)
+        .bool(reports_demand),
     )
 
 

@@ -364,6 +364,27 @@ def test_each_kind_wants_what_was_decided() raises:
     assert_equal(len(wanted(_kinds(1, 2, decided, live), True)), 0)
 
 
+def test_a_head_that_reports_no_demand_wants_max() raises:
+    # A run whose head's worker doesn't report demand (older, or with
+    # MORCA_SCALE_REPORT_SECONDS=0) would never grow: each kind wants its
+    # MAX until something is decided, as before demand.
+    assert_equal(kind_wanted(1, 4, None, False), 4)
+    assert_equal(kind_wanted(0, 2, None, False), 2)
+    assert_equal(kind_wanted(1, 4, 2, False), 2)
+    assert_equal(kind_wanted(3, 3, None, False), 3)
+    var k = kinds_of(
+        1, 2, _groups(), Dict[String, Int](), Dict[String, Int](), False
+    )
+    assert_equal(k[0].wanted, 2)
+    assert_false(k[0].decided)
+    assert_equal(k[1].wanted, 3)
+    assert_equal(k[2].wanted, 2)
+    var decided = Dict[String, Int]()
+    decided["gpu"] = 1
+    k = kinds_of(1, 2, _groups(), decided, Dict[String, Int](), False)
+    assert_equal(k[2].wanted, 1)
+
+
 def test_no_group_wants_as_before() raises:
     # A pipeline without groups and a fixed count wants that count from the
     # start, less its live members, as before demand.

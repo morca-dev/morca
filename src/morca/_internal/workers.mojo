@@ -410,6 +410,18 @@ def groups_field(v: Value) raises -> Bool:
     )
 
 
+def reports_demand_field(v: Value) raises -> Bool:
+    """Whether a worker's claim says it reports its runs' heads' demand
+    (`"reports_demand": true`, `morca._internal.worker_demand`); one before
+    it, or with reporting off, says nothing, and its runs' kinds want
+    their MAX until something is decided."""
+    return (
+        String("reports_demand") in v
+        and v["reports_demand"].is_bool()
+        and v["reports_demand"].bool_value()
+    )
+
+
 def _seen(mut db: State, w: WorkerAuth, v: Value) raises:
     """Keeps what the worker says of itself, for Ops."""
     var cpus = Int64(0)
@@ -440,6 +452,7 @@ def _seen(mut db: State, w: WorkerAuth, v: Value) raises:
         text_field(v, "advertise"),
         gpus_field(v, "slots"),
         groups_field(v),
+        reports_demand_field(v),
     )
     if String("pressure") in v and v["pressure"].is_object():
         _pressure_seen(db, w, v, Report.from_json(v["pressure"]))

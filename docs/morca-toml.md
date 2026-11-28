@@ -383,8 +383,10 @@ On a pool, each group's members are its own:
   run's head reports the head's status every `MORCA_SCALE_REPORT_SECONDS`
   (5), and the scheduler asks dista's `decide` per group how many members
   it wants (`MORCA_SCALE_UP_AFTER`, `MORCA_SCALE_IDLE`, `MORCA_SCALE_STEP`).
-  A count is its own MIN and MAX. No member is stopped before its run ends
-  yet ([workers.md](workers.md#demand-on-a-pool)).
+  A count is its own MIN and MAX. A head on a worker that doesn't report
+  demand (`MORCA_SCALE_REPORT_SECONDS=0`) has each group want its MAX. No
+  member is stopped before its run ends yet
+  ([workers.md](workers.md#demand-on-a-pool)).
 - **Hosts.** A host with GPUs is offered the members that ask for GPUs
   first, and joins as one that asks for none only when no host without
   GPUs has room for it. It doesn't start the run itself, as its head,

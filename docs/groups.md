@@ -107,6 +107,10 @@ memory_gb = 16
   `orca.run_wants`, so a restarted UI goes on where it was.
 - A host with GPUs doesn't start a run whose groups ask for GPUs as its
   head while a host without GPUs could: the head's host serves no group.
+- A worker says in each claim whether it reports demand
+  (`reports_demand`). A run whose head is on one that doesn't (an older
+  worker, or reporting off) wants each kind's MAX until something is
+  decided, as before, since nothing would grow it from MIN.
 - When `decide` says a group has too many, the scheduler tells the member's
   host to stop it. The host drains the dista worker first (`dista-drain`)
   and kills it when it has left or after a timeout.

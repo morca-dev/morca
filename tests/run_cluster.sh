@@ -26,7 +26,9 @@
 # Then demand per group: gpufan on pool h with its group gpu at "0..1" and
 # no GPUs. Its head's host ha reports the head's status; hb joins as the
 # group's member only after that, once the gpu tasks wait; the run's JSON
-# says what the group wants; and the run gets the same answer.
+# says what the group wants; and the run gets the same answer. A head
+# whose worker reports no demand (MORCA_SCALE_REPORT_SECONDS=0) wants the
+# group's MAX at once, as before demand.
 #
 # Needs MORCA_DATABASE_URL (pixi run test-run-cluster).
 set -eu
@@ -290,4 +292,30 @@ for f in "$marks"/model-*.env; do
         || fail "a gpu task of run $g3 ran in $(basename "$f"): $(tr '\n' ' ' < "$f")"
 done
 echo "ok   run $g3 grew its gpu group from 0 by demand and got the right answer (56)"
+
+# A head whose worker doesn't report demand (MORCA_SCALE_REPORT_SECONDS=0,
+# as a worker from before demand): nothing would grow its group, so it
+# wants its MAX at once, as before demand.
+is "SELECT coalesce(reports_demand, false) FROM orca.workers WHERE label = 'ha'" t || fail "ha's claims don't say it reports demand"
+stop_worker ha
+stop_worker hb
+htc=$(./build/morca worker-token create --pool h --label hc 2>> "$log") || fail "token hc"
+MORCA_SCALE_REPORT_SECONDS=0
+worker hc "$htc" h 0
+MORCA_SCALE_REPORT_SECONDS=2
+./build/morca backfill gpufan 2024-04 >> "$log" 2>&1 || fail "backfill gpufan 2024-04"
+g4=$(q "SELECT max(id) FROM orca.runs")
+hc_head() { is "SELECT count(*) FROM orca.runs r JOIN orca.workers w ON w.id = r.worker WHERE r.id = $g4 AND r.cluster_head IS NOT NULL AND w.label = 'hc'" 1; }
+until_ 30 "hc didn't start run $g4 as a cluster: $(q "SELECT status, held, cluster_head FROM orca.runs WHERE id = $g4")" hc_head
+is "SELECT coalesce(reports_demand, false) FROM orca.workers WHERE label = 'hc'" f || fail "hc says it reports demand with reporting off"
+curl -fsS -H 'Accept: application/json' "$base/runs/$g4" > "$dir/g4.json" || fail "run $g4's JSON"
+jq -e '.cluster_wants[0] | .group == "gpu" and .wanted == 1 and .decided == false' "$dir/g4.json" > /dev/null \
+    || fail "run $g4's gpu group doesn't want its MAX: $(jq -c .cluster_wants "$dir/g4.json")"
+worker hb "$htb" h 0
+until_ 30 "hb didn't join run $g4's gpu group" \
+    is "SELECT count(*) FROM orca.run_members m JOIN orca.workers w ON w.id = m.worker WHERE m.run = $g4 AND m.worker_group = 'gpu' AND w.label = 'hb'" 1
+until_ 120 "run $g4 didn't succeed: $(q "SELECT status, error FROM orca.runs WHERE id = $g4")" \
+    is "SELECT status FROM orca.runs WHERE id = $g4" succeeded
+is "SELECT count(*) FROM orca.run_wants WHERE run = $g4" 0 || fail "run $g4 was decided on with no demand reported"
+echo "ok   a head whose worker reports no demand wants its group's MAX at once (run $g4)"
 echo "run cluster: ok"

@@ -50,6 +50,7 @@ def cluster_wants(mut db: State, run: Int) raises -> ClusterWants:
             parse_groups(k.groups),
             live_by_group(k.decided),
             live_by_group(k.live),
+            k.reports,
         ),
         k.demand_at,
     )
