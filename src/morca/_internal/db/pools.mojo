@@ -18,20 +18,23 @@ def upsert_pool(
     name: String,
     provider: String,
     machines: String,
+    gpu_machines: String,
     locations: String,
     max_machines: Int,
     idle_seconds: Int,
 ) raises:
-    """Records pool `name` as morca.toml declares it; `machines` and
-    `locations` are JSON."""
+    """Records pool `name` as morca.toml declares it; `machines`,
+    `gpu_machines` and `locations` are JSON."""
     _ = tx.execute(
         (
-            "INSERT INTO orca.pools (name, provider, machines, locations,"
-            " max_machines, idle_seconds) VALUES ($1, $2, $3::jsonb,"
-            " $4::jsonb, $5, $6) ON CONFLICT (name) DO UPDATE SET provider"
-            " = EXCLUDED.provider, machines = EXCLUDED.machines, locations"
-            " = EXCLUDED.locations, max_machines = EXCLUDED.max_machines,"
-            " idle_seconds = EXCLUDED.idle_seconds, updated = now()"
+            "INSERT INTO orca.pools (name, provider, machines, gpu_machines,"
+            " locations, max_machines, idle_seconds) VALUES ($1, $2,"
+            " $3::jsonb, $7::jsonb, $4::jsonb, $5, $6) ON CONFLICT (name) DO"
+            " UPDATE SET provider = EXCLUDED.provider, machines ="
+            " EXCLUDED.machines, gpu_machines = EXCLUDED.gpu_machines,"
+            " locations = EXCLUDED.locations, max_machines ="
+            " EXCLUDED.max_machines, idle_seconds = EXCLUDED.idle_seconds,"
+            " updated = now()"
         ),
         Params()
         .text(name)
@@ -39,7 +42,8 @@ def upsert_pool(
         .text(machines)
         .text(locations)
         .int64(Int64(max_machines))
-        .int64(Int64(idle_seconds)),
+        .int64(Int64(idle_seconds))
+        .text(gpu_machines),
     )
 
 
@@ -213,53 +217,72 @@ def stack_id(mut conn: Connection) raises -> String:
     )
 
 
-def demand(mut conn: Connection, pool: String, after: Float64) raises -> Int:
-    """The runs of `pool`'s pipelines queued at least `after` seconds that
-    a worker could start: per pipeline at most `max_runs` less its running
-    ones, and its fill runs; and the members its running runs that spread
-    (#268) still want, once they've run `after` seconds: with no group, and
-    of each group that asks for no GPU, what it was decided to want from
-    its head's demand, else its MIN (its MAX when the head's worker
-    doesn't report demand; docs/groups.md)."""
-    var r = conn.query(
-        (
-            "SELECT (SELECT coalesce(sum(least(q.n,"
-            " greatest(coalesce(p.max_runs, (p.describe->>'max_runs')::bigint,"
-            " 1) - coalesce(r.n, 0), 0))), 0) + coalesce(sum(q.fills), 0) FROM"
-            " orca.pipelines p JOIN (SELECT pipeline, count(*) FILTER (WHERE"
-            " trigger <> 'fill') AS n, count(*) FILTER (WHERE trigger ="
-            " 'fill') AS fills FROM orca.runs WHERE status = 'queued' AND"
-            " created <= now() - make_interval(secs => $2) GROUP BY pipeline)"
-            " q ON q.pipeline = p.name LEFT JOIN (SELECT pipeline, count(*) AS"
-            " n FROM orca.runs WHERE status = 'running' AND trigger <> 'fill'"
-            " GROUP BY pipeline) r ON r.pipeline = p.name WHERE p.placement ="
-            " 'worker:' || $1 AND NOT p.paused AND p.binary_path IS NOT NULL)"
-            # Members a running run of the pool still wants (#268): of its
-            # workers with no group, and of each group that asks for no GPU
-            # (docs/groups.md; a machine with GPUs is gpu_machines', which
-            # pools don't have yet), what each was decided to want from
-            # demand, else its MIN (MAX if its head's worker doesn't report
-            # demand).
-            " + (SELECT coalesce(sum(greatest("
+def _members_wanted_sql(gpu: Bool) -> String:
+    """The members the running runs of pool `$1` still want, once they've
+    run `$2` seconds: of each group that asks for GPUs when `gpu`, else of
+    their workers with no group and each group that asks for none; what
+    each kind was decided to want from its head's demand, else its MIN
+    (its MAX when the head's worker doesn't report demand; docs/groups.md),
+    less its live members not being drained."""
+    var plain = String("0")
+    if not gpu:
+        plain = (
+            String("greatest(")
+            + wanted_sql(
+                "r2", "''", plain_min_sql("p2"), "coalesce(p2.ec2_workers, 0)"
+            )
+            + " - (SELECT count(*) FROM orca.run_members m WHERE m.run = r2.id"
+            " AND m.start = r2.starts AND m.ended IS NULL AND m.draining IS"
+            " NULL AND m.worker_group IS NULL), 0)"
         )
-        + wanted_sql(
-            "r2", "''", plain_min_sql("p2"), "coalesce(p2.ec2_workers, 0)"
-        )
-        + " - (SELECT count(*) FROM orca.run_members m WHERE m.run = r2.id AND"
-        " m.start = r2.starts AND m.ended IS NULL AND m.worker_group IS"
-        " NULL), 0) + (SELECT coalesce(sum(greatest("
+    return (
+        "(SELECT coalesce(sum("
+        + plain
+        + " + (SELECT coalesce(sum(greatest("
         + wanted_sql("r2", "g->>'name'", GROUP_MIN_SQL, GROUP_MAX_SQL)
         + " - (SELECT count(*) FROM orca.run_members m WHERE m.run = r2.id"
-        " AND m.start = r2.starts AND m.ended IS NULL AND m.worker_group ="
-        " g->>'name'), 0)), 0) FROM jsonb_array_elements(p2.groups) g"
-        " WHERE coalesce((g->>'gpus')::int, 0) = 0)), 0) FROM orca.runs"
-        " r2 JOIN orca.pipelines p2 ON p2.name = r2.pipeline WHERE"
-        " r2.status = 'running' AND r2.cluster_head IS NOT NULL AND"
-        " p2.placement = 'worker:' || $1 AND r2.started <= now() -"
-        " make_interval(secs => $2)) AS n",
+        " AND m.start = r2.starts AND m.ended IS NULL AND m.draining IS NULL"
+        " AND m.worker_group = g->>'name'), 0)), 0) FROM"
+        " jsonb_array_elements(p2.groups) g WHERE (coalesce((g->>'gpus')::int,"
+        " 0) > 0) = "
+        + ("true" if gpu else "false")
+        + ")), 0) FROM orca.runs r2 JOIN orca.pipelines p2 ON p2.name ="
+        " r2.pipeline WHERE r2.status = 'running' AND r2.cluster_head IS NOT"
+        " NULL AND p2.placement = 'worker:' || $1 AND r2.started <= now() -"
+        " make_interval(secs => $2))"
+    )
+
+
+def demand(
+    mut conn: Connection, pool: String, after: Float64
+) raises -> Tuple[Int, Int]:
+    """What `pool` needs machines for: (without GPUs, with GPUs). Without:
+    the runs of its pipelines queued at least `after` seconds that a worker
+    could start (per pipeline at most `max_runs` less its running ones, and
+    its fill runs), and the members its running runs that spread (#268)
+    still want with no group and of each group that asks for no GPU. With:
+    the members they want of each group that asks for GPUs
+    (`_members_wanted_sql`)."""
+    var r = conn.query(
+        "SELECT ((SELECT coalesce(sum(least(q.n,"
+        " greatest(coalesce(p.max_runs, (p.describe->>'max_runs')::bigint,"
+        " 1) - coalesce(r.n, 0), 0))), 0) + coalesce(sum(q.fills), 0) FROM"
+        " orca.pipelines p JOIN (SELECT pipeline, count(*) FILTER (WHERE"
+        " trigger <> 'fill') AS n, count(*) FILTER (WHERE trigger ="
+        " 'fill') AS fills FROM orca.runs WHERE status = 'queued' AND"
+        " created <= now() - make_interval(secs => $2) GROUP BY pipeline)"
+        " q ON q.pipeline = p.name LEFT JOIN (SELECT pipeline, count(*) AS"
+        " n FROM orca.runs WHERE status = 'running' AND trigger <> 'fill'"
+        " GROUP BY pipeline) r ON r.pipeline = p.name WHERE p.placement ="
+        " 'worker:' || $1 AND NOT p.paused AND p.binary_path IS NOT NULL)"
+        " + "
+        + _members_wanted_sql(False)
+        + ")::bigint AS n, "
+        + _members_wanted_sql(True)
+        + "::bigint AS gpu",
         Params().text(pool).float64(after),
     )
-    return Int(r.row(0).int64("n"))
+    return (Int(r.row(0).int64("n")), Int(r.row(0).int64("gpu")))
 
 
 @fieldwise_init
@@ -282,6 +305,8 @@ struct LiveMachine(Copyable, Movable):
     var drained: Bool
     """Its worker was asked to drain (`morca host drain`): it's removed
     once idle."""
+    var gpu: Bool
+    """It was made from the pool's `gpu_machines`."""
 
 
 def live_machines(
@@ -301,8 +326,8 @@ def live_machines(
             " m.worker AND rm.ended IS NULL)) AS busy, coalesce(extract(epoch"
             " FROM now() - m.idle_since)::float8, -1) AS idle_for,"
             " coalesce(m.image, '') AS image, m.draining IS NOT NULL AS"
-            " draining, coalesce(w.draining IS NOT NULL, false) AS drained"
-            " FROM orca.pool_machines m LEFT JOIN orca.workers w ON"
+            " draining, coalesce(w.draining IS NOT NULL, false) AS drained,"
+            " m.gpu FROM orca.pool_machines m LEFT JOIN orca.workers w ON"
             " w.id = m.worker WHERE m.pool = $1 AND m.ended IS NULL ORDER BY"
             " m.id"
         ),
@@ -322,15 +347,22 @@ def live_machines(
                 r.text("image"),
                 r.bool("draining"),
                 r.bool("drained"),
+                r.bool("gpu"),
             )
         )
     return out^
 
 
-def set_status(mut conn: Connection, pool: String, text: String) raises:
-    """Has `pool` say `text` on Ops."""
+def set_status(
+    mut conn: Connection, pool: String, text: String, gpu: Bool = False
+) raises:
+    """Has `pool` say `text` on Ops (of its `gpu_machines`, for `gpu`)."""
     _ = conn.execute(
-        "UPDATE orca.pools SET status = $2 WHERE name = $1",
+        String(
+            "UPDATE orca.pools SET ",
+            "gpu_status" if gpu else "status",
+            " = $2 WHERE name = $1",
+        ),
         Params().text(pool).text(text),
     )
 
@@ -376,6 +408,11 @@ struct PoolRow(Copyable, Movable):
     """Seconds since it started trying `trying`; -1 if it isn't."""
     var since_try: Float64
     """Seconds since the last attempt; -1 for none."""
+    var gpu_machines: String
+    """JSON, as `machines`: `[]` for none."""
+    var gpu_trying: Int
+    var gpu_trying_for: Float64
+    var gpu_since_try: Float64
 
 
 def pool_rows(mut conn: Connection) raises -> List[PoolRow]:
@@ -388,10 +425,15 @@ def pool_rows(mut conn: Connection) raises -> List[PoolRow]:
             " AS locations, max_machines, idle_seconds, true AS configured,"
             " trying, coalesce(extract(epoch FROM now() -"
             " trying_since)::float8, -1) AS trying_for, coalesce(extract(epoch"
-            " FROM now() - last_try)::float8, -1) AS since_try FROM orca.pools"
+            " FROM now() - last_try)::float8, -1) AS since_try,"
+            " coalesce(gpu_machines, '[]')::text AS gpu_machines, gpu_trying,"
+            " coalesce(extract(epoch FROM now() - gpu_trying_since)::float8,"
+            " -1) AS gpu_trying_for, coalesce(extract(epoch FROM now() -"
+            " gpu_last_try)::float8, -1) AS gpu_since_try FROM orca.pools"
             " UNION ALL SELECT DISTINCT pool, provider, '[]', '[]', 0, 0,"
-            " false, 0, -1, -1 FROM orca.pool_machines WHERE ended IS NULL AND"
-            " pool NOT IN (SELECT name FROM orca.pools) ORDER BY 1"
+            " false, 0, -1, -1, '[]', 0, -1, -1 FROM orca.pool_machines WHERE"
+            " ended IS NULL AND pool NOT IN (SELECT name FROM orca.pools) ORDER"
+            " BY 1"
         ),
         Params(),
     ):
@@ -407,6 +449,10 @@ def pool_rows(mut conn: Connection) raises -> List[PoolRow]:
                 Int(r.int64("trying")),
                 r.float64("trying_for"),
                 r.float64("since_try"),
+                r.text("gpu_machines"),
+                Int(r.int64("gpu_trying")),
+                r.float64("gpu_trying_for"),
+                r.float64("gpu_since_try"),
             )
         )
     return out^
@@ -442,58 +488,100 @@ def mark_idle(mut conn: Connection, id: Int) raises:
     )
 
 
-def stop_trying(mut conn: Connection, pool: String) raises:
-    """`pool` needs no machine: it tries no type and says nothing."""
+def _cols(sql: String, gpu: Bool) -> String:
+    """`sql` over a pool's growing state for its `machines`, or for its
+    `gpu_machines` (`gpu`): `{trying}`, `{since}`, `{last}` and `{status}`
+    name those columns."""
+    var p = "gpu_" if gpu else ""
+    return (
+        sql.replace("{trying}", String(p, "trying"))
+        .replace("{since}", String(p, "trying_since"))
+        .replace("{last}", String(p, "last_try"))
+        .replace("{status}", String(p, "status"))
+    )
+
+
+def stop_trying(mut conn: Connection, pool: String, gpu: Bool = False) raises:
+    """`pool` needs no machine (with GPUs, for `gpu`): it tries no type and
+    says nothing."""
     _ = conn.execute(
-        (
-            "UPDATE orca.pools SET trying = 0, trying_since = NULL,"
-            " status = NULL WHERE name = $1"
+        _cols(
+            (
+                "UPDATE orca.pools SET {trying} = 0, {since} = NULL, {status} ="
+                " NULL WHERE name = $1"
+            ),
+            gpu,
         ),
         Params().text(pool),
     )
 
 
-def mark_try(mut conn: Connection, pool: String) raises:
+def mark_try(mut conn: Connection, pool: String, gpu: Bool = False) raises:
     """`pool` tries to grow now, and has been trying since then if it
     wasn't."""
     _ = conn.execute(
-        (
-            "UPDATE orca.pools SET last_try = now(), trying_since ="
-            " coalesce(trying_since, now()) WHERE name = $1"
+        _cols(
+            (
+                "UPDATE orca.pools SET {last} = now(), {since} ="
+                " coalesce({since}, now()) WHERE name = $1"
+            ),
+            gpu,
         ),
         Params().text(pool),
     )
 
 
-def grew(mut conn: Connection, pool: String, status: String) raises:
+def grew(
+    mut conn: Connection, pool: String, status: String, gpu: Bool = False
+) raises:
     """`pool` made a machine: it tries no type, and says `status`."""
     _ = conn.execute(
-        (
-            "UPDATE orca.pools SET trying = 0, trying_since ="
-            " NULL, status = $2 WHERE name = $1"
+        _cols(
+            (
+                "UPDATE orca.pools SET {trying} = 0, {since} = NULL, {status} ="
+                " $2 WHERE name = $1"
+            ),
+            gpu,
         ),
         Params().text(pool).text(status),
     )
 
 
 def refused(
-    mut conn: Connection, pool: String, trying: Int, status: String
+    mut conn: Connection,
+    pool: String,
+    trying: Int,
+    status: String,
+    gpu: Bool = False,
 ) raises:
     """`pool`'s type `trying` was refused: it says `status`."""
     _ = conn.execute(
-        "UPDATE orca.pools SET trying = $2, status = $3 WHERE name = $1",
+        _cols(
+            (
+                "UPDATE orca.pools SET {trying} = $2, {status} = $3 WHERE name"
+                " = $1"
+            ),
+            gpu,
+        ),
         Params().text(pool).int64(Int64(trying)).text(status),
     )
 
 
 def try_next(
-    mut conn: Connection, pool: String, trying: Int, status: String
+    mut conn: Connection,
+    pool: String,
+    trying: Int,
+    status: String,
+    gpu: Bool = False,
 ) raises:
     """`pool` tries type `trying` from now, saying `status`."""
     _ = conn.execute(
-        (
-            "UPDATE orca.pools SET trying = $2, trying_since = now(),"
-            " status = $3 WHERE name = $1"
+        _cols(
+            (
+                "UPDATE orca.pools SET {trying} = $2, {since} = now(), {status}"
+                " = $3 WHERE name = $1"
+            ),
+            gpu,
         ),
         Params().text(pool).int64(Int64(trying)).text(status),
     )
@@ -505,15 +593,19 @@ def keep_trying(
     trying: Int,
     since_now: Bool,
     status: String,
+    gpu: Bool = False,
 ) raises:
     """`pool` waits for type `trying`, saying `status`: since it started
     trying it, or from now (`since_now`, a type it wasn't trying)."""
-    var since = "now()" if since_now else "trying_since"
+    var since = "now()" if since_now else "{since}"
     _ = conn.execute(
-        String(
-            "UPDATE orca.pools SET trying = $2, trying_since = ",
-            since,
-            ", status = $3 WHERE name = $1",
+        _cols(
+            String(
+                "UPDATE orca.pools SET {trying} = $2, {since} = ",
+                since,
+                ", {status} = $3 WHERE name = $1",
+            ),
+            gpu,
         ),
         Params().text(pool).int64(Int64(trying)).text(status),
     )
@@ -561,15 +653,17 @@ def add_machine(
     address: String,
     worker: Int,
     image: String,
+    gpu: Bool = False,
 ) raises:
     """Records a machine made for `pool` to run worker image `image`
-    (empty `arch` or `address` for unknown)."""
+    (empty `arch` or `address` for unknown), from its `gpu_machines` for
+    `gpu`."""
     _ = conn.execute(
         (
             "INSERT INTO orca.pool_machines (id, pool, provider, name,"
             " server_type, arch, location, provider_id, address, worker,"
-            " image) VALUES ($1, $2, $3, $4, $5, nullif($6, ''), $7, $8,"
-            " nullif($9, ''), $10, nullif($11, ''))"
+            " image, gpu) VALUES ($1, $2, $3, $4, $5, nullif($6, ''), $7, $8,"
+            " nullif($9, ''), $10, nullif($11, ''), $12)"
         ),
         Params()
         .int64(Int64(id))
@@ -582,5 +676,6 @@ def add_machine(
         .text(provider_id)
         .text(address)
         .int64(Int64(worker))
-        .text(image),
+        .text(image)
+        .bool(gpu),
     )

@@ -205,7 +205,7 @@ def joinable(
             " (SELECT coalesce(json_object_agg(x.g, x.n), '{}')::text FROM"
             " (SELECT coalesce(m.worker_group, '') AS g, count(*) AS n FROM"
             " orca.run_members m WHERE m.run = r.id AND m.start = r.starts AND"
-            " m.ended IS NULL GROUP BY 1) x) AS live, "
+            " m.ended IS NULL AND m.draining IS NULL GROUP BY 1) x) AS live, "
             + plain_min_sql("p")
             + " AS lo, (SELECT coalesce(json_object_agg(rw.worker_group,"
             " rw.wanted), '{}')::text FROM orca.run_wants rw WHERE rw.run ="
@@ -216,7 +216,8 @@ def joinable(
             " 'running' AND p.placement = $1 AND r.cluster_head IS NOT NULL AND"
             " r.worker <> $2 AND (coalesce(p.ec2_workers, 0) > (SELECT"
             " count(*) FROM orca.run_members m WHERE m.run = r.id AND m.start"
-            " = r.starts AND m.ended IS NULL AND m.worker_group IS NULL) OR"
+            " = r.starts AND m.ended IS NULL AND m.draining IS NULL AND"
+            " m.worker_group IS NULL) OR"
             " jsonb_array_length(coalesce(p.groups, '[]')) > 0) AND NOT EXISTS"
             " (SELECT 1 FROM orca.run_members m WHERE m.run = r.id AND m.start"
             " = r.starts AND m.worker = $2 AND m.ended IS NULL) ORDER BY r.id"
@@ -477,7 +478,11 @@ def kinds_row(mut conn: Connection, run: Int) raises -> Optional[KindsRow]:
             " coalesce(json_object_agg(x.g, x.n), '{}')::text FROM (SELECT",
             " coalesce(m.worker_group, '') AS g, count(*) AS n FROM",
             " orca.run_members m WHERE m.run = r.id AND m.start = r.starts",
-            " AND m.ended IS NULL GROUP BY 1) x) AS live, (SELECT",
+            (
+                " AND m.ended IS NULL AND m.draining IS NULL GROUP BY 1) x) AS"
+                " live,"
+            ),
+            " (SELECT",
             " coalesce(json_object_agg(rw.worker_group, rw.wanted),",
             " '{}')::text FROM orca.run_wants rw WHERE rw.run = r.id AND",
             " rw.start = r.starts) AS decided, ",
@@ -500,4 +505,142 @@ def kinds_row(mut conn: Connection, run: Int) raises -> Optional[KindsRow]:
         r.text("decided"),
         r.bool("reports"),
         r.text("demand_at"),
+    )
+
+
+# ── draining members (`morca._internal.run_demand`, docs/groups.md) ──────
+
+
+@fieldwise_init
+struct MemberRow(Copyable, Movable):
+    """A live member of a run's start whose host said its dista worker's
+    address."""
+
+    var group: String
+    """"" for the workers with no group."""
+    var address: String
+    var draining: Bool
+
+
+def live_addresses(
+    mut conn: Connection, run: Int, start: Int
+) raises -> List[MemberRow]:
+    """`run`'s live members at `start` whose address is known."""
+    var out = List[MemberRow]()
+    for r in conn.query(
+        (
+            "SELECT coalesce(worker_group, '') AS g, address, draining IS NOT"
+            " NULL AS draining FROM orca.run_members WHERE run = $1 AND start"
+            " = $2 AND ended IS NULL AND address IS NOT NULL"
+        ),
+        Params().int64(Int64(run)).int64(Int64(start)),
+    ):
+        out.append(
+            MemberRow(r.text("g"), r.text("address"), r.bool("draining"))
+        )
+    return out^
+
+
+def mark_draining(
+    mut conn: Connection,
+    run: Int,
+    start: Int,
+    group: String,
+    address: String,
+    why: String,
+) raises -> Int:
+    """Marks `run`'s live member at `start` of `group` ("" for none) whose
+    dista worker is at `address` as being drained, saying `why`; returns
+    how many were (0 or 1)."""
+    return conn.execute(
+        (
+            "UPDATE orca.run_members SET draining = now(), why = $5 WHERE run"
+            " = $1 AND start = $2 AND coalesce(worker_group, '') = $3 AND"
+            " address = $4 AND ended IS NULL AND draining IS NULL"
+        ),
+        Params()
+        .int64(Int64(run))
+        .int64(Int64(start))
+        .text(group)
+        .text(address)
+        .text(why),
+    )
+
+
+def set_address(
+    mut conn: Connection, worker: Int, member: Int, address: String
+) raises:
+    """Keeps `address`, the dista worker's `ip:port` that `worker` says its
+    live member `member` has."""
+    _ = conn.execute(
+        (
+            "UPDATE orca.run_members SET address = $3 WHERE id = $1 AND worker"
+            " = $2 AND ended IS NULL AND address IS DISTINCT FROM $3"
+        ),
+        Params().int64(Int64(member)).int64(Int64(worker)).text(address),
+    )
+
+
+def keep_member(
+    mut conn: Connection, worker: Int, member: Int, why: String
+) raises:
+    """`worker`'s host couldn't drain its member `member` (dista refused,
+    `why`): it stays a live member, not being drained."""
+    _ = conn.execute(
+        (
+            "UPDATE orca.run_members SET draining = NULL, why = $3 WHERE id ="
+            " $1 AND worker = $2 AND ended IS NULL AND draining IS NOT NULL"
+        ),
+        Params().int64(Int64(member)).int64(Int64(worker)).text(why),
+    )
+
+
+def to_drain(mut conn: Connection, worker: Int) raises -> List[Int]:
+    """`worker`'s live members the scheduler has asked to be drained."""
+    var out = List[Int]()
+    for r in conn.query(
+        (
+            "SELECT id FROM orca.run_members WHERE worker = $1 AND ended IS"
+            " NULL AND draining IS NOT NULL ORDER BY id"
+        ),
+        Params().int64(Int64(worker)),
+    ):
+        out.append(Int(r.int64("id")))
+    return out^
+
+
+# ── a host with GPUs deferring to one without (docs/groups.md) ───────────
+
+
+def deferred_for(
+    mut conn: Connection, run: Int, start: Int, kind: String
+) raises -> Float64:
+    """How long, in seconds, hosts with GPUs have left `run`'s `kind`
+    ("head" for its start, else a member's group, "" for none) to a host
+    without GPUs at `start` (-1: its current start, for a queued run),
+    counted from the first time; 0 the first."""
+    var got = conn.query(
+        (
+            "WITH s AS (SELECT CASE WHEN $2 < 0 THEN (SELECT starts FROM"
+            " orca.runs WHERE id = $1) ELSE $2 END AS start), i AS (INSERT INTO"
+            " orca.gpu_defers (run, start, kind) SELECT $1, s.start, $3 FROM s"
+            " WHERE s.start IS NOT NULL ON CONFLICT (run, start, kind) DO"
+            " NOTHING RETURNING since) SELECT coalesce((SELECT extract(epoch"
+            " FROM now() - d.since)::float8 FROM orca.gpu_defers d, s WHERE"
+            " d.run = $1 AND d.start = s.start AND d.kind = $3), 0) AS secs"
+        ),
+        Params().int64(Int64(run)).int64(Int64(start)).text(kind),
+    )
+    return got.row(0).float64("secs")
+
+
+def served(mut conn: Connection, run: Int, start: Int, kind: String) raises:
+    """`run`'s `kind` at `start` was served: a later deferral counts from
+    then."""
+    _ = conn.execute(
+        (
+            "DELETE FROM orca.gpu_defers WHERE run = $1 AND start = $2 AND kind"
+            " = $3"
+        ),
+        Params().int64(Int64(run)).int64(Int64(start)).text(kind),
     )

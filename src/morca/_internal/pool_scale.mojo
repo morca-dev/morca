@@ -9,6 +9,14 @@ seconds (20) that a worker could start: no more of a pipeline's than
 the pool take what they have room for first; what's left waiting is the
 demand.
 
+**GPU machines.** A mixed pool lists its types with GPUs under
+`gpu_machines` (docs/groups.md). The members of groups that ask for GPUs
+are their demand, apart from the rest, which is the demand of `machines`.
+Each kind grows and shrinks by its own demand, with a trying state and a
+status of its own (`orca.pools.gpu_*`): a GPU machine is never made for
+work that needs none, and an idle one is removed once no member wants a
+GPU, whatever the other demand. `max_machines` caps both together.
+
 **Growing.** While there's demand, no machine of the pool is still booting
 (made, its worker not yet seen) and it has fewer than `max_machines`, the
 autoscaler makes one, at most once every `MORCA_POOL_TRY_SECONDS` (60):
@@ -91,11 +99,15 @@ def stack_id(mut db: State) raises -> String:
     return pools_db.stack_id(db.conn)
 
 
-def demand(mut db: State, pool: String, after: Float64) raises -> Int:
-    """The runs of `pool`'s pipelines queued at least `after` seconds that
-    a worker could start: per pipeline at most `max_runs` less its running
-    ones, and its fill runs; and the members its running runs that spread
-    (#268) still want, once they've run `after` seconds."""
+def demand(
+    mut db: State, pool: String, after: Float64
+) raises -> Tuple[Int, Int]:
+    """What `pool` needs machines for, without GPUs and with
+    (`pools_db.demand`): the runs of its pipelines queued at least `after`
+    seconds that a worker could start, per pipeline at most `max_runs` less
+    its running ones, and its fill runs, and the members its running runs
+    that spread (#268) still want, once they've run `after` seconds; those
+    of groups that ask for GPUs apart."""
     return pools_db.demand(db.conn, pool, after)
 
 
@@ -103,8 +115,10 @@ def _live(mut db: State, pool: String) raises -> List[LiveMachine]:
     return pools_db.live_machines(db.conn, pool)
 
 
-def _status(mut db: State, pool: String, text: String) raises:
-    pools_db.set_status(db.conn, pool, text)
+def _status(
+    mut db: State, pool: String, text: String, gpu: Bool = False
+) raises:
+    pools_db.set_status(db.conn, pool, text, gpu)
 
 
 def _remove(
@@ -144,6 +158,30 @@ struct _Pool(Copyable, Movable):
     """Seconds since it started trying `trying`; -1 if it isn't."""
     var since_try: Float64
     """Seconds since the last attempt; -1 for none."""
+    var gpu_machines: List[Tuple[String, Int]]
+    var gpu_trying: Int
+    var gpu_trying_for: Float64
+    var gpu_since_try: Float64
+
+    def types(self, gpu: Bool) -> List[Tuple[String, Int]]:
+        """Its `gpu_machines` for `gpu`, else its `machines`."""
+        return self.gpu_machines.copy() if gpu else self.machines.copy()
+
+    def trying_of(self, gpu: Bool) -> Tuple[Int, Float64, Float64]:
+        """The type it's trying of that kind, since when, and its last try."""
+        if gpu:
+            return (self.gpu_trying, self.gpu_trying_for, self.gpu_since_try)
+        return (self.trying, self.trying_for, self.since_try)
+
+
+def _choices(text: String) raises -> List[Tuple[String, Int]]:
+    var machines = List[Tuple[String, Int]]()
+    for m in loads(text).array_items():
+        var wait = NO_WAIT
+        if "wait" in m and m["wait"].is_int():
+            wait = Int(m["wait"].int_value())
+        machines.append((m["type"].string_value(), wait))
+    return machines^
 
 
 def _pools(mut db: State) raises -> List[_Pool]:
@@ -151,12 +189,7 @@ def _pools(mut db: State) raises -> List[_Pool]:
     machines live."""
     var out = List[_Pool]()
     for r in pools_db.pool_rows(db.conn):
-        var machines = List[Tuple[String, Int]]()
-        for m in loads(r.machines).array_items():
-            var wait = NO_WAIT
-            if "wait" in m and m["wait"].is_int():
-                wait = Int(m["wait"].int_value())
-            machines.append((m["type"].string_value(), wait))
+        var machines = _choices(r.machines)
         var locations = List[String]()
         for l in loads(r.locations).array_items():
             locations.append(l.string_value())
@@ -172,6 +205,10 @@ def _pools(mut db: State) raises -> List[_Pool]:
                 r.trying,
                 r.trying_for,
                 r.since_try,
+                _choices(r.gpu_machines),
+                r.gpu_trying,
+                r.gpu_trying_for,
+                r.gpu_since_try,
             )
         )
     return out^
@@ -251,14 +288,15 @@ struct PoolScaler(Movable):
 
     def _pool(mut self, mut db: State, p: _Pool) raises:
         var provider = Provider.of(p.provider, self.owner)
-        var want = demand(
+        var wants = demand(
             db, p.name, _seconds("MORCA_POOL_GROW_AFTER", 20.0)
-        ) if p.configured else 0
+        ) if p.configured else (0, 0)
         var live = _live(db, p.name)
         var boot_s = _seconds("MORCA_POOL_BOOT_SECONDS", 900.0)
         var lost_s = _seconds("MORCA_POOL_LOST_SECONDS", 300.0)
         var kept = 0
         var booting = 0
+        var booting_gpu = 0
         # The image a machine made now would run: one made for another
         # (before a deploy) drains, and is removed once idle (#356).
         var image = getenv(WORKER_IMAGE)
@@ -280,9 +318,14 @@ struct PoolScaler(Movable):
                 )
                 continue
             if not m.seen:
-                booting += 1
+                if m.gpu:
+                    booting_gpu += 1
+                else:
+                    booting += 1
                 kept += 1
                 continue
+            # Each kind of machine by its own demand (docs/groups.md).
+            var want = wants[1] if m.gpu else wants[0]
             var outdated = Bool(image) and m.image != image
             if outdated != m.draining:
                 pools_db.drain(db.conn, m.id, outdated)
@@ -335,21 +378,58 @@ struct PoolScaler(Movable):
         _sweep(db, provider, p.name)
         if not p.configured:
             return
-        if want == 0:
-            if p.trying > 0 or p.trying_for >= 0.0:
-                pools_db.stop_trying(db.conn, p.name)
-            return
-        if booting > 0 or kept >= p.max_machines:
-            return
-        var every = _seconds("MORCA_POOL_TRY_SECONDS", 60.0)
-        if p.since_try >= 0.0 and p.since_try < every:
-            return
-        self._grow(db, provider, p)
+        if self._kind(db, provider, p, False, wants[0], booting, kept):
+            kept += 1
+        _ = self._kind(db, provider, p, True, wants[1], booting_gpu, kept)
 
-    def _grow(mut self, mut db: State, provider: Provider, p: _Pool) raises:
-        """Tries to make one machine for `p`, by the wait rule over the
-        types the worker image runs on."""
-        pools_db.mark_try(db.conn, p.name)
+    def _kind(
+        mut self,
+        mut db: State,
+        provider: Provider,
+        p: _Pool,
+        gpu: Bool,
+        want: Int,
+        booting: Int,
+        kept: Int,
+    ) raises -> Bool:
+        """Grows `p`'s machines of one kind (with GPUs for `gpu`) for its
+        demand, `want`, with `booting` of them not joined yet and `kept`
+        machines of both live; whether it made one."""
+        var t = p.trying_of(gpu)
+        if want == 0:
+            if gpu or t[0] > 0 or t[1] >= 0.0:
+                pools_db.stop_trying(db.conn, p.name, gpu)
+            return False
+        if gpu and len(p.gpu_machines) == 0:
+            _status(
+                db,
+                p.name,
+                String(
+                    "can't grow: ",
+                    want,
+                    " member" if want == 1 else " members",
+                    " of groups that ask for GPUs, and the pool has no",
+                    " gpu_machines",
+                ),
+                True,
+            )
+            return False
+        if booting > 0 or kept >= p.max_machines:
+            return False
+        var every = _seconds("MORCA_POOL_TRY_SECONDS", 60.0)
+        if t[2] >= 0.0 and t[2] < every:
+            return False
+        return self._grow(db, provider, p, gpu)
+
+    def _grow(
+        mut self, mut db: State, provider: Provider, p: _Pool, gpu: Bool
+    ) raises -> Bool:
+        """Tries to make one machine for `p` of one kind (with GPUs for
+        `gpu`), by the wait rule over the types the worker image runs on;
+        whether it made one."""
+        pools_db.mark_try(db.conn, p.name, gpu)
+        var machines = p.types(gpu)
+        var tried = p.trying_of(gpu)
         var image = getenv(WORKER_IMAGE)
         var remote = getenv("MORCA_POOL_REMOTE", getenv("MORCA_UI_URL"))
         if not image or not remote:
@@ -361,14 +441,15 @@ struct PoolScaler(Movable):
                     WORKER_IMAGE,
                     " and MORCA_UI_URL",
                 ),
+                gpu,
             )
-            return
+            return False
         # The types the image runs on, in order; the others said.
         var checked = self._image_arches(image)
         var usable = List[Int]()
         var skipped = String()
-        for k in range(len(p.machines)):
-            var t = p.machines[k][0]
+        for k in range(len(machines)):
+            var t = machines[k][0]
             if checked:
                 var arch = provider.arch(t)
                 if arch not in self.arches:
@@ -384,17 +465,18 @@ struct PoolScaler(Movable):
                 String(
                     skipped, "can't grow: the image runs on none of its types"
                 ),
+                gpu,
             )
-            return
+            return False
         # The type it's on: the one it was trying, else the next usable one
         # after it, else back to the first.
         var at = -1
         for u in range(len(usable)):
-            if usable[u] >= p.trying:
+            if usable[u] >= tried[0]:
                 at = u
                 break
-        var trying_for = max(p.trying_for, 0.0)
-        if at < 0 or usable[at] != p.trying:
+        var trying_for = max(tried[1], 0.0)
+        if at < 0 or usable[at] != tried[0]:
             trying_for = 0.0
             if at < 0:
                 at = 0
@@ -409,16 +491,18 @@ struct PoolScaler(Movable):
         var wait: Int
         while True:
             i = usable[at]
-            t = p.machines[i][0]
-            wait = p.machines[i][1]
+            t = machines[i][0]
+            wait = machines[i][1]
             var quota_hit = False
             for loc in locations:
                 var made = self._make(
-                    db, provider, p.name, t, loc, image, remote
+                    db, provider, p.name, t, loc, image, remote, gpu
                 )
                 if made[0]:
-                    pools_db.grew(db.conn, p.name, String(skipped, made[1]))
-                    return
+                    pools_db.grew(
+                        db.conn, p.name, String(skipped, made[1]), gpu
+                    )
+                    return True
                 if made[3]:
                     skipped.write(t, " refused for quota: ", made[1], "; ")
                     quota_hit = True
@@ -426,9 +510,9 @@ struct PoolScaler(Movable):
                 if not made[2]:
                     # A refusal that isn't stock: say it, try again later.
                     pools_db.refused(
-                        db.conn, p.name, i, String(skipped, made[1])
+                        db.conn, p.name, i, String(skipped, made[1]), gpu
                     )
-                    return
+                    return False
             if not quota_hit:
                 break
             if at + 1 >= len(usable):
@@ -440,8 +524,9 @@ struct PoolScaler(Movable):
                         "can't grow: the project's quota fits none of its",
                         " types",
                     ),
+                    gpu,
                 )
-                return
+                return False
             at += 1
             trying_for = 0.0
         var places = String(" in ", ", ".join(p.locations)) if len(
@@ -462,11 +547,12 @@ struct PoolScaler(Movable):
                     " for ",
                     wait,
                     " s: trying ",
-                    p.machines[next][0],
+                    machines[next][0],
                     " next",
                 ),
+                gpu,
             )
-            return
+            return False
         var left = String(
             " (", Int(trying_for), " of ", wait, " s)"
         ) if wait != NO_WAIT and not last else String(
@@ -476,9 +562,11 @@ struct PoolScaler(Movable):
             db.conn,
             p.name,
             i,
-            usable[at] != p.trying,
+            usable[at] != tried[0],
             String(skipped, "waiting: no ", t, places, " yet", left),
+            gpu,
         )
+        return False
 
     def _make(
         mut self,
@@ -489,6 +577,7 @@ struct PoolScaler(Movable):
         location: String,
         image: String,
         remote: String,
+        gpu: Bool = False,
     ) raises -> Tuple[Bool, String, Bool, Bool]:
         """Makes one machine: (made, what it came to, out of stock, refused
         for quota)."""
@@ -505,6 +594,7 @@ struct PoolScaler(Movable):
             name,
             issued.token,
             getenv("MORCA_POOL_WORKER_COMMAND"),
+            gpu,
         )
         var arch = String()
         try:
@@ -538,8 +628,11 @@ struct PoolScaler(Movable):
             got.address,
             worker,
             image,
+            gpu,
         )
         var what = String("made ", name, ": ", machine_type)
+        if gpu:
+            what.write(" (GPUs)")
         if location:
             what.write(" in ", location)
         print("pool", pool, what)

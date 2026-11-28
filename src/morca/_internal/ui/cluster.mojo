@@ -115,7 +115,12 @@ def cluster_html(mut h: Html, rows: List[ClusterRow], wants: ClusterWants):
         h.raw("</td><td>")
         h.text(r.joined)
         h.raw("</td><td>")
-        h.text(r.ended if r.ended else String("-"))
+        if r.ended:
+            h.text(r.ended)
+        elif r.draining:
+            h.text(String("draining since ", r.draining))
+        else:
+            h.text("-")
         h.raw("</td><td>")
         h.text(r.why)
         h.raw("</td></tr>")
@@ -147,6 +152,8 @@ def cluster_json(rows: List[ClusterRow]) -> String:
             String(r.grant_gpus) if r.grant_gpus else String("null"),
             '}, "joined": ',
             quote(r.joined),
+            ', "draining": ',
+            quote(r.draining) if r.draining else String("null"),
             ', "ended": ',
             quote(r.ended) if r.ended else String("null"),
             ', "why": ',

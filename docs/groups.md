@@ -1,7 +1,7 @@
 # Worker groups and GPUs on pools: a plan
 
 November 27, 2026 · a plan for step 4 of [layers.md](layers.md); PRs 1
-to 3 and 4a are built
+to 4b are built
 
 dista now routes a task or an actor to the workers of a named group, reports
 demand per group and runs flows (dista #152 to #167). morca can't use any of
@@ -51,8 +51,9 @@ memory_gb = 16
   `gpus` per worker. What it doesn't set falls back to the pipeline's.
 - The keys outside `groups` keep their meaning: they describe the workers
   with no group, which is where dista sends a task that names none.
-- Groups are stored as one `jsonb` column on `orca.pipelines`, and copied
-  into the run's `spec` when it starts. Both are additive.
+- Groups are stored as one `jsonb` column on `orca.pipelines`, which is
+  additive. They aren't copied into the run's `spec`: the scheduler reads
+  them from the pipeline's registration.
 - In code, a task names its group (`Task[..., group="gpu"]` in dista).
   `register` and `config check` refuse a pipeline whose tasks name a group
   the pipeline doesn't declare, if the binary's `describe` can list them;
@@ -111,13 +112,29 @@ memory_gb = 16
   (`reports_demand`). A run whose head is on one that doesn't (an older
   worker, or reporting off) wants each kind's MAX until something is
   decided, as before, since nothing would grow it from MIN.
-- When `decide` says a group has too many, the scheduler tells the member's
-  host to stop it. The host drains the dista worker first (`dista-drain`)
-  and kills it when it has left or after a timeout.
+- When `decide` says a group has too many, it names the idle members to
+  drain by their dista workers' addresses, which each member's host reads
+  from the process and sends with its claims. The scheduler marks those
+  members as draining, counts them no more among the live ones, and tells
+  their hosts in their claims' answers. A host drains the dista worker
+  with dista's drain (`dista-drain`), so its tasks finish or move and a
+  group's last worker stays while the group has tasks, and kills it if it
+  hasn't left 15 s after dista's own bound. A drain dista refuses goes
+  back with the next claim, and the member runs on. A member ends, and its
+  grant is returned, when its process exits; its row says why it was
+  drained. `decide` never goes below the group's MIN, and the head's
+  host's own dista worker is no member and is never drained.
 - A pool grows when wanted members have no host. A group that asks for
   GPUs needs a machine type that has them: a pool lists those under
   `gpu_machines`, with the same shape as `machines`, and is otherwise
-  unchanged.
+  unchanged. The members of groups that ask for GPUs are the demand of
+  `gpu_machines`, and the rest the demand of `machines`: each kind grows
+  and shrinks by its own, with a trying state and a status of its own, and
+  `max_machines` caps both together.
+- A host with GPUs leaves a run's head, or a member that asks for no GPU,
+  to a host without GPUs that has room for `MORCA_GPU_DEFER_SECONDS` (60)
+  at most. A host that seems to have room may never take it (it runs
+  another image, say), and the run would wait for ever.
 
 ## One contract for every provider
 
@@ -161,7 +178,7 @@ names it and moves the other providers behind it:
 | 2 | GPUs: the host's count, the claim, `Grant`, admission, the UI's host and run pages (done) | `test-grants` with `MORCA_HOST_GPUS` |
 | 3 | Members by group on pools: `run_members`, `join_claim`, `DISTA_GROUP` (done) | `test-run-cluster` with a GPU group on a mixed pair of hosts: the group's task runs only there |
 | 4a | Demand per group: the head's status with the claim, `decide` per group, the wanted counts in `join_claim` and the pool's demand; MIN honoured; a host with GPUs leaves a run whose groups ask for GPUs to start on one without (done) | `test-run-cluster` with a group of `0..1` that grows from 0 once the head reports its tasks; unit tests of the decision |
-| 4b | Draining a member when `decide` says a group has too many, and `gpu_machines` in a growing pool | `test-pool-scale` with a group that grows from 0 and drains when idle |
+| 4b | Draining a member when `decide` says a group has too many, and `gpu_machines` in a growing pool; a bound on a host with GPUs deferring (done) | `test-pool-scale` with a mixed pool whose GPU machine grows for a group from 0, is drained when idle and removed while the run goes on; `test-run-cluster` with a member drained mid-run, and a deferral that ends |
 | 5 | The contract by name: one environment builder, groups on local, `control` and Kubernetes, warnings for the `ec2` placement | `test-kube`, and a local run with two groups |
 
 Each PR leaves a pipeline without groups behaving as it does today, except

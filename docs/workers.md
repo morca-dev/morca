@@ -335,9 +335,24 @@ per kind of member ([groups.md](groups.md#demand-per-group)):
   decided. A run
   whose kinds could ever want a member starts its head even when every MIN
   is 0.
-- **No shrinking yet.** A kind that wants fewer members than it has is
-  given no new ones; none is stopped before its run ends. Draining a
-  member mid-run comes next ([groups.md](groups.md#prs), PR 4b).
+- **Shrinking.** When `decide` drains a kind's idle members, the
+  scheduler marks each (`orca.run_members.draining`, migration 74, and its
+  why, "drained: group gpu wants 0 (0..1)"), counts it no more among the
+  kind's live members, and lists it in its host's next claim's answer
+  (`"drain"`). The host drains its dista worker with dista's drain
+  (`<binary> dista-drain <head> <address>`): it takes no new tasks, what
+  it holds moves, and it exits once done, within `DISTA_DRAIN_SECONDS`
+  (25); one still running 15 s after that is killed. The member then ends
+  as any does, and its grant and GPUs are free again. `decide` never goes
+  below the kind's MIN, and dista keeps a group's last worker while the
+  group has tasks: a drain dista refuses goes back with the next claim
+  (`kept`), and the member runs on. The head's host's own dista worker is
+  no member and is never drained.
+- **Addresses.** dista names the workers to drain by address. Each claim
+  says the address of each of the worker's members' dista workers
+  (`member_addresses`, kept as `orca.run_members.address`), read from the
+  process (`/proc` on Linux, `lsof` on macOS). A member whose host hasn't
+  said it, such as one on a worker from before this, is never drained.
 - **On the page.** The run's Cluster card, and its JSON's `cluster_wants`,
   show each kind's range, live members and what it wants now.
 
@@ -359,9 +374,9 @@ Only pools use groups for now: a local run, `control`, Kubernetes and the
 - a running run that wants more members than have joined (what each kind
   wants now, [Demand on a pool](#demand-on-a-pool)) counts as the pool's
   demand, so the pool grows for it (up to `max_machines`), and the
-  new machine joins the run (a group's that asks for GPUs doesn't count
-  yet: a pool has no machine type with GPUs until `gpu_machines`,
-  [groups.md](groups.md#demand-per-group));
+  new machine joins the run; the members of groups that ask for GPUs are
+  the demand of the pool's `gpu_machines` instead, which grow and shrink
+  apart ([morca-toml.md](morca-toml.md#worker-pools));
 - a machine running only a member is busy, not idle.
 
 ## Tokens

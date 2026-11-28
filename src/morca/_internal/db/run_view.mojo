@@ -187,7 +187,8 @@ struct ClusterRow(Copyable, Movable):
     var worker: String
     """The worker's name, else its token's label."""
     var address: String
-    """The head's `host:port`; empty for a member."""
+    """The head's `host:port`; a member's dista worker's `ip:port`, as its
+    host said it (empty before)."""
     var grant_cpus: Int
     var grant_memory_mb: Int
     var joined: String
@@ -197,6 +198,8 @@ struct ClusterRow(Copyable, Movable):
     """The worker group a member serves (docs/groups.md); empty for none
     and for the head."""
     var grant_gpus: Int
+    var draining: String
+    """When a member was asked to drain (docs/groups.md); empty if not."""
 
 
 def cluster_rows(mut conn: Connection, run: Int) raises -> List[ClusterRow]:
@@ -235,6 +238,7 @@ def cluster_rows(mut conn: Connection, run: Int) raises -> List[ClusterRow]:
                 "",
                 "",
                 Int(r.int64("gpus")),
+                "",
             )
         )
     for r in conn.query(
@@ -247,7 +251,11 @@ def cluster_rows(mut conn: Connection, run: Int) raises -> List[ClusterRow]:
             _TS,
             ") AS joined, coalesce(to_char(m.ended AT TIME ZONE 'UTC', ",
             _TS,
-            "), '') AS ended, coalesce(m.why, '') AS why FROM",
+            "), '') AS ended, coalesce(m.why, '') AS why,",
+            " coalesce(m.address, '') AS address, coalesce(to_char(m.draining",
+            " AT TIME ZONE 'UTC', ",
+            _TS,
+            "), '') AS draining FROM",
             " orca.run_members m LEFT JOIN orca.workers w ON w.id = m.worker",
             " WHERE m.run = $1 ORDER BY m.id",
         ),
@@ -258,7 +266,7 @@ def cluster_rows(mut conn: Connection, run: Int) raises -> List[ClusterRow]:
                 "member",
                 Int(r.int64("start")),
                 r.text("worker"),
-                "",
+                r.text("address"),
                 Int(r.int64("cpus")),
                 Int(r.int64("mb")),
                 r.text("joined"),
@@ -266,6 +274,7 @@ def cluster_rows(mut conn: Connection, run: Int) raises -> List[ClusterRow]:
                 r.text("why"),
                 r.text("grp"),
                 Int(r.int64("gpus")),
+                r.text("draining"),
             )
         )
     return out^

@@ -32,17 +32,25 @@ struct ScaledPool(Copyable, Movable):
     var live: Int
     var trying: Int
     var status: String
+    var gpu_machines: List[Tuple[String, Int]]
+    """Its types with GPUs (docs/groups.md), as `machines`."""
+    var gpu_status: String
+
+
+def _choices(text: String) raises -> List[Tuple[String, Int]]:
+    var ms = List[Tuple[String, Int]]()
+    for m in loads(text).array_items():
+        var wait = -1
+        if "wait" in m and m["wait"].is_int():
+            wait = Int(m["wait"].int_value())
+        ms.append((m["type"].string_value(), wait))
+    return ms^
 
 
 def scaled_pools(mut db: State) raises -> List[ScaledPool]:
     var out = List[ScaledPool]()
     for r in machines_db.scaled_pools(db.conn):
-        var ms = List[Tuple[String, Int]]()
-        for m in loads(r.machines).array_items():
-            var wait = -1
-            if "wait" in m and m["wait"].is_int():
-                wait = Int(m["wait"].int_value())
-            ms.append((m["type"].string_value(), wait))
+        var ms = _choices(r.machines)
         var ls = List[String]()
         for l in loads(r.locations).array_items():
             ls.append(l.string_value())
@@ -57,17 +65,42 @@ def scaled_pools(mut db: State) raises -> List[ScaledPool]:
                 r.live,
                 r.trying,
                 r.status,
+                _choices(r.gpu_machines),
+                r.gpu_status,
             )
         )
     return out^
 
 
-def _types(p: ScaledPool) -> String:
+def _list(machines: List[Tuple[String, Int]]) -> String:
     var out = String()
-    for i in range(len(p.machines)):
-        out.write(", " if i else "", p.machines[i][0])
-        if p.machines[i][1] >= 0:
-            out.write(" (", p.machines[i][1], " s)")
+    for i in range(len(machines)):
+        out.write(", " if i else "", machines[i][0])
+        if machines[i][1] >= 0:
+            out.write(" (", machines[i][1], " s)")
+    return out^
+
+
+def _types(p: ScaledPool) -> String:
+    """Its types, then those with GPUs: "cax31; GPUs: gex44"."""
+    var out = _list(p.machines)
+    if len(p.gpu_machines):
+        out.write("; GPUs: ", _list(p.gpu_machines))
+    return out^
+
+
+def _json_types(machines: List[Tuple[String, Int]]) -> String:
+    var out = String("[")
+    for k in range(len(machines)):
+        out.write(
+            ", " if k else "",
+            '{"type": ',
+            quote(machines[k][0]),
+            ', "wait": ',
+            String(machines[k][1]) if machines[k][1] >= 0 else String("null"),
+            "}",
+        )
+    out.write("]")
     return out^
 
 
@@ -105,6 +138,9 @@ def scaled_pools_html(mut h: Html, pools: List[ScaledPool]):
         h.text(trying)
         h.raw("</td><td>")
         h.text(p.status if p.status else String("-"))
+        if p.gpu_status:
+            h.raw("<br>")
+            h.text(String("GPUs: ", p.gpu_status))
         h.raw("</td></tr>")
     h.raw("</tbody></table></div></section>")
 
@@ -119,19 +155,12 @@ def scaled_pools_json(pools: List[ScaledPool]) -> String:
             quote(p.name),
             ', "provider": ',
             quote(p.provider),
-            ', "machines": [',
+            ', "machines": ',
+            _json_types(p.machines),
+            ', "gpu_machines": ',
+            _json_types(p.gpu_machines),
         )
-        for k in range(len(p.machines)):
-            out.write(
-                ", " if k else "",
-                '{"type": ',
-                quote(p.machines[k][0]),
-                ', "wait": ',
-                String(p.machines[k][1]) if p.machines[k][1]
-                >= 0 else String("null"),
-                "}",
-            )
-        out.write('], "locations": [')
+        out.write(', "locations": [')
         for k in range(len(p.locations)):
             out.write(", " if k else "", quote(p.locations[k]))
         out.write(
@@ -146,6 +175,8 @@ def scaled_pools_json(pools: List[ScaledPool]) -> String:
             and p.trying < len(p.machines) else String("null"),
             ', "status": ',
             quote(p.status) if p.status else String("null"),
+            ', "gpu_status": ',
+            quote(p.gpu_status) if p.gpu_status else String("null"),
             "}",
         )
     out.write("]")

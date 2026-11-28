@@ -299,6 +299,9 @@ struct PoolRecord(Copyable, Movable):
     var live: Int
     var trying: Int
     var status: String
+    var gpu_machines: String
+    """Its `gpu_machines`, as `machines`: `[]` for none."""
+    var gpu_status: String
 
 
 def scaled_pools(mut conn: Connection) raises -> List[PoolRecord]:
@@ -310,7 +313,9 @@ def scaled_pools(mut conn: Connection) raises -> List[PoolRecord]:
             " p.locations::text AS locations, p.max_machines, p.idle_seconds,"
             " p.trying, coalesce(p.status, '') AS status, (SELECT count(*) FROM"
             " orca.pool_machines m WHERE m.pool = p.name AND m.ended IS NULL)"
-            " AS live FROM orca.pools p ORDER BY p.name"
+            " AS live, coalesce(p.gpu_machines, '[]')::text AS gpu_machines,"
+            " coalesce(p.gpu_status, '') AS gpu_status FROM orca.pools p ORDER"
+            " BY p.name"
         ),
         Params(),
     ):
@@ -325,6 +330,8 @@ def scaled_pools(mut conn: Connection) raises -> List[PoolRecord]:
                 Int(r.int64("live")),
                 Int(r.int64("trying")),
                 r.text("status"),
+                r.text("gpu_machines"),
+                r.text("gpu_status"),
             )
         )
     return out^

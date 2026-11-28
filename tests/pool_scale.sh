@@ -20,6 +20,12 @@
 #   second, which joins the private network the first did, and the run;
 #   both run its tasks, the total is one machine's; idle once the run ends,
 #   both are removed. (This was tests/pool_spread.sh, #447.)
+# - a mixed pool (docs/groups.md, PR 4b): m has machines and gpu_machines,
+#   and gpufan's group gpu ("0..1", one GPU) is placed on it. The queued
+#   run grows a machine without GPUs, which starts it; the group's demand
+#   grows one with a GPU, which joins as its member; idle once the gpu
+#   tasks are done, the member is drained while the run goes on, and the
+#   GPU machine is removed while the other runs on.
 #
 # Each fake server runs its boot script, which runs `morca worker` with the
 # address MORCA_BOOT_ADVERTISE gives it (127.0.0.1 here; the private one
@@ -32,7 +38,7 @@ cd "$(dirname "$0")/.."
 . "$PWD/tests/port.sh"
 one_cluster_test
 mkdir -p build
-scripts/pipelines.sh plain fanout
+scripts/pipelines.sh plain fanout gpufan
 # shellcheck disable=SC2086
 scripts/mojo-build.sh -I src $DEP_INC bin/scheduler.mojo -o build/morca
 log=build/pool-scale.log
@@ -45,6 +51,9 @@ mkdir -p "$GRANTEE_OUT"
 export MORCA_STALE_SECONDS=5 MORCA_START_SECONDS=20 MORCA_SAMPLE_SECONDS=0 MORCA_WATCHDOG_SECONDS=0
 export MORCA_FANOUT_SLEEP=4 MORCA_FANOUT_SHOW_HOST=1 DISTA_SHM=0
 export MORCA_BOOT_ADVERTISE=127.0.0.1
+# gpufan's tail, in its runs on the fake's servers, and an idle time the
+# UI decides with that drains its member within it.
+export GPUFAN_SLEEP=2 GPUFAN_TAIL=60 MORCA_SCALE_IDLE=3
 unset MORCA_RUNNER MORCA_CONFIG MORCA_WORKER_ADVERTISE
 free_port hport
 free_port uport
@@ -247,4 +256,65 @@ echo "ok   both machines run its tasks, and the total is one machine's ($spread)
 gone() { is "SELECT count(*) FROM orca.pool_machines WHERE pool = 's' AND ended IS NULL" 0; }
 until_ 60 "the machines weren't removed: $(q "SELECT name, ended, why FROM orca.pool_machines WHERE pool = 's'")" gone
 echo "ok   idle once the run ends, both machines are removed ($(q "SELECT string_agg(DISTINCT why, ', ') FROM orca.pool_machines WHERE pool = 's'"))"
+
+# A mixed pool: m's GPU machines grow and shrink by its gpu group's demand.
+cat build/pool-scale-spread.toml - > build/pool-scale-gpu.toml << 'EOF'
+
+[pools.m]
+provider = "hetzner"
+machines = [{ type = "cax31" }]
+gpu_machines = [{ type = "gex44" }]
+locations = ["hel1"]
+max_machines = 2
+idle_seconds = 10
+
+[pipelines.gpufan]
+placement = "worker:m"
+max_runs = 1
+
+[pipelines.gpufan.groups.gpu]
+workers = "0..1"
+gpus = 1
+EOF
+printf 'cax31 hel1\ngex44 hel1\n' > "$dir/stock"
+./build/morca register --config build/pool-scale-gpu.toml ./build/gpufan >> "$log" 2>&1 || fail "register gpufan"
+is "SELECT gpu_machines::text FROM orca.pools WHERE name = 'm'" '[{"type": "gex44"}]' || fail "pool m's gpu_machines: $(q "SELECT gpu_machines FROM orca.pools WHERE name = 'm'")"
+./build/morca backfill gpufan 2024-01 >> "$log" 2>&1 || fail "backfill gpufan"
+gr=$(q "SELECT max(id) FROM orca.runs WHERE pipeline = 'gpufan'")
+m_head() { [ -n "$(q "SELECT coalesce(cluster_head, '') FROM orca.runs WHERE id = $gr")" ]; }
+until_ 60 "no head for run $gr: $(q "SELECT status, held FROM orca.runs WHERE id = $gr") / $(q "SELECT status, gpu_status FROM orca.pools WHERE name = 'm'")" m_head
+is "SELECT string_agg(server_type || ':' || gpu, ' ') FROM orca.pool_machines WHERE pool = 'm'" "cax31:false" \
+    || fail "pool m's machines for the queued run: $(q "SELECT server_type, gpu FROM orca.pool_machines WHERE pool = 'm'")"
+echo "ok   the queued run grows a machine without GPUs, which starts it"
+gpu_machine() { is "SELECT count(*) FROM orca.pool_machines WHERE pool = 'm' AND gpu AND server_type = 'gex44'" 1; }
+until_ 60 "no GPU machine: $(q "SELECT status, gpu_status FROM orca.pools WHERE name = 'm'") / $(q "SELECT worker_group, wanted FROM orca.run_wants WHERE run = $gr")" gpu_machine
+gpu_member() { [ -n "$(q "SELECT m.id FROM orca.run_members m JOIN orca.pool_machines pm ON pm.worker = m.worker WHERE m.run = $gr AND pm.gpu AND m.worker_group = 'gpu' AND m.grant_gpus = 1")" ]; }
+until_ 90 "the GPU machine didn't join run $gr: $(q "SELECT worker, worker_group, grant_gpus, ended, why FROM orca.run_members WHERE run = $gr")" gpu_member
+gm=$(q "SELECT m.id FROM orca.run_members m JOIN orca.pool_machines pm ON pm.worker = m.worker WHERE m.run = $gr AND pm.gpu")
+echo "ok   the group's demand grows a machine with a GPU, which joins as its member with the GPU"
+drained_mid_run() {
+    got=$(q "SELECT (m.ended IS NOT NULL)::int || ' ' || r.status FROM orca.run_members m JOIN orca.runs r ON r.id = m.run WHERE m.id = $gm")
+    case "$got" in
+    "1 running") return 0 ;;
+    "1 "*) fail "member $gm ended only with its run: $got" ;;
+    *) return 1 ;;
+    esac
+}
+until_ 60 "member $gm wasn't drained: $(q "SELECT ended, draining, why, address FROM orca.run_members WHERE id = $gm")" drained_mid_run
+is "SELECT why FROM orca.run_members WHERE id = $gm" "drained: group gpu wants 0 (0..1)" || fail "member $gm's why: $(q "SELECT why FROM orca.run_members WHERE id = $gm")"
+echo "ok   idle, the member is drained while the run goes on"
+gpu_removed() {
+    got=$(q "SELECT coalesce(why, '') FROM orca.pool_machines WHERE pool = 'm' AND gpu")
+    [ -n "$got" ] || return 1
+    [ "$got" = "idle 10 s" ] || fail "the GPU machine was removed: $got"
+    is "SELECT status FROM orca.runs WHERE id = $gr" running || fail "the run ended before the GPU machine was removed"
+}
+until_ 60 "the idle GPU machine wasn't removed: $(q "SELECT name, gpu, ended, why FROM orca.pool_machines WHERE pool = 'm'")" gpu_removed
+is "SELECT count(*) FROM orca.pool_machines WHERE pool = 'm' AND NOT gpu AND ended IS NULL" 1 || fail "the machine without GPUs went with it"
+echo "ok   the idle GPU machine is removed while the run goes on, on the other"
+until_ 120 "run $gr didn't succeed: $(q "SELECT status, error FROM orca.runs WHERE id = $gr")" \
+    is "SELECT status FROM orca.runs WHERE id = $gr" succeeded
+m_gone() { is "SELECT count(*) FROM orca.pool_machines WHERE pool = 'm' AND ended IS NULL" 0; }
+until_ 60 "pool m's machines weren't removed: $(q "SELECT name, ended, why FROM orca.pool_machines WHERE pool = 'm'")" m_gone
+echo "ok   once the run ends, the other is removed too"
 echo "pool scale: ok"

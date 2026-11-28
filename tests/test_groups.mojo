@@ -30,6 +30,7 @@ from morca._internal.groups import (
 )
 from morca._internal.member_demand import (
     DEMAND_STALE_SECONDS,
+    Member,
     Prior,
     decide_kind,
     own_workers,
@@ -43,9 +44,11 @@ from morca._internal.member_wants import (
     kind_wanted,
     kinds_of,
     offer_order,
+    still_defers,
     wanted,
     wants_gpus_of,
 )
+from morca._internal.run_demand import drain_why
 from morca._internal.scale_policy import ScaleKnobs
 from morca._internal.secrets import env_name_problem
 
@@ -610,6 +613,93 @@ def test_idle_members_are_wanted_no_more() raises:
     assert_equal(decide_kind(old, "", 1, 2, _knobs(), 1000, None).wanted, 1)
     assert_true(groups_ask_gpus(_groups()))
     assert_false(groups_ask_gpus([Group("decode", 1, 1, 0, "", "")]))
+
+
+def test_idle_members_are_drained_by_address() raises:
+    # gpu (0..2): two idle members, past MORCA_SCALE_IDLE, no tasks. With
+    # both known by address, both drain, fewest held bytes first.
+    var d = _status(
+        [
+            _worker("h:1", "", 0, 90),
+            _worker("g:1", "gpu", 0, 90),
+            _worker("g:2", "gpu", 0, 90),
+        ],
+        [_group("", 1, 0, 0), _group("gpu", 2, 0, 0)],
+    )
+    var both: List[Member] = [Member("g:1", False), Member("g:2", False)]
+    var got = decide_kind(
+        d, "gpu", 0, 2, _knobs(), 1000, Prior(2, 0, 999), both^
+    )
+    assert_equal(got.wanted, 0)
+    assert_equal(len(got.drain), 2)
+    # A worker that is no member it knows (its host hasn't said its
+    # address yet) is taken as busy: only g:2 drains.
+    var one: List[Member] = [Member("g:2", False)]
+    got = decide_kind(d, "gpu", 0, 2, _knobs(), 1000, Prior(2, 0, 999), one^)
+    assert_equal(got.drain, ["g:2"])
+    assert_equal(got.wanted, 1)
+    # Its MIN is kept: 1..2 drains one.
+    var all: List[Member] = [Member("g:1", False), Member("g:2", False)]
+    got = decide_kind(d, "gpu", 1, 2, _knobs(), 1000, Prior(2, 0, 999), all^)
+    assert_equal(len(got.drain), 1)
+    assert_equal(got.wanted, 1)
+    # One being drained already counts as gone: the next answer, before
+    # the head has heard of it, drains no other below the MIN.
+    var marked: List[Member] = [Member("g:1", True), Member("g:2", False)]
+    got = decide_kind(
+        d, "gpu", 1, 2, _knobs(), 1005, Prior(1, 0, 1000), marked^
+    )
+    assert_equal(len(got.drain), 0)
+    assert_equal(got.wanted, 1)
+
+
+def test_the_heads_own_worker_is_never_drained() raises:
+    # The workers with no group, 0..2: the head's host's own worker and a
+    # member, both idle. Only the member drains; the head's is no member.
+    var d = _status(
+        [_worker("h:1", "", 0, 90), _worker("m:1", "", 0, 90)],
+        [_group("", 2, 0, 0)],
+    )
+    var ms: List[Member] = [Member("m:1", False)]
+    var got = decide_kind(d, "", 0, 2, _knobs(), 1000, Prior(1, 0, 999), ms^)
+    assert_equal(got.drain, ["m:1"])
+    assert_equal(got.wanted, 0)
+    var none = List[Member]()
+    got = decide_kind(d, "", 0, 2, _knobs(), 1000, Prior(1, 0, 999), none^)
+    assert_equal(len(got.drain), 0)
+
+
+def test_the_last_worker_of_a_group_with_tasks_stays() raises:
+    # gpu (0..1): its one member idle, but a task of the group is waiting
+    # for its inputs: dista's rule keeps the last worker.
+    var d = _status(
+        [_worker("h:1", "", 1, 0), _worker("g:1", "gpu", 0, 90)],
+        [
+            _group("", 1, 0, 1),
+            String(
+                '{"group":"gpu","workers":1,"slots":1,"tasks_ready":0,',
+                '"tasks_waiting":2,"tasks_running":0,"actors_waiting":0}',
+            ),
+        ],
+    )
+    var ms: List[Member] = [Member("g:1", False)]
+    var got = decide_kind(d, "gpu", 0, 1, _knobs(), 1000, Prior(1, 0, 999), ms^)
+    assert_equal(len(got.drain), 0)
+    assert_equal(got.wanted, 1)
+
+
+def test_why_a_member_is_drained() raises:
+    assert_equal(drain_why("gpu", 0, 0, 2), "drained: group gpu wants 0 (0..2)")
+    assert_equal(drain_why("", 1, 1, 1), "drained: no group wants 1 (1)")
+
+
+def test_a_gpu_host_defers_for_a_while() raises:
+    # A host with GPUs leaves a head or a member with no GPU to one
+    # without for MORCA_GPU_DEFER_SECONDS at most, then takes it.
+    assert_true(still_defers(0, 60))
+    assert_true(still_defers(59.9, 60))
+    assert_false(still_defers(60, 60))
+    assert_false(still_defers(0, 0))
 
 
 def main() raises:

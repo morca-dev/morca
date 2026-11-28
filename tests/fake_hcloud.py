@@ -13,7 +13,9 @@ Stock: a create succeeds only for a type and location named in
 test can change it); any other is refused 412 `resource_unavailable`, as
 Hetzner refuses a type it's out of. A location not in hel1, nbg1, fsn1 is
 `invalid_input`. Types starting with `cax` are `arm`, the rest `x86`; the
-types are cax11..cax41, cx23..cx53, cpx12..cpx62 and ccx13..ccx63. A type named in <dir>/quota (words) is
+types are cax11..cax41, cx23..cx53, cpx12..cpx62 and ccx13..ccx63, and
+gex44 and gex130, which have one GPU: their servers run with
+MORCA_HOST_GPUS=1. A type named in <dir>/quota (words) is
 refused 403 `resource_limit_exceeded`, as a project over its core quota is.
 The one
 firewall is `morca-lab`, id 42. Networks are made by POST /v1/networks and
@@ -51,11 +53,13 @@ SERVERS = {}  # id -> {"name", "type", "location", "labels", "proc", "status", "
 NETWORKS = {}  # id -> {"name", "ip_range", "zone"}
 COUNTER = [1000]
 LOCATIONS = ("hel1", "nbg1", "fsn1")
+GPU_TYPES = ["gex44", "gex130"]
 TYPES = (
     [f"cax{n}1" for n in range(1, 5)]
     + [f"cx{n}3" for n in range(2, 6)]
     + [f"cpx{n}2" for n in range(1, 7)]
     + [f"ccx{n}3" for n in range(1, 7)]
+    + GPU_TYPES
 )
 
 
@@ -133,7 +137,8 @@ def _create(body):
             f.write(body.get("user_data", ""))
         log = open(os.path.join(DIR, f"server-{sid}.log"), "w")
         env = dict(os.environ, HOSTNAME=name, SERVER_NAME=name,
-                   MORCA_BOOT_DIR=os.path.join(DIR, f"boot-{sid}"))
+                   MORCA_BOOT_DIR=os.path.join(DIR, f"boot-{sid}"),
+                   MORCA_HOST_GPUS="1" if t in GPU_TYPES else "0")
         proc = subprocess.Popen(["sh", script], stdout=log, stderr=log, env=env, cwd=DIR,
                                 start_new_session=True)
     for n in body.get("networks", []):

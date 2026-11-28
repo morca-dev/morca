@@ -61,6 +61,8 @@ from morca._internal.run_cluster import (
     join_claim,
     member_spec_json,
     members_of,
+    member_reports,
+    members_to_drain,
     members_to_stop,
     say_gpu_head,
     stop_json,
@@ -500,7 +502,7 @@ def _num(v: Value, key: String) raises -> Int64:
 
 def claim(mut db: State, w: WorkerAuth, v: Value) raises -> String:
     """`/api/worker/claim`'s answer: `{"run": <spec>|null, "refused": ...,
-    "join": <member spec>, "stop": [member, ...]}`, and `"max_runs"` when
+    "join": <member spec>, "stop": [member, ...], "drain": [member, ...]}`, and `"max_runs"` when
     its pool's settings (`morca._internal.pool_config`) have one. Nothing
     for a draining pool machine (`morca._internal.pool_scale`), or a worker
     asked to drain (`morca host drain`: `"draining"` says so). Its pool's
@@ -510,6 +512,12 @@ def claim(mut db: State, w: WorkerAuth, v: Value) raises -> String:
     (`advertise`), a run to join (`morca._internal.run_cluster`); and always the
     members it has whose run has ended, to stop."""
     var stop = members_to_stop(db, w.id)
+    # Its members' addresses and refused drains (docs/groups.md), then
+    # those it's to drain.
+    try:
+        member_reports(db, w.id, v)
+    except e:
+        print("morca: worker", w.id, "member reports skipped:", e)
     # Its runs' heads' demand, decided on before any worker is offered a
     # member below (morca._internal.run_demand).
     try:
@@ -610,6 +618,8 @@ def claim(mut db: State, w: WorkerAuth, v: Value) raises -> String:
         most,
         ', "stop": ',
         stop_json(stop),
+        ', "drain": ',
+        stop_json(members_to_drain(db, w.id)),
         "}",
     )
 

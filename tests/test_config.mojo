@@ -415,6 +415,39 @@ max_machines = 3
 """
 
 
+def test_gpu_machines() raises:
+    # A mixed pool (docs/groups.md): gpu_machines beside machines, of the
+    # same shape; none when it doesn't say.
+    var f = ProjectConfig(
+        POOL
+        + 'gpu_machines = [{ type = "ccx33", wait = 60 }, { type = "ccx43"'
+        " }]\n",
+        "morca.toml",
+    )
+    var p = read_pools(f.doc)[0].copy()
+    assert_equal(len(p.gpu_machines), 2)
+    assert_equal(
+        p.gpu_machines_json(),
+        '[{"type": "ccx33", "wait": 60}, {"type": "ccx43"}]',
+    )
+    assert_equal(
+        read_pools(ProjectConfig(POOL, "morca.toml").doc)[
+            0
+        ].gpu_machines_json(),
+        "[]",
+    )
+    _refused(
+        POOL + 'gpu_machines = [{ type = "cax31" }]\n', "is in machines too"
+    )
+    _refused(
+        POOL + 'gpu_machines = [{ type = "ccx33" }, { type = "ccx43" }]\n',
+        "gpu_machines: ",
+    )
+    _refused(
+        '[pools.lab]\ngpu_machines = [{ type = "a" }]\n', "needs a provider"
+    )
+
+
 def test_pools() raises:
     # [pools.<name>] (morca.pool_config, #267): checked with the file.
     var f = ProjectConfig(POOL, "morca.toml")
