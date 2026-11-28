@@ -1,7 +1,7 @@
 # Worker groups and GPUs on pools: a plan
 
-November 27, 2026 · a plan for step 4 of [layers.md](layers.md), nothing
-here is built
+November 27, 2026 · a plan for step 4 of [layers.md](layers.md); PRs 1
+to 3 are built
 
 dista now routes a task or an actor to the workers of a named group, reports
 demand per group and runs flows (dista #152 to #167). morca can't use any of
@@ -76,6 +76,14 @@ memory_gb = 16
 - `start_dista_worker` sets `DISTA_GROUP`. The claiming host's own dista
   worker has no group, as today.
 - The driver and head stay on the claiming host.
+- Until demand per group lands, every group wants its MAX, as the workers
+  with no group want `workers` today. Honouring MIN before there is
+  demand to grow a group back would shrink today's pool runs.
+- A host is one member of a run at most, so a host with GPUs doesn't join
+  as a member without GPUs of a run that still wants one with them.
+- A claim says whether its worker understands groups; one that doesn't is
+  offered only members with no group. A run with groups goes only to a
+  worker with `--advertise`, which starts it as a cluster.
 
 ## Demand per group
 
@@ -87,7 +95,8 @@ memory_gb = 16
   The result is how many members of each group the run wants now.
 - `join_claim` and the pool's demand query use those wanted counts where
   they used `workers`. Before the first answer a run wants each group's
-  MIN, which is also the fix for the ignored MIN.
+  MIN, which is also the fix for the ignored MIN (PR 4; until then each
+  group wants its MAX).
 - When `decide` says a group has too many, the scheduler tells the member's
   host to stop it. The host drains the dista worker first (`dista-drain`)
   and kills it when it has left or after a timeout.
@@ -136,12 +145,12 @@ names it and moves the other providers behind it:
 | 0 | Move the dista pin to the release with groups and flows | The existing suite |
 | 1 | Groups in `morca.toml`, `Registered`, the database and `describe`; `config check`; reserve the `DISTA_*` names. No change in what runs. (done) | Unit tests of the parser and the stored form |
 | 2 | GPUs: the host's count, the claim, `Grant`, admission, the UI's host and run pages (done) | `test-grants` with `MORCA_HOST_GPUS` |
-| 3 | Members by group on pools: `run_members`, `join_claim`, `DISTA_GROUP`, MIN honoured | `test-run-cluster` with a GPU group on a mixed pair of hosts: the group's task runs only there |
-| 4 | Demand per group: the head's status with the claim, `decide` per group, draining a member, `gpu_machines` in a growing pool | `test-pool-scale` with a group that grows from 0 and drains when idle |
+| 3 | Members by group on pools: `run_members`, `join_claim`, `DISTA_GROUP` (done) | `test-run-cluster` with a GPU group on a mixed pair of hosts: the group's task runs only there |
+| 4 | Demand per group: the head's status with the claim, `decide` per group, draining a member, `gpu_machines` in a growing pool; MIN honoured, and `Pipeline[workers=]` read from code | `test-pool-scale` with a group that grows from 0 and drains when idle |
 | 5 | The contract by name: one environment builder, groups on local, `control` and Kubernetes, warnings for the `ec2` placement | `test-kube`, and a local run with two groups |
 
 Each PR leaves a pipeline without groups behaving as it does today, except
-for the MIN fix in PR 3.
+for the MIN fix in PR 4.
 
 ## Defaults (confirmed 2026-11-27)
 

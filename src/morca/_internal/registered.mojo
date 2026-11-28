@@ -133,8 +133,9 @@ struct Registered(Copyable, Movable):
     var probe_every: Int
     """`probe_every`: about one run in this many is probed (1)."""
     var groups: List[Group]
-    """Its worker groups in morca.toml (`morca._internal.groups`), by name;
-    recorded, not used yet."""
+    """Its worker groups in morca.toml (`morca._internal.groups`), by name:
+    on a pool, the members of its runs by group
+    (`morca._internal.member_wants`)."""
 
     def request(self) raises -> Request:
         """As declared: `auto` not resolved (`run_request` does)."""

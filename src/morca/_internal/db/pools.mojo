@@ -5,6 +5,8 @@ autoscaler (`morca._internal.pool_scale`) made for them, and
 
 from postgres import Connection, Params, Transaction
 
+from morca._internal.db.run_cluster import GROUP_MAX_SQL
+
 
 def upsert_pool(
     mut tx: Transaction,
@@ -210,7 +212,8 @@ def demand(mut conn: Connection, pool: String, after: Float64) raises -> Int:
     """The runs of `pool`'s pipelines queued at least `after` seconds that
     a worker could start: per pipeline at most `max_runs` less its running
     ones, and its fill runs; and the members its running runs that spread
-    (#268) still want, once they've run `after` seconds."""
+    (#268) still want, once they've run `after` seconds: with no group, and
+    of each group that asks for no GPU, its MAX (docs/groups.md)."""
     var r = conn.query(
         (
             "SELECT (SELECT coalesce(sum(least(q.n,"
@@ -224,15 +227,24 @@ def demand(mut conn: Connection, pool: String, after: Float64) raises -> Int:
             " n FROM orca.runs WHERE status = 'running' AND trigger <> 'fill'"
             " GROUP BY pipeline) r ON r.pipeline = p.name WHERE p.placement ="
             " 'worker:' || $1 AND NOT p.paused AND p.binary_path IS NOT NULL)"
-            # Members a running run of the pool still wants (#268).
+            # Members a running run of the pool still wants (#268): its
+            # workers with no group, and each group's MAX that asks for no
+            # GPU (docs/groups.md; a machine with GPUs is gpu_machines',
+            # which pools don't have yet).
             " + (SELECT coalesce(sum(greatest(coalesce(p2.ec2_workers, 0) -"
             " (SELECT count(*) FROM orca.run_members m WHERE m.run = r2.id AND"
-            " m.start = r2.starts AND m.ended IS NULL), 0)), 0) FROM orca.runs"
-            " r2 JOIN orca.pipelines p2 ON p2.name = r2.pipeline WHERE"
-            " r2.status = 'running' AND r2.cluster_head IS NOT NULL AND"
-            " p2.placement = 'worker:' || $1 AND r2.started <= now() -"
-            " make_interval(secs => $2)) AS n"
-        ),
+            " m.start = r2.starts AND m.ended IS NULL AND m.worker_group IS"
+            " NULL), 0) + (SELECT coalesce(sum(greatest("
+        )
+        + GROUP_MAX_SQL
+        + " - (SELECT count(*) FROM orca.run_members m WHERE m.run = r2.id"
+        " AND m.start = r2.starts AND m.ended IS NULL AND m.worker_group ="
+        " g->>'name'), 0)), 0) FROM jsonb_array_elements(p2.groups) g"
+        " WHERE coalesce((g->>'gpus')::int, 0) = 0)), 0) FROM orca.runs"
+        " r2 JOIN orca.pipelines p2 ON p2.name = r2.pipeline WHERE"
+        " r2.status = 'running' AND r2.cluster_head IS NOT NULL AND"
+        " p2.placement = 'worker:' || $1 AND r2.started <= now() -"
+        " make_interval(secs => $2)) AS n",
         Params().text(pool).float64(after),
     )
     return Int(r.row(0).int64("n"))

@@ -396,6 +396,17 @@ def gpus_field(v: Value, key: String) raises -> Int:
     return 0
 
 
+def groups_field(v: Value) raises -> Bool:
+    """Whether a worker's claim says it starts members of a group
+    (`"groups": true`); a worker before them says nothing, and is never
+    given one."""
+    return (
+        String("groups") in v
+        and v["groups"].is_bool()
+        and v["groups"].bool_value()
+    )
+
+
 def _seen(mut db: State, w: WorkerAuth, v: Value) raises:
     """Keeps what the worker says of itself, for Ops."""
     var cpus = Int64(0)
@@ -423,6 +434,9 @@ def _seen(mut db: State, w: WorkerAuth, v: Value) raises:
         text_field(v, "host_image"),
         text_field(v, "host_upgrade"),
         gpus_field(v, "gpus"),
+        text_field(v, "advertise"),
+        gpus_field(v, "slots"),
+        groups_field(v),
     )
     if String("pressure") in v and v["pressure"].is_object():
         _pressure_seen(db, w, v, Report.from_json(v["pressure"]))
@@ -533,6 +547,12 @@ def claim(mut db: State, w: WorkerAuth, v: Value) raises -> String:
             room_mb = Int(v["room_memory_mb"].int_value())
         var g = workers_db.granted(db.conn, w.id)
         var name = text_field(v, "name")
+        var gpus = gpus_field(v, "gpus")
+        # The GPUs held: those granted, or more if the worker says fewer
+        # are free (a member its run's end stopped is still being reaped).
+        var held = g[2]
+        if String("free_gpus") in v:
+            held = max(held, gpus - gpus_field(v, "free_gpus"))
         var joined = join_claim(
             db,
             w.id,
@@ -542,8 +562,9 @@ def claim(mut db: State, w: WorkerAuth, v: Value) raises -> String:
             g[0],
             g[1],
             String("worker ", name) if name else w.user(),
-            gpus_field(v, "gpus"),
-            g[2],
+            gpus,
+            held,
+            groups_field(v),
         )
         if joined:
             var m = joined.value().copy()
@@ -570,6 +591,13 @@ def claim(mut db: State, w: WorkerAuth, v: Value) raises -> String:
         "}",
     )
 
+
+comptime NO_ADVERTISE = (
+    "its worker groups need a worker that runs it over the pool, started"
+    " with --advertise, and this one has no address"
+)
+"""Why a worker without `--advertise` isn't given a run of a pipeline with
+groups."""
 
 comptime POOL_ROOM_SECONDS = 600
 """How recently a worker must have been seen for its room to count among
@@ -672,6 +700,17 @@ def _claim_run(
                 db.conn,
                 p.name,
                 String("held: ", w.user(), " can't run it: ", why),
+                fill,
+            )
+            continue
+        # Worker groups need the run's cluster over the pool (docs/groups.md),
+        # which a worker without an address doesn't start.
+        if len(p.groups) > 0 and not text_field(v, "advertise"):
+            refused = String(NO_ADVERTISE)
+            workers_db.hold_queued(
+                db.conn,
+                p.name,
+                String("held: ", w.user(), " can't run it: ", refused),
                 fill,
             )
             continue

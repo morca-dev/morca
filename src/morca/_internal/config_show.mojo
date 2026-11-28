@@ -506,7 +506,7 @@ def shown(mut db: State, only: String = "") raises -> List[Shown]:
             else:
                 s.add("probe_every", "1", CODE_DEFAULT, "")
         _show_fills(s, r, sources)
-        # Worker groups (morca._internal.groups): recorded, not used yet.
+        # Worker groups (morca._internal.groups).
         for g in parse_groups(r.groups):
             var key = String("groups.", g.name)
             var w = _source(sources, key)

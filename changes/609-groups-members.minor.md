@@ -1,0 +1,1 @@
+- **Members by group on pools**: a run of a pool-placed pipeline with worker groups spreads over the pool's advertising workers and gets each group's MAX of members, each started with `DISTA_GROUP` and its group's size and GPUs, with hosts with GPUs kept for the groups that need them; migration 72 is additive. (#609)

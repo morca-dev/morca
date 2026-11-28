@@ -990,6 +990,18 @@ def _migrations() -> List[List[String]]:
             "ALTER TABLE orca.runs ADD COLUMN grant_gpus integer",
             "ALTER TABLE orca.run_members ADD COLUMN grant_gpus integer",
         ],
+        # Members by group on pools (docs/groups.md): the group a member
+        # serves, null for none; and what a worker's claim says of joining
+        # (`morca._internal.run_cluster`): its address, its free slots and
+        # whether it understands groups. Additive: nullable columns the
+        # binaries before it neither read nor write; their members have no
+        # group, as before.
+        [
+            "ALTER TABLE orca.run_members ADD COLUMN worker_group text",
+            "ALTER TABLE orca.workers ADD COLUMN advertise text",
+            "ALTER TABLE orca.workers ADD COLUMN slots integer",
+            "ALTER TABLE orca.workers ADD COLUMN member_groups boolean",
+        ],
     ]
 
 
@@ -1068,6 +1080,11 @@ def _floor_raisers() -> List[Int]:
     docs/groups.md) is additive: nullable columns the binaries before it
     neither read nor write. Nothing grants a run GPUs until members by
     group land, so the grants stay null, which is none.
+    72 (`run_members.worker_group`; `workers.advertise`, `slots`,
+    `member_groups`, docs/groups.md) is additive: nullable columns the
+    binaries before it neither read nor write. Their `join_claim` counts
+    every live member against `workers`, grouped ones too, so it may offer
+    a run fewer members than it wants, never a grouped one.
     """
     return [1, 24]
 

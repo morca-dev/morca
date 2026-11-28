@@ -1,7 +1,8 @@
 """Worker groups in morca.toml (`morca._internal.groups`, docs/groups.md):
 the keys a group takes and how they're checked, what falls back to the
 pipeline's, the canonical form `register` records, and its stored JSON read
-back. Recorded only: nothing here runs."""
+back; and the members a running run wants by group on a pool, and which
+a host is offered (`morca._internal.member_wants`)."""
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
@@ -18,6 +19,14 @@ from morca._internal.groups import (
     group_name_problem,
     groups_json,
     parse_groups,
+)
+from morca._internal.member_wants import (
+    Want,
+    group_request,
+    gpu_host_takes,
+    offer_order,
+    wanted,
+    wants_gpus_of,
 )
 from morca._internal.secrets import env_name_problem
 
@@ -274,6 +283,105 @@ def test_gpu_names_are_reserved() raises:
     """A grant's GPUs reach a process in these, which `env` can't set."""
     for n in ["MORCA_GRANT_GPUS", "CUDA_VISIBLE_DEVICES"]:
         assert_true("is set by morca itself" in env_name_problem(String(n)))
+
+
+def _groups() raises -> List[Group]:
+    return [
+        Group("decode", 3, 3, 0, "2..8", ""),
+        Group("gpu", 0, 2, 1, "4", "16"),
+    ]
+
+
+def test_a_run_wants_each_groups_max() raises:
+    # Each group its MAX (MIN waits for demand per group), less its live
+    # members; the workers with no group as before.
+    var live = Dict[String, Int]()
+    var w = wanted(2, _groups(), live, True)
+    assert_equal(len(w), 3)
+    assert_equal(w[0].group, "")
+    assert_equal(w[0].short, 2)
+    assert_equal(w[0].gpus, 0)
+    assert_equal(w[1].group, "decode")
+    assert_equal(w[1].short, 3)
+    assert_equal(w[2].group, "gpu")
+    assert_equal(w[2].short, 2)
+    assert_equal(w[2].gpus, 1)
+    live[""] = 2
+    live["gpu"] = 1
+    live["decode"] = 3
+    w = wanted(2, _groups(), live, True)
+    assert_equal(len(w), 1)
+    assert_equal(w[0].group, "gpu")
+    assert_equal(w[0].short, 1)
+
+
+def test_no_group_wants_as_before() raises:
+    # A pipeline without groups wants `workers` less its live members.
+    var live = Dict[String, Int]()
+    live[""] = 1
+    var w = wanted(3, List[Group](), live, True)
+    assert_equal(len(w), 1)
+    assert_equal(w[0].short, 2)
+    assert_equal(len(wanted(1, List[Group](), live, True)), 0)
+    assert_equal(len(wanted(0, List[Group](), Dict[String, Int](), True)), 0)
+    # With groups and no workers of its own, only the groups' members.
+    var g = wanted(0, _groups(), Dict[String, Int](), True)
+    assert_equal(len(g), 2)
+    assert_equal(g[0].group, "decode")
+
+
+def test_an_older_worker_gets_no_group() raises:
+    var w = wanted(1, _groups(), Dict[String, Int](), False)
+    assert_equal(len(w), 1)
+    assert_equal(w[0].group, "")
+    assert_equal(len(wanted(0, _groups(), Dict[String, Int](), False)), 0)
+
+
+def test_gpu_hosts_are_offered_gpu_members_first() raises:
+    var asks: List[Int] = [0, 1, 0, 2]
+    var on_gpu = offer_order(asks, 2)
+    assert_equal(len(on_gpu), 4)
+    assert_equal(on_gpu[0], 1)
+    assert_equal(on_gpu[1], 3)
+    assert_equal(on_gpu[2], 0)
+    assert_equal(on_gpu[3], 2)
+    var elsewhere = offer_order(asks, 0)
+    for i in range(4):
+        assert_equal(elsewhere[i], i)
+
+
+def test_a_gpu_host_keeps_its_place() raises:
+    # A host without GPUs takes anything admission lets it.
+    assert_true(gpu_host_takes(0, 0, True, True))
+    # A member that asks for GPUs, always (admission checks they're free).
+    assert_true(gpu_host_takes(2, 1, True, True))
+    # One that asks for none: only when no host without GPUs has room and
+    # its run wants no member of a group this host could serve.
+    assert_true(gpu_host_takes(1, 0, False, False))
+    assert_false(gpu_host_takes(1, 0, False, True))
+    assert_false(gpu_host_takes(1, 0, True, False))
+    var wants: List[Want] = [Want("", 0, 1), Want("big", 4, 1)]
+    assert_false(wants_gpus_of(wants, 2))
+    assert_true(wants_gpus_of(wants, 4))
+    assert_false(wants_gpus_of([Want("", 0, 1)], 8))
+
+
+def test_a_groups_request() raises:
+    var r = group_request(Group("gpu", 0, 2, 1, "4", "16"))
+    assert_equal(r.cpus_min, 4)
+    assert_equal(r.cpus_max, 4)
+    assert_equal(r.memory_min_mb, 16 * 1024)
+    assert_equal(r.gpus, 1)
+    assert_true(r.any())
+    var gpus_only = group_request(Group("gpu", 1, 1, 1, "", ""))
+    assert_equal(gpus_only.cpus_min, 0)
+    assert_equal(gpus_only.memory_min_mb, 0)
+    assert_equal(gpus_only.gpus, 1)
+    assert_true(gpus_only.any())
+    # `auto` isn't learned for a group: not asked for.
+    var auto = group_request(Group("decode", 1, 1, 0, "auto", ""))
+    assert_equal(auto.cpus_min, 0)
+    assert_false(auto.any())
 
 
 def main() raises:

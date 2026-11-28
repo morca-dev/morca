@@ -43,7 +43,7 @@ hostname = "orca.mlake.dev"
 |---|---|
 | `[defaults]` | Values for every pipeline the file names. It doesn't apply to pipelines the file leaves out. |
 | `[pipelines.<name>]` | One pipeline's own values, by the name its `describe` gives. An empty table is allowed: the pipeline is then "in the file" and gets `[defaults]`. |
-| `[pipelines.<name>.groups.<group>]` | One group of the pipeline's workers, with its own size and GPUs. Recorded, not used yet: [Worker groups](#worker-groups). |
+| `[pipelines.<name>.groups.<group>]` | One group of the pipeline's workers, with its own size and GPUs, used on pools: [Worker groups](#worker-groups). |
 | `[pools.<name>]` | A pool of workers: one morca grows and shrinks itself, or, without a `provider`, machines that join by hand. [Worker pools](#worker-pools). |
 | `[apps.<name>]` | An app beside the UI and what it gets: [Apps](#apps). |
 | `[datasets."<name>"]` | A dataset's settings: whether visitors see its data. [Datasets](#datasets). |
@@ -329,15 +329,20 @@ env = { DISTA_WORKER_SLOTS = "auto", GHARCHIVE_PARALLEL = "auto" }
   which free devices and passes their indexes in `MORCA_GRANT_GPUS` and
   `CUDA_VISIBLE_DEVICES` (`0,2`). On a host with GPUs, a start granted
   none gets both variables empty, so it sees no GPU; on a host without,
-  neither is set. Only a [group](#worker-groups) asks for GPUs, so until
-  members by group land no run is granted any.
+  neither is set. Only a [group](#worker-groups) asks for GPUs, so only a
+  member of a group on a pool is granted any.
 
 ### Worker groups
 
 A pipeline may split its workers into named groups, each with its own size
 and GPUs ([groups.md](groups.md)). Groups are recorded, shown and exported,
-but nothing uses them yet: no worker is started with a group, and a run
-asks for its workers as before.
+and used on a pool: a run of a pipeline placed `worker:<pool>` that
+declares groups spreads over the pool's workers as a cluster, and gets
+members of each group ([workers.md](workers.md#members-by-group)). A dista
+task names its group (`Task[..., group="gpu"]`) and runs only on a member
+of that group; a task that names none runs on the workers with no group.
+Every other placement ignores groups for now (local runs, `control`,
+Kubernetes and `ec2`).
 
 ```toml
 [pipelines.embed]
@@ -364,6 +369,25 @@ have them, and no flag sets them. They are stored in
 as `groups.<group>`. The `ec2` placement ignores groups, and `morca
 register` and `morca config check` warn when a pipeline placed on it
 declares some.
+
+On a pool, each group's members are its own:
+
+- **A member of a group** is a worker of the pool that joins the run's
+  cluster with a dista worker of that group (`DISTA_GROUP=<group>`), sized
+  by the group's `cpus` and `memory_gb` (the pipeline's where it sets
+  none) and granted its `gpus` whole (`MORCA_GRANT_GPUS`,
+  `CUDA_VISIBLE_DEVICES`). The worker that starts the run, with its head,
+  driver and own dista worker, belongs to no group.
+- **Every group asks for its MAX**, as the workers with no group ask for
+  `workers` today: MIN is honoured once morca asks dista how many each
+  group needs ([groups.md](groups.md#demand-per-group)).
+- **Hosts.** A host with GPUs is offered the members that ask for GPUs
+  first, and joins as one that asks for none only when no host without
+  GPUs has room for it.
+- **The run needs workers that advertise.** A run of a pipeline with
+  groups is given only to a worker started with `--advertise`, since only
+  such a worker starts a run as a cluster; one without stays queued, held
+  saying so.
 
 ### On Kubernetes
 

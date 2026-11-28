@@ -25,7 +25,7 @@ runs (#145), read by `morca register` and `morca aws register`.
     enabled = false              # `morca register` skips it (a stack's overlay)
 
     [pipelines.gharchive.groups.gpu]   # workers by group (morca.groups),
-    workers = "0..2"                   # recorded, not used yet
+    workers = "0..2"                   # members by group on a pool
     gpus = 1
 
     [stack]                      # for `morca aws up`; not read yet

@@ -272,17 +272,23 @@ def set_seen(
     host_image: String = "",
     host_upgrade: String = "",
     gpus: Int = 0,
+    advertise: String = "",
+    slots: Int = 0,
+    member_groups: Bool = False,
 ) raises:
     """Keeps what worker `id` says of itself (empty or 0 for unsaid; -1
-    for the room it can grant a run)."""
+    for the room it can grant a run): also the address it joins runs at,
+    its free slots and whether it understands members by group
+    (`morca._internal.run_cluster`)."""
     _ = conn.execute(
         (
             "UPDATE orca.workers SET name = nullif($2, ''), image ="
             " nullif($3, ''), cpus = nullif($4, 0), memory_mb = nullif($5, 0),"
             " running = nullif($6, ''), room_cpus = nullif($7, -1),"
             " room_memory_mb = nullif($8, -1), host_image = nullif($9, ''),"
-            " host_upgrade = nullif($10, ''), gpus = nullif($11, 0) WHERE id"
-            " = $1"
+            " host_upgrade = nullif($10, ''), gpus = nullif($11, 0), advertise"
+            " = nullif($12, ''), slots = $13, member_groups = nullif($14,"
+            " false) WHERE id = $1"
         ),
         Params()
         .int64(Int64(id))
@@ -295,7 +301,10 @@ def set_seen(
         .int64(Int64(room_memory_mb))
         .text(host_image)
         .text(host_upgrade)
-        .int32(Int32(gpus)),
+        .int32(Int32(gpus))
+        .text(advertise)
+        .int32(Int32(slots))
+        .bool(member_groups),
     )
 
 

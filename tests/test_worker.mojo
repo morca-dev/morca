@@ -48,6 +48,11 @@ from morca._internal.host_follow import (
     Follow,
     image_problem,
 )
+from morca._internal.run_cluster import (
+    MemberSpec,
+    member_spec_json,
+    member_spec_of,
+)
 from morca._internal.sample import machine_name
 from morca._internal.worker import env_file_pairs
 from morca._internal.workers import (
@@ -192,6 +197,37 @@ def test_worker_run() raises:
     assert_equal(got.env[1][1], "x=y")
     assert_equal(got.secrets[0][0], "TOKEN")
     assert_equal(got.secrets[0][1], "prod/token")
+
+
+def test_member_spec() raises:
+    var env: List[Tuple[String, String]] = [("A", "1")]
+    var m = MemberSpec(
+        7,
+        12,
+        2,
+        "embed",
+        "/app/bin/embed",
+        "10.0.0.2:4100",
+        "secret",
+        env^,
+        List[Tuple[String, String]](),
+        Grant(4, 16384, 1),
+        "gpu",
+    )
+    var got = member_spec_of(loads(member_spec_json(m)))
+    assert_equal(got.member, 7)
+    assert_equal(got.head, "10.0.0.2:4100")
+    assert_equal(got.grant.gpus, 1)
+    assert_equal(got.group, "gpu")
+    # From a UI before groups: no group.
+    var old = loads(
+        '{"member": 1, "run": 2, "start": 1, "pipeline": "p", "binary": "b",'
+        ' "head": "h:1", "token": "t", "env": [], "secrets": [],'
+        ' "grant_cpus": 0, "grant_memory_mb": 0}'
+    )
+    var o = member_spec_of(old)
+    assert_equal(o.group, "")
+    assert_equal(o.grant.gpus, 0)
 
 
 def test_versions() raises:

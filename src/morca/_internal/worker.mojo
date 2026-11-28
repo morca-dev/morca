@@ -525,6 +525,7 @@ struct Worker(Movable):
             m.token,
             m.grant.cpus,
             True,
+            m.group,
         )
         self.members[pid] = m.member
         print(
@@ -536,6 +537,7 @@ struct Worker(Movable):
             m.start,
             "as member",
             m.member,
+            String("of group ", m.group) if m.group else String("(no group)"),
             "pid",
             pid,
             flush=True,
@@ -801,6 +803,9 @@ struct Worker(Movable):
                     "s with none of its runs going: one at a time",
                     flush=True,
                 )
+            # With its GPUs, those its processes don't hold now (a member
+            # just stopped holds its own until it's reaped), and that it
+            # starts members of a group (`groups`, DISTA_GROUP).
             var got: Value
             try:
                 got = self._post(
@@ -814,7 +819,9 @@ struct Worker(Movable):
                     .int("room_cpus", Int64(room.cpus))
                     .int("room_memory_mb", Int64(room.memory_mb))
                     .int("gpus", Int64(self.gpus.count()))
+                    .int("free_gpus", Int64(self.gpus.free()))
                     .text("advertise", self.advertise)
+                    .bool("groups", True)
                     .text("host_image", self.follow.host_image)
                     .text("host_upgrade", self.follow.state())
                     .raw(

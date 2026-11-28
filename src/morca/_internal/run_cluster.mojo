@@ -11,12 +11,23 @@ side: the run's head, the members that join it, and when they stop.
   (`orca.runs.cluster_head`, `cluster_token`) for this start only.
 - **Members.** A worker of the pool with room, and an address, that has no
   run to start is given one to join (`join_claim`): a running run of the
-  pool whose head is known, with fewer live members than its `workers`,
-  that isn't already this worker's. It's sized as a run of the pipeline
-  would be on that machine, counted against the machine's room with its
-  runs, and kept in `orca.run_members`. The worker starts a dista worker
+  pool whose head is known, that isn't already this worker's, and that
+  wants a member this worker can serve. A run wants its `workers` members
+  with no group, sized as a run of the pipeline would be on that machine,
+  and each of its groups' MAX (docs/groups.md), sized by the group's
+  request and of the group's GPUs (`morca._internal.member_wants`). A
+  member is counted against the machine's room with its runs, and kept in
+  `orca.run_members` with its group. The worker starts a dista worker
   against the head, with the token (dista's `DISTA_TOKEN`: nothing without
-  it joins), and says when it ends (`/api/worker/left`, `member_left`).
+  it joins) and, for a member of a group, `DISTA_GROUP`, and says when it
+  ends (`/api/worker/left`, `member_left`).
+- **Groups and GPUs.** Only a worker whose claim says it understands
+  groups (`"groups": true`) is offered a member of one. A host with GPUs
+  is offered the members that ask for GPUs first, and takes one that asks
+  for none only when its run wants no member of a group it could serve
+  and no other worker of the pool on a host without GPUs has room for it
+  (`cluster_db.other_has_room`). The GPUs a claim says are free cap those
+  offered, so a member still being stopped keeps its GPUs until reaped.
 - **Stopping.** Each claim's answer lists this worker's members whose run
   isn't running at that start any more (`members_to_stop`): the worker
   kills them, and they're ended "its run ended".
@@ -25,19 +36,28 @@ The token reaches a member only in a claim's answer, over the worker API's
 TLS, and is never in a log or a page.
 """
 
-from json import Value
+from json import Value, loads
 import morca._internal.db.run_cluster as cluster_db
 
 from morca._internal.http_store import Body
-from morca._internal.registered import registered, run_request
+from morca._internal.member_wants import (
+    Want,
+    group_request,
+    gpu_host_takes,
+    offer_order,
+    wanted,
+    wants_gpus_of,
+)
+from morca._internal.registered import Registered, registered, run_request
 from morca._internal.cgroup import raised_request
-from morca._internal.resources import Grant, Room, admit
+from morca._internal.resources import Grant, Request, Room, admit
 from morca._internal.state import State
 
 
 def members_of(mut db: State, pipeline: String) raises -> Int:
     """How many more machines `pipeline`'s runs may spread over: its
-    `workers`, when set for it; 0 (one machine) when not."""
+    `workers` and each of its groups' MAX, when set for it; 0 (one
+    machine) when none is."""
     return cluster_db.spread(db.conn, pipeline)
 
 
@@ -89,6 +109,9 @@ struct MemberSpec(Copyable, Movable):
     var env: List[Tuple[String, String]]
     var secrets: List[Tuple[String, String]]
     var grant: Grant
+    var group: String
+    """The group it serves (docs/groups.md), its dista worker's
+    `DISTA_GROUP`; empty for none."""
 
 
 def _pairs_json(
@@ -126,6 +149,7 @@ def member_spec_json(m: MemberSpec) -> String:
         .int("grant_cpus", Int64(m.grant.cpus))
         .int("grant_memory_mb", Int64(m.grant.memory_mb))
         .int("grant_gpus", Int64(m.grant.gpus))
+        .text("group", m.group)
         .finish()
     )
 
@@ -147,7 +171,34 @@ def member_spec_of(v: Value) raises -> MemberSpec:
             Int(v["grant_gpus"].int_value()) if String("grant_gpus") in v
             and v["grant_gpus"].is_int() else 0,
         ),
+        v["group"].string_value() if String("group") in v
+        and v["group"].is_string() else String(),
     )
+
+
+@fieldwise_init
+struct _Offer(Copyable, Movable):
+    """A member a run wants, as `join_claim` offers it."""
+
+    var row: Int
+    """Its run, an index into `joinable`'s rows."""
+    var pipeline: Int
+    """Its pipeline, an index into the pipelines read."""
+    var want: Want
+    var run_wants_gpus: Bool
+    """Its run wants a member that asks for GPUs this host has
+    (`wants_gpus_of`)."""
+
+
+def live_by_group(text: String) raises -> Dict[String, Int]:
+    """`Joinable.live`'s JSON object of counts, by group."""
+    var out = Dict[String, Int]()
+    if not text:
+        return out^
+    var v = loads(text)
+    for k in v.object_keys():
+        out[k] = Int(v[k].int_value())
+    return out^
 
 
 def join_claim(
@@ -161,24 +212,67 @@ def join_claim(
     label: String,
     gpus: Int = 0,
     used_gpus: Int = 0,
+    understands_groups: Bool = False,
 ) raises -> Optional[MemberSpec]:
-    """A run for this worker to join, recorded as its member, or None: the
-    oldest running run of the pool with its head known, fewer live members
-    than its `workers`, none of them or its head this worker, whose request
-    fits what this machine hasn't granted (`used_*`, of its `gpus`)."""
+    """A run for this worker to join, recorded as its member, or None: of
+    the running runs of the pool with their head known, none of them or
+    their head this worker, a member one of them wants
+    (`morca._internal.member_wants.wanted`) whose request fits what this
+    machine hasn't granted (`used_*`, of its `gpus`). The oldest run's
+    first, but on a host with GPUs the members that ask for GPUs first, and
+    one that asks for none only if its run wants no member of a group this
+    host could serve and no host without GPUs has room for it."""
     var rows = cluster_db.joinable(db.conn, placement, worker)
-    for c in rows:
+    var pipelines = List[Registered]()
+    var offers = List[_Offer]()
+    for i in range(len(rows)):
+        ref c = rows[i]
         var ps = registered(db, c.pipeline)
         if len(ps) == 0:
             continue
-        ref p = ps[0]
-        var grant = Grant.none()
-        var sized = run_request(db, p, room_cpus)
-        var request = sized.request
-        if request.memory_min_mb > 0:
-            request.memory_min_mb = raised_request(
-                request.memory_min_mb, request.memory_max_mb, p.memory_raised_mb
+        pipelines.append(ps[0].copy())
+        var wants = wanted(
+            c.workers,
+            ps[0].groups,
+            live_by_group(c.live),
+            understands_groups,
+        )
+        var gpus_wanted = wants_gpus_of(wants, gpus)
+        for w in wants:
+            offers.append(_Offer(i, len(pipelines) - 1, w.copy(), gpus_wanted))
+    var asks = List[Int]()
+    for o in offers:
+        asks.append(o.want.gpus)
+    for k in offer_order(asks, gpus):
+        ref o = offers[k]
+        ref c = rows[o.row]
+        ref p = pipelines[o.pipeline]
+        var request: Request
+        if o.want.group:
+            request = group_request(p.group(o.want.group))
+        else:
+            # The members with no group are sized as before groups.
+            request = run_request(db, p, room_cpus).request
+            if request.memory_min_mb > 0:
+                request.memory_min_mb = raised_request(
+                    request.memory_min_mb,
+                    request.memory_max_mb,
+                    p.memory_raised_mb,
+                )
+        if gpus > 0 and o.want.gpus == 0:
+            var other = not o.run_wants_gpus and cluster_db.other_has_room(
+                db.conn,
+                placement,
+                worker,
+                c.run,
+                c.start,
+                request.cpus_min,
+                request.memory_min_mb,
+                o.want.group != "",
             )
+            if not gpu_host_takes(gpus, 0, o.run_wants_gpus, other):
+                continue
+        var grant = Grant.none()
         if request.any() and room_cpus >= 0:
             var fit = admit(
                 request,
@@ -198,6 +292,8 @@ def join_claim(
             if len(fit[0]) == 0:
                 continue
             grant = fit[0][0]
+        elif request.gpus > 0:
+            continue  # a worker that says nothing of its room has no GPUs
         var got = cluster_db.add_member(
             db.conn,
             c.run,
@@ -206,6 +302,7 @@ def join_claim(
             grant.cpus,
             grant.memory_mb,
             grant.gpus,
+            o.want.group,
         )
         if not got:
             continue
@@ -220,6 +317,7 @@ def join_claim(
             p.env.copy(),
             p.secrets.copy(),
             grant,
+            o.want.group,
         )
     return None
 
