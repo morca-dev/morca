@@ -97,7 +97,7 @@ Each key can go in `[defaults]` or in `[pipelines.<name>]`.
 - `fills = "all"` for a keyed pipeline, a sensor, or one with no first partition. `morca register` refuses it with the file and line, because it has to see the pipeline first; see [Fills](#fills).
 - An `env` name that isn't a valid variable name.
 - An `env` name that looks like a secret (`*TOKEN*`, `*SECRET*`, `*PASSWORD*`, `*DATABASE_URL*`). Put those in `secrets` instead.
-- An `env` variable that morca sets itself: `MORCA_DATABASE_URL`, `MORCA_IMAGE`, `MORCA_SECRETS`, `MORCA_WORKERS`, `DISTA_ROLE`, `DISTA_HEAD`, `DISTA_ADVERTISE`, `DISTA_TOKEN`, `DISTA_PORT`, `DISTA_GROUP`, `MORCA_GRANT_CPUS`, `MORCA_GRANT_MEMORY_MB`, `MORCA_MEMORY_PRESSURE_FILE`. `DISTA_WORKER_SLOTS` isn't one of them: a pipeline sets it (["auto" from the grant](#auto-from-the-grant)).
+- An `env` variable that morca sets itself: `MORCA_DATABASE_URL`, `MORCA_IMAGE`, `MORCA_SECRETS`, `MORCA_WORKERS`, `DISTA_ROLE`, `DISTA_HEAD`, `DISTA_ADVERTISE`, `DISTA_TOKEN`, `DISTA_PORT`, `DISTA_GROUP`, `MORCA_GRANT_CPUS`, `MORCA_GRANT_MEMORY_MB`, `MORCA_GRANT_GPUS`, `CUDA_VISIBLE_DEVICES`, `MORCA_MEMORY_PRESSURE_FILE`. `DISTA_WORKER_SLOTS` isn't one of them: a pipeline sets it (["auto" from the grant](#auto-from-the-grant)).
 - A [worker group](#worker-groups) without `workers`, with a key it doesn't have, with a name that isn't lowercase letters, digits, `-` and `_` starting with a letter (at most 32), or in `[defaults]`.
 
 Each refusal names the file and line, and nothing is registered:
@@ -320,6 +320,17 @@ env = { DISTA_WORKER_SLOTS = "auto", GHARCHIVE_PARALLEL = "auto" }
   memory peak, so offload never makes a learned request smaller. Offload
   needs swap on the host: without any, the setting does nothing, and the
   scheduler says so on its log (`morca: runs' swap: ...`).
+- **GPUs** ([groups.md](groups.md)). A worker counts its host's GPUs once
+  at start: `MORCA_HOST_GPUS` if set (a whole number from 0; any other
+  value stops the worker), else the devices `nvidia-smi -L` lists, else
+  none. It sends the count with each claim, and the host's page on Ops ›
+  Pools shows it with how many its runs hold. GPUs are granted whole and
+  exactly: admission decides how many a start holds, and the worker picks
+  which free devices and passes their indexes in `MORCA_GRANT_GPUS` and
+  `CUDA_VISIBLE_DEVICES` (`0,2`). On a host with GPUs, a start granted
+  none gets both variables empty, so it sees no GPU; on a host without,
+  neither is set. Only a [group](#worker-groups) asks for GPUs, so until
+  members by group land no run is granted any.
 
 ### Worker groups
 

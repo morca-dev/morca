@@ -396,6 +396,10 @@ def _machine_json(m: Machine) -> String:
         m.cpus,
         ', "memory_mb": ',
         m.memory_mb,
+        ', "gpus": ',
+        m.gpus,
+        ', "granted_gpus": ',
+        m.granted_gpus,
         ', "runs": ',
         runs,
         ', "seen_seconds_ago": ',
@@ -591,6 +595,10 @@ def machine_page(mut db: State, kind: String, id: String) raises -> Page:
     _fact(h, "Memory", "m-memory")
     h.text(_memory(m.memory_mb))
     h.raw("</dd>")
+    if m.gpus > 0:
+        _fact(h, "GPUs", "m-gpus")
+        h.text(m.gpus, ", ", m.granted_gpus, " granted")
+        h.raw("</dd>")
     _fact(h, "Runs", "m-runs")
     _runs_html(h, m.runs)
     h.raw("</dd>")

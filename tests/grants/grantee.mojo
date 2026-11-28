@@ -8,7 +8,8 @@ GRANTEE=wide` makes `main` that one. For a month, the step writes
 `$GRANTEE_OUT/<name>-<month>.env` with the run's
 `MORCA_GRANT_CPUS`, `MORCA_GRANT_MEMORY_MB` and `DISTA_WORKER_SLOTS` (each
 `-` when unset), and `GRANTEE_PARALLEL` as `morca.auto_count` reads it at
-2 GB each, then sleeps `GRANTEE_SLEEP` (2) seconds.
+2 GB each, then `MORCA_GRANT_GPUS` and `CUDA_VISIBLE_DEVICES` only if set
+(empty included), then sleeps `GRANTEE_SLEEP` (2) seconds.
 """
 
 from std.os import getenv
@@ -50,6 +51,10 @@ def grantee(mut ctx: Ctx, m: Month) raises -> Int:
                 parallel,
                 "\n",
             )
+            for name in ["MORCA_GRANT_GPUS", "CUDA_VISIBLE_DEVICES"]:
+                var v = getenv(name, "-")
+                if v != "-":
+                    f.write(name, "=", v, "\n")
     sleep(Float64(getenv("GRANTEE_SLEEP", "2")))
     return m.month
 

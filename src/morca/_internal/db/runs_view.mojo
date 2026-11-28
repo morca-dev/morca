@@ -69,6 +69,7 @@ struct RunRecord(Copyable, Movable):
     var request_runs: Int
     var waits_on: Int
     """The run whose concurrency key a queued one waits on (#397), or 0."""
+    var grant_gpus: Int
 
 
 comptime _WAITING = (
@@ -101,6 +102,7 @@ comptime _GRANT_COLUMNS = (
     " = 'running' THEN coalesce(memory_bytes, -1) ELSE -1 END::bigint AS"
     " memory_bytes, coalesce(request_source, '') AS request_source,"
     " coalesce(request_runs, 0)::bigint AS request_runs,"
+    " coalesce(grant_gpus, 0)::bigint AS grant_gpus,"
 )
 """SQL for a run's request and grant (`morca._internal.resources`), and where the
 request came from (`morca._internal.recommend`)."""
@@ -169,6 +171,7 @@ def _record(r: Row, id: Int) raises -> RunRecord:
         r.text("request_source"),
         Int(r.int64("request_runs")),
         Int(r.int64("waits_on")),
+        Int(r.int64("grant_gpus")),
     )
 
 

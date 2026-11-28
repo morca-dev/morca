@@ -1,6 +1,7 @@
 """Requests, admission and grants (morca.resources): the parsing, what fits,
-the grants and the reason a run waits, and `auto` (passed through to
-dista, #436)."""
+the grants and the reason a run waits, `auto` (passed through to dista,
+#436), and GPUs: the host's count, the worker's devices, a grant's
+variables and admission (docs/groups.md)."""
 
 from std.os import setenv, unsetenv
 from std.testing import (
@@ -12,6 +13,7 @@ from std.testing import (
 )
 
 from morca._internal.resources import (
+    Gpus,
     Grant,
     Request,
     Room,
@@ -19,8 +21,11 @@ from morca._internal.resources import (
     auto_count,
     canonical_cpus,
     canonical_memory_gb,
+    count_gpus,
+    devices_text,
     gb_text,
     host_capacity,
+    host_gpus,
     host_room,
     parse_cpus,
     parse_memory_gb,
@@ -252,6 +257,144 @@ def test_host() raises:
     _ = unsetenv("MORCA_RESERVE_MEMORY_MB")
     _ = unsetenv("MORCA_HOST_CPUS")
     _ = unsetenv("MORCA_HOST_MEMORY_MB")
+
+
+def test_count_gpus() raises:
+    var listing = String(
+        "GPU 0: NVIDIA A10G (UUID: GPU-1)\n",
+        "GPU 1: NVIDIA A100 (UUID: GPU-2)\n",
+        "  MIG 1g.5gb     Device  0: (UUID: MIG-3)\n",
+    )
+    assert_equal(count_gpus(listing), 2)
+    assert_equal(count_gpus(""), 0)
+    assert_equal(count_gpus("No devices were found\n"), 0)
+
+
+def test_host_gpus() raises:
+    """MORCA_HOST_GPUS, else what the command lists; none without it or
+    when it fails or hangs."""
+    _ = unsetenv("MORCA_HOST_GPUS")
+    var two: List[String] = ["printf", "GPU 0: a\nGPU 1: b\n"]
+    assert_equal(host_gpus(two), 2)
+    var absent: List[String] = ["/nonexistent/nvidia-smi", "-L"]
+    assert_equal(host_gpus(absent), 0)
+    var failing: List[String] = ["sh", "-c", "echo 'GPU 0: a'; exit 9"]
+    assert_equal(host_gpus(failing), 0)
+    var hangs: List[String] = ["sleep", "5"]
+    assert_equal(host_gpus(hangs, timeout=0.2), 0)
+    _ = setenv("MORCA_HOST_GPUS", "3")
+    assert_equal(host_gpus(absent), 3)
+    _ = setenv("MORCA_HOST_GPUS", "0")
+    assert_equal(host_gpus(two), 0)
+    _ = setenv("MORCA_HOST_GPUS", "two")
+    with assert_raises(contains="MORCA_HOST_GPUS must be a number from 0"):
+        _ = host_gpus(two)
+    _ = setenv("MORCA_HOST_GPUS", "-1")
+    with assert_raises(contains="MORCA_HOST_GPUS must be a number from 0"):
+        _ = host_gpus(two)
+    _ = unsetenv("MORCA_HOST_GPUS")
+
+
+def test_gpus_take_and_give_back() raises:
+    var g = Gpus(3)
+    assert_equal(g.count(), 3)
+    assert_equal(len(g.take(0)), 0)
+    var a = g.take(2)
+    assert_equal(len(a), 2)
+    assert_equal(a[0], 0)
+    assert_equal(a[1], 1)
+    assert_equal(g.free(), 1)
+    with assert_raises(contains="granted 2 GPUs, but 1 of its 3 are free"):
+        _ = g.take(2)
+    var b = g.take(1)
+    assert_equal(b[0], 2)
+    assert_equal(g.free(), 0)
+    # The lowest free first, once some are back.
+    var first: List[Int] = [0]
+    g.give_back(first)
+    g.give_back([7, -1])  # not its own: ignored
+    assert_equal(g.free(), 1)
+    assert_equal(g.take(1)[0], 0)
+    g.give_back(a)
+    g.give_back(b)
+    assert_equal(g.free(), 3)
+    # A host without GPUs grants none, and none is always there.
+    var none = Gpus(0)
+    assert_equal(len(none.take(0)), 0)
+    with assert_raises(contains="granted 1 GPUs, but 0 of its 0 are free"):
+        _ = none.take(1)
+
+
+def test_grant_gpus_env() raises:
+    """A grant's devices as variables, and back; nothing new on a host
+    without GPUs."""
+    var env = List[Tuple[String, String]]()
+    var plain = run_env(env, Grant(2, 1024))
+    assert_equal(len(plain), 2)
+    # On a host with GPUs, a grant of none hides them.
+    var hidden = run_env(env, Grant(2, 1024), host_gpus=2)
+    assert_equal(len(hidden), 4)
+    assert_equal(hidden[2], "MORCA_GRANT_GPUS=")
+    assert_equal(hidden[3], "CUDA_VISIBLE_DEVICES=")
+    var g = Grant(0, 0, 2, devices_text([1, 3]))
+    assert_equal(g.devices, "1,3")
+    var got = g.env(4)
+    assert_equal(len(got), 2)
+    assert_equal(got[0], "MORCA_GRANT_GPUS=1,3")
+    assert_equal(got[1], "CUDA_VISIBLE_DEVICES=1,3")
+    _ = setenv("MORCA_GRANT_GPUS", "1,3")
+    var back = Grant.from_env()
+    assert_equal(back.gpus, 2)
+    assert_equal(back.devices, "1,3")
+    var list = back.device_list()
+    assert_equal(len(list), 2)
+    assert_equal(list[0], 1)
+    assert_equal(list[1], 3)
+    # Copied as before, devices and all.
+    var copy = back
+    assert_equal(copy.devices, "1,3")
+    _ = setenv("MORCA_GRANT_GPUS", " 0 , x,2")
+    assert_equal(Grant.from_env().devices, "0,2")
+    _ = setenv("MORCA_GRANT_GPUS", "")
+    assert_equal(Grant.from_env().gpus, 0)
+    _ = unsetenv("MORCA_GRANT_GPUS")
+    assert_equal(Grant.from_env().devices, "")
+
+
+def test_admit_gpus() raises:
+    """GPUs are whole and granted exactly, from those free."""
+    var req = Request.of("1", "")
+    req.gpus = 1
+    assert_true(req.any())
+    var gpu_only = Request(0, 0, 0, 0, gpus=2)
+    assert_true(gpu_only.any())
+    var room = Room(8, 8192, 8, 8192, 2, 2)
+    var got = admit(req, room, 0, 0, 3)
+    assert_equal(len(got[0]), 2)
+    assert_equal(got[0][0].gpus, 1)
+    assert_equal(got[0][1].gpus, 1)
+    assert_equal(got[0][0].cpus, 1)
+    assert_equal(got[1], "waiting: needs 1 GPU, 0 free of grants")
+    # Two held by live grants: none free.
+    got = admit(req, Room(8, 8192, 8, 8192, 2, 0), 0, 0, 1, "worker g-1")
+    assert_equal(len(got[0]), 0)
+    assert_equal(got[1], "waiting: needs 1 GPU, 0 free of grants on worker g-1")
+    # More than the host has.
+    got = admit(gpu_only, Room(8, 8192, 8, 8192, 1, 1), 0, 0, 1, "worker g-1")
+    assert_equal(len(got[0]), 0)
+    assert_equal(
+        got[1],
+        "waiting: needs 2 GPUs, more than the 1 worker g-1 grants at most",
+    )
+    got = admit(gpu_only, Room(8, 8192, 8, 8192), 0, 0, 1)
+    assert_equal(
+        got[1],
+        "waiting: needs 2 GPUs, more than the 0 this host grants at most",
+    )
+    # A request without GPUs is granted none, on a host with or without.
+    got = admit(Request.of("2", ""), Room(8, 8192, 8, 8192, 2, 2), 0, 0, 1)
+    assert_equal(got[0][0].gpus, 0)
+    assert_equal(got[0][0].cpus, 2)
 
 
 def main() raises:

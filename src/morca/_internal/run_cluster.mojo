@@ -125,6 +125,7 @@ def member_spec_json(m: MemberSpec) -> String:
         .raw("secrets", _pairs_json(m.secrets, "name", "id"))
         .int("grant_cpus", Int64(m.grant.cpus))
         .int("grant_memory_mb", Int64(m.grant.memory_mb))
+        .int("grant_gpus", Int64(m.grant.gpus))
         .finish()
     )
 
@@ -143,6 +144,8 @@ def member_spec_of(v: Value) raises -> MemberSpec:
         Grant(
             Int(v["grant_cpus"].int_value()),
             Int(v["grant_memory_mb"].int_value()),
+            Int(v["grant_gpus"].int_value()) if String("grant_gpus") in v
+            and v["grant_gpus"].is_int() else 0,
         ),
     )
 
@@ -156,11 +159,13 @@ def join_claim(
     used_cpus: Int,
     used_mb: Int,
     label: String,
+    gpus: Int = 0,
+    used_gpus: Int = 0,
 ) raises -> Optional[MemberSpec]:
     """A run for this worker to join, recorded as its member, or None: the
     oldest running run of the pool with its head known, fewer live members
     than its `workers`, none of them or its head this worker, whose request
-    fits what this machine hasn't granted (`used_*`)."""
+    fits what this machine hasn't granted (`used_*`, of its `gpus`)."""
     var rows = cluster_db.joinable(db.conn, placement, worker)
     for c in rows:
         var ps = registered(db, c.pipeline)
@@ -177,7 +182,14 @@ def join_claim(
         if request.any() and room_cpus >= 0:
             var fit = admit(
                 request,
-                Room(room_cpus, room_mb, room_cpus, room_mb),
+                Room(
+                    room_cpus,
+                    room_mb,
+                    room_cpus,
+                    room_mb,
+                    gpus,
+                    max(gpus - used_gpus, 0),
+                ),
                 used_cpus,
                 used_mb,
                 1,
@@ -187,7 +199,13 @@ def join_claim(
                 continue
             grant = fit[0][0]
         var got = cluster_db.add_member(
-            db.conn, c.run, c.start, worker, grant.cpus, grant.memory_mb
+            db.conn,
+            c.run,
+            c.start,
+            worker,
+            grant.cpus,
+            grant.memory_mb,
+            grant.gpus,
         )
         if not got:
             continue

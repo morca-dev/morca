@@ -981,6 +981,15 @@ def _migrations() -> List[List[String]]:
         [
             "ALTER TABLE orca.pipelines ADD COLUMN groups jsonb",
         ],
+        # GPUs (docs/groups.md): how many a worker's host has, as its
+        # claims say, and how many a run's start or a member was granted.
+        # Additive: nullable columns the binaries before it neither read
+        # nor write; null is none.
+        [
+            "ALTER TABLE orca.workers ADD COLUMN gpus integer",
+            "ALTER TABLE orca.runs ADD COLUMN grant_gpus integer",
+            "ALTER TABLE orca.run_members ADD COLUMN grant_gpus integer",
+        ],
     ]
 
 
@@ -1055,6 +1064,10 @@ def _floor_raisers() -> List[Int]:
     70 (`pipelines.groups`, docs/groups.md) is additive: a nullable column
     the binaries before it neither read nor write. A registration one of
     them makes leaves it as it was, and nothing reads it yet.
+    71 (`workers.gpus`, `runs.grant_gpus`, `run_members.grant_gpus`,
+    docs/groups.md) is additive: nullable columns the binaries before it
+    neither read nor write. Nothing grants a run GPUs until members by
+    group land, so the grants stay null, which is none.
     """
     return [1, 24]
 

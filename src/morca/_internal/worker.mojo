@@ -6,9 +6,10 @@ MORCA_WORKER_TOKEN=orca_... morca worker --pool bgent --remote https://orca.mlak
 ```
 
 Every `--poll-seconds` (2) the worker posts its heartbeat to
-`/api/worker/claim` (`orca.workers`), its name, image, CPUs, memory and
-the runs it has, and, while it has fewer than `--max-runs` (1), asks for
-one. A run it's given starts as the local runner starts one: the
+`/api/worker/claim` (`orca.workers`), its name, image, CPUs, memory, GPUs
+(`host_gpus`, counted once at start) and the runs it has, and, while it
+has fewer than `--max-runs` (1), asks for one. A run it's given starts
+as the local runner starts one: the
 pipeline's binary (the path it was registered with, which the worker's
 image has too) with `resume <run>`, in a process group of its own, its
 output staged under `--dir` (`$TMPDIR/morca-worker`), with the pipeline's
@@ -118,7 +119,14 @@ from morca._internal.pressure import (
     read_psi,
 )
 from morca._internal.proc import Reaped, reap, spawn
-from morca._internal.resources import host_room, run_env as grant_env
+from morca._internal.resources import (
+    Grant,
+    Gpus,
+    devices_text,
+    host_gpus,
+    host_room,
+    run_env as grant_env,
+)
 from morca._internal.sample import (
     _hostname,
     _sysctl_u64,
@@ -230,6 +238,11 @@ struct Worker(Movable):
     `orca.run_members` id."""
     var follow: Follow
     """What it does about the server's image (`morca._internal.host_follow`)."""
+    var gpus: Gpus
+    """This host's GPUs, which it hands out to the runs and members it
+    starts (`morca._internal.resources`)."""
+    var holding: Dict[Int, List[Int]]
+    """The GPUs each run's or member's process holds, by pid."""
 
     def __init__(
         out self,
@@ -271,6 +284,8 @@ struct Worker(Movable):
         self.advertise = advertise
         self.members = Dict[Int, Int]()
         self.follow = Follow(host_image, host_service, image, dir)
+        self.gpus = Gpus(0)
+        self.holding = Dict[Int, List[Int]]()
 
     def _running_ids(self) -> String:
         var ids = String()
@@ -285,6 +300,25 @@ struct Worker(Movable):
         )
 
     def _start(mut self, spec: WorkerRun) raises:
+        """Starts `spec`'s process with the GPUs it was granted, which it
+        holds until it ends."""
+        var devices = self.gpus.take(spec.grant.gpus)
+        var g = spec.grant
+        g.devices = devices_text(devices)
+        var pid: Int
+        try:
+            pid = self._start_with(spec, g)
+        except e:
+            self.gpus.give_back(devices)
+            raise e^
+        if pid > 0:
+            self.holding[pid] = devices^
+        else:
+            self.gpus.give_back(devices)
+
+    def _start_with(mut self, spec: WorkerRun, grant: Grant) raises -> Int:
+        """`_start`, with its grant's devices: its process's pid, or 0 if
+        it refused the run."""
         var why = version_refusal(spec.image, self.image)
         if why:
             print("morca worker: refusing run", spec.run, ":", why)
@@ -295,9 +329,11 @@ struct Worker(Movable):
                 .int("start", Int64(spec.start))
                 .text("why", why),
             )
-            return
+            return 0
         # Its own variables and its grant of this host (morca.resources).
-        var env = grant_env(spec.env, spec.grant, pressure_env(self.psi))
+        var env = grant_env(
+            spec.env, grant, pressure_env(self.psi), self.gpus.count()
+        )
         var names = String()
         for s in spec.secrets:
             env.append(String(s[0], "=", fetch_secret(s[1])))
@@ -445,11 +481,25 @@ struct Worker(Movable):
                 )
             except e:
                 print("morca worker: no sampler for run", spec.run, ":", e)
+        return pid
 
     def _join(mut self, m: MemberSpec) raises:
-        """A dista worker for another worker's run (`morca._internal.run_cluster`).
-        """
-        var env = grant_env(m.env, m.grant, pressure_env(self.psi))
+        """A dista worker for another worker's run
+        (`morca._internal.run_cluster`), holding the GPUs it was granted
+        until it ends."""
+        var devices = self.gpus.take(m.grant.gpus)
+        var g = m.grant
+        g.devices = devices_text(devices)
+        try:
+            self.holding[self._join_with(m, g)] = devices.copy()
+        except e:
+            self.gpus.give_back(devices)
+            raise e^
+
+    def _join_with(mut self, m: MemberSpec, grant: Grant) raises -> Int:
+        var env = grant_env(
+            m.env, grant, pressure_env(self.psi), self.gpus.count()
+        )
         for s in m.secrets:
             env.append(String(s[0], "=", fetch_secret(s[1])))
         if self.image:
@@ -490,6 +540,7 @@ struct Worker(Movable):
             pid,
             flush=True,
         )
+        return pid
 
     def _stop_member(mut self, member: Int):
         for e in self.members.items():
@@ -512,6 +563,8 @@ struct Worker(Movable):
     def _ended(mut self, done: Reaped) raises:
         var pid = done.pid
         var code = done.code
+        if pid in self.holding:
+            self.gpus.give_back(self.holding.pop(pid))
         if pid in self.keeping:
             var stage = self.keeping.pop(pid)
             if not keep_log_ended(stage, code):
@@ -659,6 +712,14 @@ struct Worker(Movable):
                 flush=True,
             )
         self.room_mb = room.memory_mb
+        self.gpus = Gpus(host_gpus())
+        if self.gpus.count() > 0:
+            print(
+                "morca worker:",
+                self.gpus.count(),
+                "GPUs to grant (MORCA_HOST_GPUS, else nvidia-smi)",
+                flush=True,
+            )
         self.cgroups = Cgroups.setup(
             MemoryKnobs.from_env(), CpuKnobs.from_env()
         )
@@ -752,6 +813,7 @@ struct Worker(Movable):
                     .int("memory_mb", Int64(mem))
                     .int("room_cpus", Int64(room.cpus))
                     .int("room_memory_mb", Int64(room.memory_mb))
+                    .int("gpus", Int64(self.gpus.count()))
                     .text("advertise", self.advertise)
                     .text("host_image", self.follow.host_image)
                     .text("host_upgrade", self.follow.state())

@@ -44,11 +44,20 @@ is, for the pipeline to size itself from the grant (`auto_count`).
 `DISTA_WORKER_SLOTS = "auto"` too: dista (0.5.0 on) sizes each worker from
 `MORCA_GRANT_*`, dividing the grant among a local run's workers, and
 without a grant takes a slot per core.
+
+**GPUs** (docs/groups.md). A worker counts its host's GPUs once at start
+(`host_gpus`) and says how many with each claim. A request's `gpus` are
+whole and granted exactly, never as a range; admission decides how many a
+start holds, and the worker picks which free devices (`Gpus`) and passes
+them as `MORCA_GRANT_GPUS` and `CUDA_VISIBLE_DEVICES`. Only a group asks
+for GPUs (`morca._internal.groups`), so until members by group land no
+run's request does.
 """
 
 from std.os import getenv
 from std.sys.info import CompilationTarget, num_logical_cores
 
+from morca._internal.proc import capture
 from morca._internal.sample import _read, _sysctl_u64, parse_meminfo
 
 comptime MAX_CPUS = 1024
@@ -58,6 +67,11 @@ comptime WAITING = "waiting: needs "
 
 comptime GRANT_CPUS = "MORCA_GRANT_CPUS"
 comptime GRANT_MEMORY_MB = "MORCA_GRANT_MEMORY_MB"
+comptime GRANT_GPUS = "MORCA_GRANT_GPUS"
+comptime CUDA_DEVICES = "CUDA_VISIBLE_DEVICES"
+comptime HOST_GPUS = "MORCA_HOST_GPUS"
+comptime GPU_COUNT_SECONDS = 10.0
+"""How long `host_gpus` waits for `nvidia-smi`."""
 comptime AUTO = "auto"
 
 
@@ -217,10 +231,11 @@ def gb_text(mb: Int) -> String:
 
 
 struct Request(ImplicitlyCopyable, Movable):
-    """A pipeline's range of CPUs and memory; 0s for a resource it doesn't
-    ask for. `cpus_auto` and `memory_auto` mark a learned one (`auto`, or
-    `auto..MAX` with its maximum), which `morca._internal.recommend.resolve_request`
-    makes a range before admission."""
+    """A pipeline's range of CPUs and memory, and its whole GPUs; 0s for a
+    resource it doesn't ask for. `cpus_auto` and `memory_auto` mark a
+    learned one (`auto`, or `auto..MAX` with its maximum), which
+    `morca._internal.recommend.resolve_request` makes a range before
+    admission."""
 
     var cpus_min: Int
     var cpus_max: Int
@@ -228,6 +243,8 @@ struct Request(ImplicitlyCopyable, Movable):
     var memory_max_mb: Int
     var cpus_auto: Bool
     var memory_auto: Bool
+    var gpus: Int
+    """Whole GPUs, granted exactly; only a group asks for them."""
 
     def __init__(
         out self,
@@ -237,6 +254,7 @@ struct Request(ImplicitlyCopyable, Movable):
         memory_max_mb: Int,
         cpus_auto: Bool = False,
         memory_auto: Bool = False,
+        gpus: Int = 0,
     ):
         self.cpus_min = cpus_min
         self.cpus_max = cpus_max
@@ -244,6 +262,7 @@ struct Request(ImplicitlyCopyable, Movable):
         self.memory_max_mb = memory_max_mb
         self.cpus_auto = cpus_auto
         self.memory_auto = memory_auto
+        self.gpus = gpus
 
     @staticmethod
     def of(cpus: String, memory_gb: String) raises -> Request:
@@ -267,6 +286,7 @@ struct Request(ImplicitlyCopyable, Movable):
             or self.memory_min_mb > 0
             or self.cpus_auto
             or self.memory_auto
+            or self.gpus > 0
         )
 
     def auto(self) -> Bool:
@@ -317,23 +337,66 @@ def gb_hundredths(mb: Int) -> String:
     return out^
 
 
-@fieldwise_init
+def devices_text(devices: List[Int]) -> String:
+    """Device indexes as `MORCA_GRANT_GPUS` gives them: `0,2`; empty for
+    none."""
+    var out = String()
+    for i in range(len(devices)):
+        out.write("," if i else "", devices[i])
+    return out^
+
+
 struct Grant(ImplicitlyCopyable, Movable):
     """What a start of a run was given; 0 for a resource it didn't ask
     for."""
 
     var cpus: Int
     var memory_mb: Int
+    var gpus: Int
+    """How many whole GPUs it holds, as admission decided."""
+    var devices: String
+    """Which: the indexes of the devices the worker handed it (`Gpus`),
+    as `MORCA_GRANT_GPUS` gives them (`0,2`); empty until then and for
+    none. Text, not a list, so a grant stays implicitly copyable."""
+
+    def __init__(
+        out self,
+        cpus: Int,
+        memory_mb: Int,
+        gpus: Int = 0,
+        devices: String = "",
+    ):
+        self.cpus = cpus
+        self.memory_mb = memory_mb
+        self.gpus = gpus
+        self.devices = devices
 
     @staticmethod
     def none() -> Grant:
         return Grant(0, 0)
 
+    def device_list(self) -> List[Int]:
+        """Its devices' indexes."""
+        var out = List[Int]()
+        for d in self.devices.split(","):
+            try:
+                var t = String(d.strip())
+                if t:
+                    out.append(Int(t))
+            except:
+                pass
+        return out^
+
     @staticmethod
     def from_env() -> Grant:
-        """This run's grant, from `MORCA_GRANT_CPUS` and
-        `MORCA_GRANT_MEMORY_MB`; 0 for what isn't set."""
+        """This run's grant, from `MORCA_GRANT_CPUS`,
+        `MORCA_GRANT_MEMORY_MB` and `MORCA_GRANT_GPUS`; 0 and none for what
+        isn't set."""
         var g = Grant(0, 0)
+        g.devices = getenv(GRANT_GPUS)
+        var list = g.device_list()
+        g.gpus = len(list)
+        g.devices = devices_text(list)
         try:
             if getenv(GRANT_CPUS):
                 g.cpus = max(Int(getenv(GRANT_CPUS)), 0)
@@ -346,25 +409,104 @@ struct Grant(ImplicitlyCopyable, Movable):
             pass
         return g
 
-    def env(self) -> List[String]:
-        """`NAME=value` for a run's process."""
+    def env(self, host_gpus: Int = 0) -> List[String]:
+        """`NAME=value` for a run's process. On a host with GPUs
+        (`host_gpus`), and for a grant that holds some, also its devices in
+        `MORCA_GRANT_GPUS` and `CUDA_VISIBLE_DEVICES`, empty for none, so a
+        process sees only the GPUs it was given; on a host without, neither.
+        """
         var out = List[String]()
         if self.cpus > 0:
             out.append(String(GRANT_CPUS, "=", self.cpus))
         if self.memory_mb > 0:
             out.append(String(GRANT_MEMORY_MB, "=", self.memory_mb))
+        if host_gpus > 0 or self.gpus > 0 or self.devices:
+            out.append(String(GRANT_GPUS, "=", self.devices))
+            out.append(String(CUDA_DEVICES, "=", self.devices))
         return out^
 
 
-@fieldwise_init
 struct Room(ImplicitlyCopyable, Movable):
     """What a host can grant its runs in all: its capacity less its
-    reserve."""
+    reserve; and its GPUs, with those its live grants don't hold."""
 
     var cpus: Int
     var memory_mb: Int
     var capacity_cpus: Int
     var capacity_memory_mb: Int
+    var gpus: Int
+    """The GPUs the host has."""
+    var free_gpus: Int
+    """Those of them no live grant holds."""
+
+    def __init__(
+        out self,
+        cpus: Int,
+        memory_mb: Int,
+        capacity_cpus: Int,
+        capacity_memory_mb: Int,
+        gpus: Int = 0,
+        free_gpus: Int = 0,
+    ):
+        self.cpus = cpus
+        self.memory_mb = memory_mb
+        self.capacity_cpus = capacity_cpus
+        self.capacity_memory_mb = capacity_memory_mb
+        self.gpus = gpus
+        self.free_gpus = free_gpus
+
+
+struct Gpus(Movable):
+    """A worker's GPUs, as it hands them out (docs/groups.md): which of
+    the host's devices are free. Admission decides how many a start holds;
+    the worker takes that many here when it starts the process, and gives
+    them back when the process ends."""
+
+    var busy: List[Bool]
+
+    def __init__(out self, count: Int):
+        self.busy = List[Bool](length=max(count, 0), fill=False)
+
+    def count(self) -> Int:
+        """The GPUs the host has."""
+        return len(self.busy)
+
+    def free(self) -> Int:
+        var n = 0
+        for b in self.busy:
+            if not b:
+                n += 1
+        return n
+
+    def take(mut self, n: Int) raises -> List[Int]:
+        """The `n` free devices with the lowest indexes, now held; raises if
+        fewer are free."""
+        var out = List[Int]()
+        if n <= 0:
+            return out^
+        if n > self.free():
+            raise Error(
+                "morca worker: granted ",
+                n,
+                " GPUs, but ",
+                self.free(),
+                " of its ",
+                self.count(),
+                " are free",
+            )
+        for i in range(len(self.busy)):
+            if len(out) == n:
+                break
+            if not self.busy[i]:
+                self.busy[i] = True
+                out.append(i)
+        return out^
+
+    def give_back(mut self, devices: List[Int]):
+        """Frees `devices`, those `take` gave; others are ignored."""
+        for d in devices:
+            if d >= 0 and d < len(self.busy):
+                self.busy[d] = False
 
 
 def _env_int(name: StaticString, default: Int) raises -> Int:
@@ -429,6 +571,34 @@ def host_capacity() raises -> Tuple[Int, Int]:
     return (cpus, mb)
 
 
+def count_gpus(listing: String) -> Int:
+    """The GPUs `nvidia-smi -L` lists: its lines `GPU <n>: ...` (a MIG
+    device's indented line under one isn't another)."""
+    var n = 0
+    for line in listing.split("\n"):
+        if line.startswith("GPU "):
+            n += 1
+    return n
+
+
+def host_gpus(
+    smi: List[String] = ["nvidia-smi", "-L"],
+    timeout: Float64 = GPU_COUNT_SECONDS,
+) raises -> Int:
+    """This host's GPUs: `MORCA_HOST_GPUS` if set (a number from 0, else
+    this raises); else the devices `smi` lists, run for at most `timeout`
+    seconds; none if it isn't there, fails or takes longer."""
+    if getenv(HOST_GPUS):
+        return _env_int(HOST_GPUS, 0)
+    try:
+        var got = capture(smi, timeout=timeout)
+        if got[0] != 0:
+            return 0
+        return count_gpus(got[1])
+    except:
+        return 0
+
+
 def host_room(worker: Bool = False) raises -> Room:
     """What this host can grant: `host_capacity` less `MORCA_RESERVE_CPUS`
     and `MORCA_RESERVE_MEMORY_MB` (1 and 1536 beside the scheduler, Postgres
@@ -443,6 +613,10 @@ def _cpus_text(n: Int) -> String:
     return String(n, " CPU" if n == 1 else " CPUs")
 
 
+def gpus_text(n: Int) -> String:
+    return String(n, " GPU" if n == 1 else " GPUs")
+
+
 def admit(
     req: Request,
     room: Room,
@@ -454,11 +628,13 @@ def admit(
     """Up to `most` starts of a pipeline asking for `req`, on a host that can
     grant `room` and has granted its running runs `granted_cpus` and
     `granted_mb`: each start's grant, the first up to its maximum from what's
-    left, the next from what that left, until a minimum doesn't fit. With
-    fewer than `most`, also why the next one waits."""
+    left, the next from what that left, until a minimum doesn't fit; and
+    exactly its GPUs, from those `room` has free. With fewer than `most`,
+    also why the next one waits."""
     var out = List[Grant]()
     var free_cpus = room.cpus - granted_cpus
     var free_mb = room.memory_mb - granted_mb
+    var free_gpus = room.free_gpus
     while len(out) < most:
         var why = List[String]()
         if req.memory_min_mb > 0 and req.memory_min_mb > free_mb:
@@ -503,6 +679,27 @@ def admit(
                         " free of grants",
                     )
                 )
+        if req.gpus > 0 and req.gpus > free_gpus:
+            if req.gpus > room.gpus:
+                why.append(
+                    String(
+                        gpus_text(req.gpus),
+                        ", more than the ",
+                        room.gpus,
+                        " ",
+                        host,
+                        " grants at most",
+                    )
+                )
+            else:
+                why.append(
+                    String(
+                        gpus_text(req.gpus),
+                        ", ",
+                        max(free_gpus, 0),
+                        " free of grants",
+                    )
+                )
         if len(why) > 0:
             var text = String(WAITING)
             for i in range(len(why)):
@@ -517,19 +714,25 @@ def admit(
         if req.memory_min_mb > 0:
             g.memory_mb = min(req.memory_max_mb, free_mb)
             free_mb -= g.memory_mb
+        g.gpus = max(req.gpus, 0)
+        free_gpus -= g.gpus
         out.append(g)
     return (out^, String())
 
 
 def run_env(
-    env: List[Tuple[String, String]], g: Grant, extra: List[String] = []
+    env: List[Tuple[String, String]],
+    g: Grant,
+    extra: List[String] = [],
+    host_gpus: Int = 0,
 ) -> List[String]:
     """A start's `NAME=value`s: the pipeline's `env` as it is (`auto`
-    included), then `g`'s variables, then `extra`."""
+    included), then `g`'s variables (`Grant.env` on a host of `host_gpus`),
+    then `extra`."""
     var out = List[String]()
     for kv in env:
         out.append(String(kv[0], "=", kv[1]))
-    out.extend(g.env())
+    out.extend(g.env(host_gpus))
     out.extend(extra.copy())
     return out^
 

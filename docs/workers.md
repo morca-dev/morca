@@ -373,7 +373,8 @@ A pipeline with a request (`cpus`, `memory_gb`: [morca.toml](morca-toml.md#reque
 is admitted against the worker's own host, as the scheduler admits a local
 run: each claim says what the worker can grant (its CPUs and memory, the
 cgroup's limits if set, less `MORCA_RESERVE_CPUS`, 0, and
-`MORCA_RESERVE_MEMORY_MB`, 512, of the worker's environment), and the UI
+`MORCA_RESERVE_MEMORY_MB`, 512, of the worker's environment, and its
+[GPUs](morca-toml.md#requests-and-grants), counted once at start), and the UI
 gives it a run only if the run's minimum fits less what the worker's
 running runs were granted. The run gets its grant in `MORCA_GRANT_CPUS` and
 `MORCA_GRANT_MEMORY_MB`, recorded on the run. One that doesn't fit stays

@@ -13,6 +13,10 @@ comptime MEMBER_MB_SQL = (
     " + coalesce((SELECT sum(m.grant_memory_mb) FROM orca.run_members m"
     " WHERE m.worker = $1 AND m.ended IS NULL), 0)"
 )
+comptime MEMBER_GPUS_SQL = (
+    " + coalesce((SELECT sum(m.grant_gpus) FROM orca.run_members m"
+    " WHERE m.worker = $1 AND m.ended IS NULL), 0)"
+)
 
 
 def spread(mut conn: Connection, pipeline: String) raises -> Int:
@@ -136,6 +140,7 @@ def add_member(
     worker: Int,
     grant_cpus: Int,
     grant_memory_mb: Int,
+    grant_gpus: Int = 0,
 ) raises -> Optional[Int]:
     """Records `worker` as a live member of `run` at `start`, granted that
     (0 for none), unless it is one already; returns the member's id, or
@@ -143,9 +148,10 @@ def add_member(
     var got = conn.query(
         (
             "INSERT INTO orca.run_members (run, start, worker, grant_cpus,"
-            " grant_memory_mb) SELECT $1, $2, $3, nullif($4, 0), nullif($5,"
-            " 0) WHERE NOT EXISTS (SELECT 1 FROM orca.run_members WHERE run"
-            " = $1 AND start = $2 AND worker = $3 AND ended IS NULL)"
+            " grant_memory_mb, grant_gpus) SELECT $1, $2, $3, nullif($4, 0),"
+            " nullif($5, 0), nullif($6, 0) WHERE NOT EXISTS (SELECT 1 FROM"
+            " orca.run_members WHERE run = $1 AND start = $2 AND worker = $3"
+            " AND ended IS NULL)"
             " RETURNING id"
         ),
         Params()
@@ -153,7 +159,8 @@ def add_member(
         .int64(Int64(start))
         .int64(Int64(worker))
         .int64(Int64(grant_cpus))
-        .int64(Int64(grant_memory_mb)),
+        .int64(Int64(grant_memory_mb))
+        .int64(Int64(grant_gpus)),
     )
     if len(got) != 1:
         return None

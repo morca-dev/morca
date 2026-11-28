@@ -73,17 +73,18 @@ tok2=$(./build/morca worker-token create --pool t --label idle 2>> "$log") || fa
 a=$(q "SELECT id FROM orca.workers WHERE label = 'busy'")
 b=$(q "SELECT id FROM orca.workers WHERE label = 'idle'")
 c=$(q "SELECT id FROM orca.workers WHERE label = 'never'")
-# claim TOKEN NAME IMAGE [RUNNING]: one claim, as a worker sends it.
+# claim TOKEN NAME IMAGE [RUNNING [GPUS]]: one claim, as a worker sends it.
 claim() {
     curl -fsS -H "Authorization: Bearer $1" \
-        -d "{\"pool\": \"t\", \"slots\": 4, \"name\": \"$2\", \"image\": \"$3\", \"running\": \"${4:-}\"}" \
+        -d "{\"pool\": \"t\", \"slots\": 4, \"name\": \"$2\", \"image\": \"$3\", \"running\": \"${4:-}\", \"gpus\": ${5:-0}}" \
         "$base/api/worker/claim"
 }
 run=$(q "INSERT INTO orca.runs (pipeline, registry_hash, partitions, trigger, status) SELECT name, registry_hash, '2024-01', 'ui', 'queued' FROM orca.pipelines WHERE name = 'fillwk' RETURNING id" | head -1)
 got=$(claim "$tok" busybox "") || fail "the busy host's claim"
 [ "$(echo "$got" | jq -r .run.run)" = "$run" ] || fail "the busy host got: $got"
-# Its next claim says it runs it, as a worker's does.
-claim "$tok" busybox "" "$run" | jq -e '.run == null' > /dev/null || fail "the busy host's second claim"
+# Its next claim says it runs it, as a worker's does, and that its host has
+# 2 GPUs (docs/groups.md).
+claim "$tok" busybox "" "$run" 2 | jq -e '.run == null' > /dev/null || fail "the busy host's second claim"
 claim "$tok2" idlebox "" > /dev/null || fail "the idle host's claim"
 # The images they run (a claim's own must match a run's, which has none).
 q "UPDATE orca.workers SET image = 'ghcr.io/x/morca:1' WHERE id = $a; UPDATE orca.workers SET image = 'ghcr.io/x/morca:2' WHERE id = $b" > /dev/null
@@ -112,9 +113,12 @@ echo "$page" | grep -qF "· the server's</span>" || fail "the idle host's image 
 gpage=$(html '/ops/pools?kind=self-hosted&gone=1')
 echo "$gpage" | grep -qF "action=\"/ops/pools/self-hosted/$c/remove\"" || fail "the host never seen has no Remove"
 echo "$gpage" | grep -qF '<span class="muted">not seen</span>' || fail "the host never seen isn't 'not seen'"
-html "/ops/pools/self-hosted/$a" | grep -qF "action=\"/ops/pools/self-hosted/$a/drain\"" || fail "the machine page has no Drain"
+html "/ops/pools/self-hosted/$a" > build/hosts-ui-page.txt
+grep -qF "action=\"/ops/pools/self-hosted/$a/drain\"" build/hosts-ui-page.txt || fail "the machine page has no Drain"
+grep -qF '2, 0 granted</dd>' build/hosts-ui-page.txt || fail "the machine page doesn't show its host's GPUs"
+if html "/ops/pools/self-hosted/$b" | grep -qF ' granted</dd>'; then fail "a host without GPUs shows some"; fi
 html "/ops/pools/live?kind=self-hosted" | grep -qF "action=\"/ops/pools/self-hosted/$a/remove\"" || fail "the fragment has no Remove"
-echo "ok   a live host's row and page have Drain and Remove; its state and images"
+echo "ok   a live host's row and page have Drain and Remove; its state, images and GPUs"
 
 # --- Login on: hidden from visitors, refused without a session ---
 printf 'correct horse battery\n' | ./build/morca user add alice >> "$log" 2>&1 || fail "user add"

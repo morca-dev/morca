@@ -83,6 +83,9 @@ def test_unset_falls_back_to_the_pipeline() raises:
     var req = gpu.request()
     assert_equal(req.cpus_min, 4)
     assert_equal(req.memory_min_mb, 16 * 1024)
+    # Its GPUs per worker, which admission grants exactly.
+    assert_equal(req.gpus, 1)
+    assert_equal(gs[0].effective("4", "8").request().gpus, 0)
     var decode = gs[0].effective("4", "8")
     assert_equal(decode.cpus, "2..8")
     assert_equal(decode.memory_gb, "8")
@@ -265,6 +268,12 @@ def test_dista_names_are_reserved() raises:
         '[pipelines.p]\nenv = { DISTA_GROUP = "gpu" }\n',
         "DISTA_GROUP is set by morca itself",
     )
+
+
+def test_gpu_names_are_reserved() raises:
+    """A grant's GPUs reach a process in these, which `env` can't set."""
+    for n in ["MORCA_GRANT_GPUS", "CUDA_VISIBLE_DEVICES"]:
+        assert_true("is set by morca itself" in env_name_problem(String(n)))
 
 
 def main() raises:

@@ -90,6 +90,10 @@ struct Machine(Copyable, Movable):
     """When an instance ended, and why, in UTC; empty while it's up."""
     var run_start: Int
     """The run's start an instance or a pod belongs to; 0 for a worker."""
+    var gpus: Int
+    """A worker's host's GPUs; 0 for none or unknown."""
+    var granted_gpus: Int
+    """Those its runs and members hold now."""
 
     def live(self) -> Bool:
         return self.state != "gone"
@@ -189,6 +193,8 @@ def _ec2(mut db: State, mut out: List[Machine], one: String) raises:
                 expires=String(),
                 ended=ended^,
                 run_start=r.start,
+                gpus=0,
+                granted_gpus=0,
             )
         )
 
@@ -229,6 +235,8 @@ def _kubernetes(mut db: State, mut out: List[Machine], one: String) raises:
                 expires=String(),
                 ended=String(),
                 run_start=start,
+                gpus=0,
+                granted_gpus=0,
             )
         )
 
@@ -276,6 +284,8 @@ def _workers(mut db: State, mut out: List[Machine], one: Int) raises:
                 expires=r.expires,
                 ended=String(),
                 run_start=0,
+                gpus=r.gpus,
+                granted_gpus=r.granted_gpus,
             )
         )
 

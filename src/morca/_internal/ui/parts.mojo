@@ -5,7 +5,7 @@ run's grant and usage as facts.
 
 from morca._internal.actions import cancel_kill_seconds
 from morca._internal.html import Html, url_encode
-from morca._internal.resources import gb_text
+from morca._internal.resources import gb_text, gpus_text
 from morca._internal.sample import fixed1
 from morca._internal.source import commit_url, web_url
 from morca._internal.db.run_rows import Usage
@@ -628,6 +628,8 @@ def grant_facts(mut h: Html, r: RunResources):
         g.write(r.grant.cpus, " CPU" if r.grant.cpus == 1 else " CPUs")
     if r.grant.memory_mb > 0:
         g.write(", " if g else "", gb_text(r.grant.memory_mb), " GB")
+    if r.grant.gpus > 0:
+        g.write(", " if g else "", gpus_text(r.grant.gpus))
     if g:
         h.text(g)
     else:
