@@ -6,7 +6,11 @@ died, with the stale limit as `$2`."""
 from postgres import Connection, Params, Transaction
 
 from morca._internal.db.live import behind_sql, ordered_runs
-from morca._internal.db.run_cluster import MEMBER_GRANTS_SQL, MEMBER_MB_SQL
+from morca._internal.db.run_cluster import (
+    MEMBER_GPUS_SQL,
+    MEMBER_GRANTS_SQL,
+    MEMBER_MB_SQL,
+)
 
 
 # ── tokens ───────────────────────────────────────────────────────────────────
@@ -267,6 +271,7 @@ def set_seen(
     room_memory_mb: Int = -1,
     host_image: String = "",
     host_upgrade: String = "",
+    gpus: Int = 0,
 ) raises:
     """Keeps what worker `id` says of itself (empty or 0 for unsaid; -1
     for the room it can grant a run)."""
@@ -276,7 +281,8 @@ def set_seen(
             " nullif($3, ''), cpus = nullif($4, 0), memory_mb = nullif($5, 0),"
             " running = nullif($6, ''), room_cpus = nullif($7, -1),"
             " room_memory_mb = nullif($8, -1), host_image = nullif($9, ''),"
-            " host_upgrade = nullif($10, '') WHERE id = $1"
+            " host_upgrade = nullif($10, ''), gpus = nullif($11, 0) WHERE id"
+            " = $1"
         ),
         Params()
         .int64(Int64(id))
@@ -288,7 +294,8 @@ def set_seen(
         .int32(Int32(room_cpus))
         .int64(Int64(room_memory_mb))
         .text(host_image)
-        .text(host_upgrade),
+        .text(host_upgrade)
+        .int32(Int32(gpus)),
     )
 
 
@@ -359,26 +366,28 @@ def unhold_pressure(
 # ── claims ───────────────────────────────────────────────────────────────────
 
 
-def granted(mut conn: Connection, worker: Int) raises -> Tuple[Int, Int]:
-    """The CPUs and the MB of memory granted to `worker`'s running runs and
-    its live members (`morca._internal.run_cluster`)."""
+def granted(mut conn: Connection, worker: Int) raises -> Tuple[Int, Int, Int]:
+    """The CPUs, the MB of memory and the GPUs granted to `worker`'s running
+    runs and its live members (`morca._internal.run_cluster`)."""
     var g = conn.query(
         String(
             "SELECT coalesce(sum(grant_cpus), 0)",
             MEMBER_GRANTS_SQL,
             " AS cpus, coalesce(sum(grant_memory_mb), 0)",
             MEMBER_MB_SQL,
-            " AS mb FROM orca.runs WHERE worker = $1 AND status =",
+            " AS mb, coalesce(sum(grant_gpus), 0)",
+            MEMBER_GPUS_SQL,
+            " AS gpus FROM orca.runs WHERE worker = $1 AND status =",
             " 'running'",
         ),
         Params().int64(Int64(worker)),
     ).row(0)
-    return (Int(g.int64("cpus")), Int(g.int64("mb")))
+    return (Int(g.int64("cpus")), Int(g.int64("mb")), Int(g.int64("gpus")))
 
 
 def granted_live(
     mut tx: Transaction, worker: Int, stale: Float64, dead: String
-) raises -> Tuple[Int, Int]:
+) raises -> Tuple[Int, Int, Int]:
     """`granted`, of the runs whose process is alive (`dead`), in `tx`."""
     var g = tx.query(
         String(
@@ -386,13 +395,15 @@ def granted_live(
             MEMBER_GRANTS_SQL,
             " AS cpus, coalesce(sum(grant_memory_mb), 0)",
             MEMBER_MB_SQL,
-            " AS mb FROM orca.runs",
+            " AS mb, coalesce(sum(grant_gpus), 0)",
+            MEMBER_GPUS_SQL,
+            " AS gpus FROM orca.runs",
             " WHERE worker = $1 AND status = 'running' AND NOT ",
             dead,
         ),
         Params().int64(Int64(worker)).float64(stale),
     ).row(0)
-    return (Int(g.int64("cpus")), Int(g.int64("mb")))
+    return (Int(g.int64("cpus")), Int(g.int64("mb")), Int(g.int64("gpus")))
 
 
 @fieldwise_init
@@ -469,6 +480,7 @@ def start_claimed(
     grant_memory_mb: Int,
     request_source: String,
     request_runs: Int,
+    grant_gpus: Int = 0,
 ) raises -> Optional[Claimed]:
     """Starts queued run `run` on `worker`, owned by `owner`, with what it
     asked for and was granted (empty or 0 for none); None if it isn't
@@ -483,7 +495,8 @@ def start_claimed(
             " request_cpus = nullif($5, ''), request_memory_gb ="
             " nullif($6, ''), grant_cpus = nullif($7, 0), grant_memory_mb"
             " = nullif($8, 0), request_source = nullif($9, ''),"
-            " request_runs = nullif($10, 0) WHERE id = $1 AND status ="
+            " request_runs = nullif($10, 0), grant_gpus = nullif($11, 0)"
+            " WHERE id = $1 AND status ="
             " 'queued' RETURNING starts, allow_new_code, partitions"
         ),
         Params()
@@ -496,7 +509,8 @@ def start_claimed(
         .int64(Int64(grant_cpus))
         .int64(Int64(grant_memory_mb))
         .text(request_source)
-        .int64(Int64(request_runs)),
+        .int64(Int64(request_runs))
+        .int64(Int64(grant_gpus)),
     )
     if len(got) != 1:
         return None

@@ -131,6 +131,9 @@ struct RunResources(Copyable, Movable):
             String(self.grant.memory_mb) if self.grant.memory_mb else String(
                 "null"
             ),
+            String(', "gpus": ', self.grant.gpus) if self.grant.gpus else (
+                String()
+            ),
             "}",
         )
 
@@ -243,7 +246,7 @@ def _run_row(r: RunRecord) -> RunRow:
         RunResources(
             r.request_cpus,
             r.request_memory_gb,
-            Grant(r.grant_cpus, r.grant_memory_mb),
+            Grant(r.grant_cpus, r.grant_memory_mb, r.grant_gpus),
             r.memory_limit_mb,
             r.memory_max_mb,
             r.memory_bytes,

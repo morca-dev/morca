@@ -359,6 +359,7 @@ def worker_run_json(w: WorkerRun) -> String:
         .raw("secrets", _pairs_json(w.secrets, "name", "id"))
         .int("grant_cpus", Int64(w.grant.cpus))
         .int("grant_memory_mb", Int64(w.grant.memory_mb))
+        .int("grant_gpus", Int64(w.grant.gpus))
         .int("members", Int64(w.members))
         .finish()
     )
@@ -381,9 +382,18 @@ def worker_run_of(v: Value) raises -> WorkerRun:
             in v else 0,
             Int(v["grant_memory_mb"].int_value()) if String("grant_memory_mb")
             in v else 0,
+            gpus_field(v, "grant_gpus"),
         ),
         Int(v["members"].int_value()) if String("members") in v else 0,
     )
+
+
+def gpus_field(v: Value, key: String) raises -> Int:
+    """A count of GPUs in a worker's JSON: 0 when it's absent, as from a
+    worker before them, or not a number from 0."""
+    if key in v and v[key].is_int():
+        return max(Int(v[key].int_value()), 0)
+    return 0
 
 
 def _seen(mut db: State, w: WorkerAuth, v: Value) raises:
@@ -412,6 +422,7 @@ def _seen(mut db: State, w: WorkerAuth, v: Value) raises:
         Int(room_mb),
         text_field(v, "host_image"),
         text_field(v, "host_upgrade"),
+        gpus_field(v, "gpus"),
     )
     if String("pressure") in v and v["pressure"].is_object():
         _pressure_seen(db, w, v, Report.from_json(v["pressure"]))
@@ -531,6 +542,8 @@ def claim(mut db: State, w: WorkerAuth, v: Value) raises -> String:
             g[0],
             g[1],
             String("worker ", name) if name else w.user(),
+            gpus_field(v, "gpus"),
+            g[2],
         )
         if joined:
             var m = joined.value().copy()
@@ -707,9 +720,17 @@ def _claim_run(
         var admitted = request.any() and room_cpus >= 0
         if admitted:
             var g = workers_db.granted_live(tx, w.id, stale, dead)
+            var gpus = gpus_field(v, "gpus")
             var fit = admit(
                 request,
-                Room(room_cpus, room_mb, room_cpus, room_mb),
+                Room(
+                    room_cpus,
+                    room_mb,
+                    room_cpus,
+                    room_mb,
+                    gpus,
+                    max(gpus - g[2], 0),
+                ),
                 g[0],
                 g[1],
                 1,
@@ -734,6 +755,7 @@ def _claim_run(
             grant.memory_mb,
             sized.source,
             sized.runs,
+            grant.gpus,
         )
         guard case .Some(r) = got else:
             tx.rollback()

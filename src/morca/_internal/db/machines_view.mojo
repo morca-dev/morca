@@ -179,6 +179,10 @@ struct WorkerToken(Copyable, Movable):
     var running: String
     """The runs it says it runs, comma-separated."""
     var expires: String
+    var gpus: Int
+    """The GPUs its host has, as its claims say; 0 for none."""
+    var granted_gpus: Int
+    """Those its running runs and live members were granted."""
 
 
 def worker_tokens(
@@ -197,7 +201,11 @@ def worker_tokens(
         " coalesce(memory_mb, 0) AS mem, coalesce(running, '') AS running,",
         " to_char(expires AT TIME ZONE 'UTC', ",
         _TS,
-        ") AS expires FROM orca.workers",
+        ") AS expires, coalesce(gpus, 0) AS gpus, coalesce((SELECT",
+        " sum(r.grant_gpus) FROM orca.runs r WHERE r.worker = w.id AND",
+        " r.status = 'running'), 0) + coalesce((SELECT sum(m.grant_gpus) FROM",
+        " orca.run_members m WHERE m.worker = w.id AND m.ended IS NULL), 0)",
+        " AS granted_gpus FROM orca.workers w",
         " WHERE id = $2" if one else " WHERE $2 = 0",
         " ORDER BY pool, id DESC",
     )
@@ -216,6 +224,8 @@ def worker_tokens(
                 Int(r.int64("mem")),
                 r.text("running"),
                 r.text("expires"),
+                Int(r.int64("gpus")),
+                Int(r.int64("granted_gpus")),
             )
         )
     return out^

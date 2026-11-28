@@ -463,6 +463,11 @@ def _context_header(key: String) -> StaticString:
         return (
             "Its memory: the instance type's, or what the worker said it has."
         )
+    if key == "pools:GPUs":
+        return (
+            "The GPUs the worker said its host has (MORCA_HOST_GPUS, else "
+            "nvidia-smi), and how many its runs hold now."
+        )
     if key == "pools:Runs":
         return "The runs on it now. Click one for its page."
     if key == "pools:Last heartbeat":

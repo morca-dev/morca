@@ -79,9 +79,11 @@ struct Group(Copyable, Equatable, Movable):
         )
 
     def request(self) raises -> Request:
-        """Its CPUs and memory as a `Request`, as given: call it on
+        """Its CPUs, memory and GPUs as a `Request`, as given: call it on
         `effective`'s result for the fallbacks."""
-        return Request.of(self.cpus, self.memory_gb)
+        var r = Request.of(self.cpus, self.memory_gb)
+        r.gpus = self.gpus
+        return r
 
     def toml_text(self) -> String:
         """The group as an inline table, as `morca config show` and

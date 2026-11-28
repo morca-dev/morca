@@ -303,7 +303,7 @@ def mark_started(
                 " = NULL, request_cpus = nullif($4, ''),"
                 " request_memory_gb = nullif($5, ''),"
                 " grant_cpus = nullif($6, 0), grant_memory_mb ="
-                " nullif($7, 0), memory_limit_mb = NULL,"
+                " nullif($7, 0), grant_gpus = NULL, memory_limit_mb = NULL,"
                 " memory_max_mb = NULL, memory_bytes = NULL,"
                 " instance = nullif($8, 0), request_source ="
                 " nullif($9, ''), request_runs = nullif($10,"

@@ -18,7 +18,13 @@
 #   with no request to weigh, one at a time;
 # - a remote worker (`morca worker`) admits a run against its own host the
 #   same way, and passes the grant; one more than any worker of the pool
-#   grants waits saying so.
+#   grants waits saying so;
+# - a worker with MORCA_HOST_GPUS=2 says so with its claims, which the
+#   scheduler keeps and the host's page shows; a run that asks for no GPUs
+#   is granted none, its process sees none (MORCA_GRANT_GPUS and
+#   CUDA_VISIBLE_DEVICES empty) and nothing else changes; on hosts without
+#   GPUs neither variable is set; a bad MORCA_HOST_GPUS stops the worker at
+#   start.
 #
 # Needs MORCA_DATABASE_URL (pixi run test-grants starts a throwaway server),
 # curl and jq.
@@ -338,7 +344,8 @@ wait "$small" 2> /dev/null || true
 env -u MORCA_DATABASE_URL MORCA_WORKER_TOKEN="$tok" \
     ./build/morca worker --pool g --remote "$base" --poll-seconds 0.3 --name big \
     --dir "$PWD/build/grants-stage" > build/grants-worker-big.out 2>&1 &
-pids="$pids $!"
+big=$!
+pids="$pids $big"
 until_ 60 "wide's run didn't succeed on the worker: $(q "SELECT id, status, error, held FROM orca.runs WHERE id = $w4")" \
     is "SELECT status FROM orca.runs WHERE id = $w4" succeeded
 is "SELECT placement || ' ' || grant_cpus || ' ' || grant_memory_mb FROM orca.runs WHERE id = $w4" "worker:g 3 6144" \
@@ -346,4 +353,41 @@ is "SELECT placement || ' ' || grant_cpus || ' ' || grant_memory_mb FROM orca.ru
 printf 'MORCA_GRANT_CPUS=3\nMORCA_GRANT_MEMORY_MB=6144\nDISTA_WORKER_SLOTS=auto\nGRANTEE_PARALLEL=3\n' > build/grants-want.out
 cmp -s build/grants-want.out "$out/wide-2024-04.env" || fail "wide's process on the worker got: $(cat "$out/wide-2024-04.env")"
 echo "ok   a worker admits a run against its own host, and passes the grant"
+
+# A worker's GPUs (docs/groups.md): counted once at start, sent with each
+# claim. A bad count stops it at start.
+kill "$big" 2> /dev/null || true
+wait "$big" 2> /dev/null || true
+env -u MORCA_DATABASE_URL MORCA_HOST_GPUS=two MORCA_WORKER_TOKEN="$tok" \
+    ./build/morca worker --pool g --remote "$base" --poll-seconds 0.3 --name gpu \
+    --dir "$PWD/build/grants-stage" > build/grants-worker-gpu.out 2>&1 &
+bad_gpus=$!
+pids="$pids $bad_gpus"
+until_ 20 "a worker with MORCA_HOST_GPUS=two didn't stop" sh -c "! kill -0 $bad_gpus 2> /dev/null"
+if wait "$bad_gpus"; then fail "a worker with MORCA_HOST_GPUS=two exited 0"; fi
+grep -q "MORCA_HOST_GPUS must be a number from 0, not two" build/grants-worker-gpu.out \
+    || fail "a bad MORCA_HOST_GPUS: $(cat build/grants-worker-gpu.out)"
+wid=$(q "SELECT id FROM orca.workers WHERE label = 'grants'")
+is "SELECT coalesce(gpus, 0) FROM orca.workers WHERE id = $wid" 0 \
+    || fail "a worker without GPUs: $(q "SELECT gpus FROM orca.workers WHERE id = $wid")"
+./build/morca backfill wide 2024-05 >> "$log" 2>&1 || fail "backfill wide"
+w5=$(q "SELECT max(id) FROM orca.runs")
+env -u MORCA_DATABASE_URL MORCA_HOST_GPUS=2 MORCA_WORKER_TOKEN="$tok" \
+    ./build/morca worker --pool g --remote "$base" --poll-seconds 0.3 --name gpu \
+    --dir "$PWD/build/grants-stage" > build/grants-worker-gpu.out 2>&1 &
+pids="$pids $!"
+until_ 60 "wide's run didn't succeed on the GPU worker: $(q "SELECT id, status, error, held FROM orca.runs WHERE id = $w5")" \
+    is "SELECT status FROM orca.runs WHERE id = $w5" succeeded
+is "SELECT gpus FROM orca.workers WHERE id = $wid" 2 \
+    || fail "the GPU worker's count: $(q "SELECT gpus FROM orca.workers WHERE id = $wid")"
+is "SELECT grant_cpus || ' ' || grant_memory_mb || ' ' || coalesce(grant_gpus, 0) FROM orca.runs WHERE id = $w5" "3 6144 0" \
+    || fail "wide's run on the GPU worker: $(q "SELECT grant_cpus, grant_memory_mb, grant_gpus FROM orca.runs WHERE id = $w5")"
+printf 'MORCA_GRANT_CPUS=3\nMORCA_GRANT_MEMORY_MB=6144\nDISTA_WORKER_SLOTS=auto\nGRANTEE_PARALLEL=3\nMORCA_GRANT_GPUS=\nCUDA_VISIBLE_DEVICES=\n' > build/grants-want.out
+cmp -s build/grants-want.out "$out/wide-2024-05.env" || fail "wide's process on the GPU worker got: $(cat "$out/wide-2024-05.env")"
+json "/runs/$w5" | jq -e '.run.grant == {"cpus": 3, "memory_mb": 6144}' > /dev/null \
+    || fail "wide's run's JSON on the GPU worker: $(json "/runs/$w5" | jq -c '.run.grant')"
+json "/ops/pools/self-hosted/$wid" | jq -e '.machine.gpus == 2 and .machine.granted_gpus == 0' > /dev/null \
+    || fail "the GPU worker's JSON: $(json "/ops/pools/self-hosted/$wid" | jq -c '.machine')"
+curl -fsS "$base/ops/pools/self-hosted/$wid" | grep -q '2, 0 granted' || fail "the GPU worker's page doesn't show its GPUs"
+echo "ok   a worker's GPUs reach the scheduler and its page; a run that asks for none sees none"
 echo "grants: ok"

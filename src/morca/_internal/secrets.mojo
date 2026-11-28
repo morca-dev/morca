@@ -107,6 +107,8 @@ comptime _RESERVED_ENV = [
     "DISTA_GROUP",
     "MORCA_GRANT_CPUS",
     "MORCA_GRANT_MEMORY_MB",
+    "MORCA_GRANT_GPUS",
+    "CUDA_VISIBLE_DEVICES",
     "MORCA_MEMORY_PRESSURE_FILE",
 ]
 """Variables morca gives a run itself, which `env` can't set. Of dista's,
