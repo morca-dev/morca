@@ -228,8 +228,11 @@ from morca._internal.sample import (
     tree_usage,
 )
 from morca._internal.resources import (
+    Gpus,
     Grant,
     Room,
+    devices_text,
+    host_gpus,
     host_room,
 )
 from morca._internal.admission import (
@@ -374,6 +377,14 @@ struct Scheduler(Movable):
     var room: Room
     """What this host can grant the runs of pipelines with a request
     (`morca._internal.resources`): its capacity less its reserve."""
+    var gpus: Gpus
+    """This host's GPUs, as its local and control-placed runs hold them
+    (docs/groups.md): counted (`host_gpus`) the first time a run asks for
+    some, none until then."""
+    var gpus_counted: Bool
+    var _holding: Dict[Int, List[Int]]
+    """A local or control-placed run's process to the GPUs it holds, given
+    back when it's reaped."""
     var _control: Dict[Int, _ControlProc]
     """A control-placed run's process to what its end needs."""
     var _kept: Dict[Int, _ControlProc]
@@ -492,6 +503,9 @@ struct Scheduler(Movable):
         self._kept = Dict[Int, _ControlProc]()
         self._keeping = Dict[Int, String]()
         self._meters = Dict[Int, Meter]()
+        self.gpus = Gpus(0)
+        self.gpus_counted = False
+        self._holding = Dict[Int, List[Int]]()
         self.psi = find_source()
         self.admission = Admission.from_env()
         self._pressure_kept = 0
@@ -756,6 +770,43 @@ struct Scheduler(Movable):
             if not Cgroups.remove(path):
                 left.append(path)
         self._unswept = left^
+
+    def gpu_room(mut self) -> Room:
+        """This host's room with its GPUs, counted now if they weren't
+        (`MORCA_HOST_GPUS`, else `nvidia-smi`); a bad `MORCA_HOST_GPUS`
+        is said and counts none."""
+        if not self.gpus_counted:
+            self.gpus_counted = True
+            try:
+                self.gpus = Gpus(host_gpus())
+            except e:
+                print("morca: no GPUs counted on this host:", e)
+            if self.gpus.count() > 0:
+                print("morca: this host has", self.gpus.count(), "GPUs")
+        var room = self.room
+        room.gpus = self.gpus.count()
+        room.free_gpus = self.gpus.free()
+        return room
+
+    def take_gpus(mut self, var grant: Grant) raises -> Grant:
+        """`grant` with the devices of its GPUs, now held; as it is for
+        none."""
+        if grant.gpus > 0:
+            grant.devices = devices_text(self.gpus.take(grant.gpus))
+        return grant
+
+    def hold_gpus(mut self, pid: Int, grant: Grant):
+        """`pid` holds `grant`'s devices until it's reaped."""
+        if grant.devices:
+            self._holding[pid] = grant.device_list()
+
+    def give_back_gpus(mut self, pid: Int):
+        """The GPUs `pid` held are free again."""
+        if pid in self._holding:
+            try:
+                self.gpus.give_back(self._holding.pop(pid))
+            except:
+                pass
 
     def _contain(
         mut self,

@@ -27,7 +27,8 @@ image's). Small runs then start in a second, without an instance to boot.
 
 A run held by either of the last two stays queued with the reason in
 `runs.held`, which its page and JSON show. dista inside such a run is in
-local mode, `MORCA_CONTROL_WORKERS` (1) forked workers.
+local mode, `MORCA_CONTROL_WORKERS` (1) forked workers with no group, and
+each worker group's MAX (docs/groups.md, `morca._internal.provider`).
 
 **Secrets** (`--secret NAME=ID`) are read by the scheduler when it starts
 the run, with `MORCA_SECRET_FETCH` as the instances read them, else from
@@ -45,6 +46,7 @@ from json import loads
 from morca._internal.awsjson import aws_json
 from morca._internal.json import quote
 from morca._internal.proc import binary_seconds, capture
+from morca._internal.provider import local_env
 from morca._internal.system import Now
 
 comptime CONTROL = "control"
@@ -212,12 +214,15 @@ def run_env(
     limits: ControlLimits,
     image: String,
     secrets: List[Tuple[String, String]],
+    groups: String = "",
 ) -> List[String]:
     """What a control-placed run's process gets beside the scheduler's
-    environment: its local workers, its image (which its version records)
-    and its secrets' values, `secrets` being (NAME, value) pairs, named in
-    `MORCA_SECRETS`."""
-    var out: List[String] = [String("MORCA_WORKERS=", limits.workers)]
+    environment: its local workers and those of its `groups`
+    (`name=count,...`), as the control provider gives them
+    (`morca._internal.provider.local_env`), its image (which its version
+    records) and its secrets' values, `secrets` being (NAME, value) pairs,
+    named in `MORCA_SECRETS`."""
+    var out = local_env(CONTROL, limits.workers, groups)
     if image:
         out.append(String("MORCA_IMAGE=", image))
     out.extend(secrets_env(secrets))

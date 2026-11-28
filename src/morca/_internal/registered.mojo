@@ -29,8 +29,10 @@ from morca._internal.secrets import parse_secrets
 from morca._internal.kube_size import (
     KubeDefaults,
     KubeRequests,
+    GroupPods,
     KubeSizes,
     kube_sizes,
+    with_groups,
 )
 from morca._internal.resources import Request
 from morca._internal.recommend import (
@@ -135,7 +137,11 @@ struct Registered(Copyable, Movable):
     var groups: List[Group]
     """Its worker groups in morca.toml (`morca._internal.groups`), by name:
     on a pool, the members of its runs by group
-    (`morca._internal.member_wants`)."""
+    (`morca._internal.member_wants`); on the local runner, the control
+    host and Kubernetes, its cluster's workers by group
+    (`morca._internal.provider`)."""
+    var has_tasks: Bool
+    """Whether it has dista tasks, and so a cluster to start groups in."""
 
     def request(self) raises -> Request:
         """As declared: `auto` not resolved (`run_request` does)."""
@@ -351,6 +357,7 @@ def registered(mut db: State, only: String = "") raises -> List[Registered]:
                 r.working_set,
                 r.probe_every,
                 parse_groups(r.groups),
+                r.has_tasks,
             )
         )
     # A fixed count, or no tasks: no scaling.
@@ -413,11 +420,44 @@ def kube_sizes_of(p: Registered, sized: RunRequest) raises -> KubeSizes:
     )
 
 
+def cluster_groups(p: Registered) -> List[Group]:
+    """The groups `p`'s cluster starts workers in: its groups if it has
+    tasks, else none (`morca._internal.provider`)."""
+    return p.groups.copy() if p.has_tasks else List[Group]()
+
+
+def kube_groups_of(p: Registered, sized: RunRequest) raises -> List[GroupPods]:
+    """Each of `p`'s groups as pods on Kubernetes: its MAX of them, each
+    sized from the group's `cpus` and `memory_gb` where it sets them, else
+    as the pipeline's workers are (`sized`, `auto` resolved), with what an
+    out-of-memory kill raised the pipeline's memory to, and its GPUs."""
+    var out = List[GroupPods]()
+    for g in cluster_groups(p):
+        var r = sized.request
+        var ceiling = p.request().memory_max_mb
+        if g.cpus:
+            var own = Request.of(g.cpus, "")
+            r.cpus_min = own.cpus_min
+            r.cpus_max = own.cpus_max
+        if g.memory_gb:
+            var own = Request.of("", g.memory_gb)
+            r.memory_min_mb = own.memory_min_mb
+            r.memory_max_mb = own.memory_max_mb
+            ceiling = own.memory_max_mb
+        var size = kube_sizes(
+            r, ceiling, p.memory_raised_mb, KubeDefaults.from_env()
+        ).worker
+        out.append(GroupPods(g.name, g.max_workers, g.gpus, size))
+    return out^
+
+
 def _kube_requests(p: Registered) -> Optional[KubeRequests]:
-    """What a run of `p` asks for on Kubernetes in all, `auto` as last
-    learned; None if that can't be read."""
+    """What a run of `p` asks for on Kubernetes in all, its groups' pods
+    included, `auto` as last learned; None if that can't be read."""
     try:
         var sized = resolve_request(p.request(), p.learned, p.learn)
-        return kube_sizes_of(p, sized).requests(p.workers)
+        return with_groups(
+            kube_sizes_of(p, sized), p.workers, kube_groups_of(p, sized)
+        )
     except:
         return None

@@ -13,8 +13,10 @@ def load(mut ctx: Ctx, raw: RawFile) raises -> Loaded:
 
 A run of a pipeline with tasks starts one dista `Runtime` before its first
 step and keeps it until the run ends: in local mode it forks a head and
-`MORCA_WORKERS` workers (default 4); with `DISTA_HEAD` set it joins that
-cluster instead. The same binary is dista's worker: run with `DISTA_ROLE`
+`MORCA_WORKERS` workers (default 4) with no group, and the workers of each
+group `MORCA_GROUPS` names (`gpu=1,io=2`, which the local runner and the
+control host set from the pipeline's groups, docs/groups.md); with
+`DISTA_HEAD` set it joins that cluster instead. The same binary is dista's worker: run with `DISTA_ROLE`
 set, `morca_main` hands the process to dista before reading its arguments.
 
 The runtime starts before morca opens a database connection or its heartbeat
@@ -173,7 +175,7 @@ struct Tasks[*Ts: TaskLike](TaskSet):
         comptime if CompilationTarget.is_macos():
             if not head and not getenv("DISTA_ROLE"):
                 init_curl_before_fork()
-        return Self.RT(workers=workers)
+        return Self.RT(workers=workers, groups=getenv("MORCA_GROUPS"))
 
     @staticmethod
     def names() -> List[String]:

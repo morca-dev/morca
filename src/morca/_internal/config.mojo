@@ -88,7 +88,7 @@ from morca._internal.fill import (
 )
 from morca._internal.groups import (
     Group,
-    ec2_ignores_groups,
+    placement_warnings,
     groups_json,
     groups_problem,
     read_groups,
@@ -684,12 +684,12 @@ struct ProjectConfig(Movable):
         return read_groups(self.doc, pipeline)
 
     def group_warnings(self) raises -> List[String]:
-        """`file:line: [pipelines.<name>] ...` for each pipeline placed on
-        `ec2` that declares groups, which that placement ignores."""
+        """`file:line: [pipelines.<name>] ...` for what each pipeline's
+        groups are ignored for where it's placed
+        (`morca._internal.groups.placement_warnings`)."""
         var out = List[String]()
         for p in self.pipelines():
-            var why = ec2_ignores_groups(p, self.placement(p), self.groups(p))
-            if why:
+            for why in placement_warnings(p, self.placement(p), self.groups(p)):
                 out.append(
                     String(
                         self._loc(["pipelines", p, "groups"]),

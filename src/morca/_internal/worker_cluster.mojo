@@ -14,8 +14,13 @@ from std.ffi import c_int, external_call
 from dista.socket import Listener
 
 from morca._internal.proc import spawn
-
-comptime MEMBER_CONNECT_SECONDS = "10"
+from morca._internal.provider import (
+    POOL,
+    ClusterProcess,
+    cluster_env,
+    texts,
+    worker_slots as slots_of,
+)
 
 
 def free_port() raises -> Int:
@@ -35,17 +40,14 @@ def _with(var env: List[String], extra: List[String]) -> List[String]:
 def start_head(
     binary: String, env: List[String], log: String, port: Int, token: String
 ) raises -> Int:
-    """The run's dista head, on `port`; its pid (its own process group)."""
+    """The run's dista head, on `port`; its pid (its own process group).
+    Its variables are the pool provider's (`morca._internal.provider`)."""
     return spawn(
         [binary],
         log,
         env=_with(
             env.copy(),
-            [
-                String("DISTA_ROLE=head"),
-                String("DISTA_PORT=", port),
-                String("DISTA_TOKEN=", token),
-            ],
+            texts(cluster_env(POOL, ClusterProcess.head_at(port, token))),
         ),
         group=True,
     )
@@ -54,10 +56,7 @@ def start_head(
 def worker_slots(env: List[String], slots: Int) -> String:
     """A cluster worker's `DISTA_WORKER_SLOTS=`: `auto` if `env` asks for
     it, else `slots`."""
-    for e in env:
-        if e == "DISTA_WORKER_SLOTS=auto":
-            return String("DISTA_WORKER_SLOTS=auto")
-    return String("DISTA_WORKER_SLOTS=", slots)
+    return String("DISTA_WORKER_SLOTS=", slots_of(env, slots))
 
 
 def start_dista_worker(
@@ -77,19 +76,18 @@ def start_dista_worker(
     all of it its own); its pid. A member's gives up on a head that's gone
     within `MEMBER_CONNECT_SECONDS`. One of a worker group (docs/groups.md)
     gets `DISTA_GROUP`, so the head sends it that group's tasks alone; one
-    with none runs the tasks that name no group."""
-    var extra: List[String] = [
-        String("DISTA_ROLE=worker"),
-        String("DISTA_HEAD=", head),
-        String("DISTA_ADVERTISE=", advertise),
-        String("DISTA_TOKEN=", token),
-        worker_slots(env, slots),
-    ]
-    if member:
-        extra.append(String("DISTA_CONNECT_TIMEOUT=", MEMBER_CONNECT_SECONDS))
-    if group:
-        extra.append(String("DISTA_GROUP=", group))
-    return spawn([binary], log, env=_with(env.copy(), extra), group=True)
+    with none runs the tasks that name no group. Its variables are the
+    pool provider's (`morca._internal.provider`); its GPUs are in `env`,
+    from its grant."""
+    var p = ClusterProcess.worker_of(
+        head, advertise, token, slots_of(env, slots), member, group
+    )
+    return spawn(
+        [binary],
+        log,
+        env=_with(env.copy(), texts(cluster_env(POOL, p))),
+        group=True,
+    )
 
 
 def stop_group(pid: Int):

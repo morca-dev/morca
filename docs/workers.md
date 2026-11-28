@@ -362,8 +362,10 @@ reports demand, it starts with MIN and grows by demand. With reporting
 turned off, or a head on a worker from before this, a range still asks for
 MAX at once.
 
-Only pools use groups for now: a local run, `control`, Kubernetes and the
-`ec2` placement start their workers as before, with no group.
+Off a pool, the local runner, `control` and Kubernetes start each group's
+MAX of workers for the run's life, without demand
+([morca-toml.md](morca-toml.md#groups-off-a-pool)); the `ec2` placement
+ignores groups.
 
 **On a pool morca grows** (`[pools.<name>]`), this is set up for you:
 - every Hetzner machine joins a private network of the stack's, and its

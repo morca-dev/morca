@@ -49,15 +49,18 @@ without a grant takes a slot per core.
 (`host_gpus`) and says how many with each claim. A request's `gpus` are
 whole and granted exactly, never as a range; admission decides how many a
 start holds, and the worker picks which free devices (`Gpus`) and passes
-them as `MORCA_GRANT_GPUS` and `CUDA_VISIBLE_DEVICES`. Only a group asks
-for GPUs (`morca._internal.groups`), so until members by group land no
-run's request does.
+them as `MORCA_GRANT_GPUS` and `CUDA_VISIBLE_DEVICES`
+(`morca._internal.provider.gpu_env`). Only a group asks for GPUs
+(`morca._internal.groups`): on a pool its member's request, and on the
+local runner and the control host the run's, whose GPUs the scheduler's
+host hands out the same way (`local_gpus`).
 """
 
 from std.os import getenv
 from std.sys.info import CompilationTarget, num_logical_cores
 
 from morca._internal.proc import capture
+from morca._internal.provider import gpu_env
 from morca._internal.sample import _read, _sysctl_u64, parse_meminfo
 
 comptime MAX_CPUS = 1024
@@ -68,7 +71,6 @@ comptime WAITING = "waiting: needs "
 comptime GRANT_CPUS = "MORCA_GRANT_CPUS"
 comptime GRANT_MEMORY_MB = "MORCA_GRANT_MEMORY_MB"
 comptime GRANT_GPUS = "MORCA_GRANT_GPUS"
-comptime CUDA_DEVICES = "CUDA_VISIBLE_DEVICES"
 comptime HOST_GPUS = "MORCA_HOST_GPUS"
 comptime GPU_COUNT_SECONDS = 10.0
 """How long `host_gpus` waits for `nvidia-smi`."""
@@ -421,8 +423,7 @@ struct Grant(ImplicitlyCopyable, Movable):
         if self.memory_mb > 0:
             out.append(String(GRANT_MEMORY_MB, "=", self.memory_mb))
         if host_gpus > 0 or self.gpus > 0 or self.devices:
-            out.append(String(GRANT_GPUS, "=", self.devices))
-            out.append(String(CUDA_DEVICES, "=", self.devices))
+            out.extend(gpu_env(self.devices))
         return out^
 
 

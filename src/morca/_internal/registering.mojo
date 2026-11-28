@@ -26,7 +26,7 @@ from morca._internal.fill import (
     parse_fill_max_runs,
 )
 from morca._common.paths import absolute
-from morca._internal.groups import ec2_ignores_groups
+from morca._internal.groups import placement_warnings
 from morca._internal.proc import (
     binary_seconds,
     capture,
@@ -260,8 +260,7 @@ def register_pipeline(
         var twice = repeated_fill(q, now)
         if twice:
             print("morca: warning:", twice)
-        var ignored = ec2_ignores_groups(q.name, q.placement, q.groups)
-        if ignored:
+        for ignored in placement_warnings(q.name, q.placement, q.groups):
             print("morca: warning:", ignored, file=stderr)
         if q.fill.all and q.fill.budget < 0:
             print(

@@ -53,6 +53,7 @@ def tick(mut self: Scheduler, now: Int64) raises:
             continue
         print("reaped pid", done.pid, "exit", done.code)
         var spawned = self._spawned.pop(done.pid, (-1, 0, String()))
+        self.give_back_gpus(done.pid)
         var over = String()
         var ctl = Optional[_ControlProc](None)
         if done.pid in self._control:

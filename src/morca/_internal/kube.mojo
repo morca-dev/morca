@@ -9,7 +9,8 @@ was registered with (`morca register --image`):
 |---|---|
 | A Job, `morca-<run>-<start>` | the driver: `<binary> resume <run>` |
 | A Pod and a Service, `morca-<run>-<start>-head` | the dista head, for a pipeline with tasks |
-| `workers` Pods, `morca-<run>-<start>-worker-<i>` | dista's workers, for a pipeline with tasks |
+| `workers` Pods, `morca-<run>-<start>-worker-<i>` | dista's workers with no group, for a pipeline with tasks |
+| Pods `morca-<run>-<start>-worker-<group>-<i>` | each worker group's MAX of workers (docs/groups.md), labelled `orca.group` |
 
 All are labelled `orca.run`, `orca.start` (the run's start count),
 `orca.pipeline` and `orca.role`, and the head, its Service and the workers
@@ -19,7 +20,10 @@ are owned by the Job, so deleting the Job deletes them. The Job has
 retries runs itself. The driver reaches Postgres through the Secret
 `MORCA_RUN_SECRET` (default `morca-db`, key `url`) in that namespace, and the
 head through `DISTA_HEAD`; the scheduler's variables named in
-`MORCA_RUN_ENV` are copied to every pod.
+`MORCA_RUN_ENV` are copied to every pod. The head's and workers' own
+variables are the `kubernetes` provider's (`morca._internal.provider`): a
+group's workers get `DISTA_GROUP`, and its GPUs as `nvidia.com/gpu` in
+their limits.
 
 **Object storage.** Every pod gets the scheduler's bucket settings as it
 has them (`AWS_REGION`, `AWS_DEFAULT_REGION`, `AWS_ENDPOINT_URL`,
@@ -108,6 +112,7 @@ from morca._internal.db.live import stale_limit, start_grace
 from morca._internal.json import quote
 from morca._internal.kube_size import (
     OOM_KILLED,
+    GroupPods,
     KubeDefaults,
     Killed,
     KubeSizes,
@@ -117,7 +122,16 @@ from morca._internal.kube_size import (
     pod_killed,
     pod_memory,
     pod_stuck,
+    pod_slugs,
     stuck_text,
+)
+from morca._internal.provider import (
+    KUBERNETES,
+    ClusterProcess,
+    cluster_env,
+    driver_env,
+    json_entries,
+    pod_devices,
 )
 from morca._internal.kube_place import KubePlacement
 from morca._internal.logs import (
@@ -222,6 +236,17 @@ struct RunSpec(Copyable, Movable):
     pod's NAME refers to, over the variables above of that name."""
     var sizes: KubeSizes
     """Its pods' requests and limits (`morca._internal.kube_size`)."""
+    var groups: List[GroupPods]
+    """Its worker groups' pods (docs/groups.md); none without groups."""
+
+    def has_cluster(self) -> Bool:
+        """Whether it has a head: workers with no group or in a group."""
+        if self.workers > 0:
+            return True
+        for g in self.groups:
+            if g.count > 0:
+                return True
+        return False
 
 
 def secret_name(run: Int, start: Int) -> String:
@@ -455,12 +480,23 @@ struct KubeRunner(Movable):
         command: String,
         env: String,
         size: PodSize,
+        gpus: Int = 0,
+        group: String = "",
     ) -> String:
+        var labels = self._labels(r, role)
+        if group:
+            var base = labels^
+            labels = String(
+                base[byte = : base.byte_length() - 1],
+                ', "orca.group": ',
+                quote(group),
+                "}",
+            )
         return String(
             '{"apiVersion": "v1", "kind": "Pod", "metadata": {"name": ',
             quote(name),
             ', "labels": ',
-            self._labels(r, role),
+            labels,
             ', "ownerReferences": [',
             owner,
             ']}, "spec": {"restartPolicy": "Never"',
@@ -472,7 +508,7 @@ struct KubeRunner(Movable):
             ', "env": ',
             self._env(r, env),
             ', "resources": ',
-            size.resources(),
+            size.resources(gpus),
             "}]}}",
         )
 
@@ -509,7 +545,7 @@ struct KubeRunner(Movable):
         if r.allow_new_code:
             args.append("--allow-new-code")
         var argv = _command(args^, masked)
-        var driver_env = String(
+        var own = String(
             '{"name": "MORCA_DATABASE_URL", "valueFrom": {"secretKeyRef":',
             ' {"name": ',
             quote(self.secret),
@@ -519,14 +555,10 @@ struct KubeRunner(Movable):
             quote(r.image),
             "}",
         )
-        if r.workers > 0:
-            driver_env.write(
-                ', {"name": "DISTA_HEAD", "value": "',
-                head,
-                ":",
-                DISTA_PORT,
-                '"}',
-            )
+        var head_at = String(head, ":", DISTA_PORT)
+        var joins = driver_env(KUBERNETES, head_at if r.has_cluster() else "")
+        if len(joins) > 0:
+            own.write(", ", json_entries(joins))
         var job = String(
             '{"apiVersion": "batch/v1", "kind": "Job", "metadata": {"name": ',
             quote(name),
@@ -544,7 +576,7 @@ struct KubeRunner(Movable):
             ', "imagePullPolicy": "IfNotPresent", "command": ',
             argv,
             ', "env": ',
-            self._env(r, driver_env),
+            self._env(r, own),
             ', "resources": ',
             r.sizes.driver.resources(),
             "}]}}}}",
@@ -559,7 +591,7 @@ struct KubeRunner(Movable):
                 except:
                     pass  # sweep's, then
             raise e^
-        if r.workers == 0:
+        if not r.has_cluster():
             return
         var owner = String(
             '{"apiVersion": "batch/v1", "kind": "Job", "name": ',
@@ -577,11 +609,8 @@ struct KubeRunner(Movable):
                 "head",
                 owner,
                 bin,
-                String(
-                    '{"name": "DISTA_ROLE", "value": "head"}, {"name":',
-                    ' "DISTA_PORT", "value": "',
-                    DISTA_PORT,
-                    '"}',
+                json_entries(
+                    cluster_env(KUBERNETES, ClusterProcess.head_at(DISTA_PORT))
                 ),
                 r.sizes.head,
             ),
@@ -602,6 +631,9 @@ struct KubeRunner(Movable):
                 "}]}}",
             ),
         )
+        var worker = json_entries(
+            cluster_env(KUBERNETES, ClusterProcess.worker_of(head_at))
+        )
         for i in range(r.workers):
             _ = self.k.create(
                 PODS,
@@ -611,18 +643,34 @@ struct KubeRunner(Movable):
                     "worker",
                     owner,
                     bin,
-                    String(
-                        '{"name": "DISTA_ROLE", "value": "worker"}, {"name":',
-                        ' "DISTA_HEAD", "value": "',
-                        head,
-                        ":",
-                        DISTA_PORT,
-                        '"}, {"name": "DISTA_ADVERTISE", "valueFrom":',
-                        ' {"fieldRef": {"fieldPath": "status.podIP"}}}',
-                    ),
+                    worker,
                     r.sizes.worker,
                 ),
             )
+        # Each group's workers (docs/groups.md): its own size, DISTA_GROUP
+        # and its GPUs, which the pod sees numbered from 0.
+        var slugs = pod_slugs(r.groups)
+        for k in range(len(r.groups)):
+            ref g = r.groups[k]
+            var p = ClusterProcess.worker_of(head_at, group=g.group)
+            p.gpus = True
+            p.devices = pod_devices(g.gpus)
+            var env = json_entries(cluster_env(KUBERNETES, p))
+            for i in range(g.count):
+                _ = self.k.create(
+                    PODS,
+                    self._pod(
+                        r,
+                        String(name, "-worker-", slugs[k], "-", i),
+                        "worker",
+                        owner,
+                        bin,
+                        env,
+                        g.size,
+                        g.gpus,
+                        g.group,
+                    ),
+                )
 
     def _keep_logs(self, mut db: State, job: Value):
         """Appends the log of the Job's driver pod to the run's `driver.log`

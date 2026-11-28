@@ -99,6 +99,7 @@ comptime _RESERVED_ENV = [
     "MORCA_IMAGE",
     "MORCA_SECRETS",
     "MORCA_WORKERS",
+    "MORCA_GROUPS",
     "DISTA_ROLE",
     "DISTA_HEAD",
     "DISTA_ADVERTISE",

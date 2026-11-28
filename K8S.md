@@ -12,10 +12,11 @@ How morca will create the pods a run needs, what that takes on AWS, how its cost
 |---|---|
 | A Pod and a Service for the dista head | The Service gives the head a DNS name, which becomes `DISTA_HEAD` |
 | N worker Pods, sized for the pipeline | dista's workers: the pipeline's image with `DISTA_ROLE=worker` |
+| The worker Pods of each [worker group](docs/morca-toml.md#groups-off-a-pool) | Its MAX of workers, sized for the group, with `DISTA_GROUP` and the group's GPUs as `nvidia.com/gpu` |
 | A Job for the driver | The pipeline binary: `taxi run ...`, or `taxi resume <run>` |
 | A Secret, for a run with secrets | The values of its `secrets`, which its pods refer to by name |
 
-Every pod also gets the bucket: the scheduler's `AWS_REGION`, `AWS_ENDPOINT_URL_S3` and the like, and `MORCA_WAREHOUSE` and `MORCA_LOGS` when they're in object storage, so steps reach the warehouse and attempts' logs and timelines go to the bucket. The S3 keys come from the stack's Secret `morca-s3` in `morca-runs` (`MORCA_RUN_S3_SECRET`) by `secretKeyRef`, so no Job or Pod object holds them. Before a run's objects go, the scheduler keeps its driver's, head's and workers' logs beside its attempts' (`driver.log`, `head.log`, `worker-<i>.log`).
+Every pod also gets the bucket: the scheduler's `AWS_REGION`, `AWS_ENDPOINT_URL_S3` and the like, and `MORCA_WAREHOUSE` and `MORCA_LOGS` when they're in object storage, so steps reach the warehouse and attempts' logs and timelines go to the bucket. The S3 keys come from the stack's Secret `morca-s3` in `morca-runs` (`MORCA_RUN_S3_SECRET`) by `secretKeyRef`, so no Job or Pod object holds them. Before a run's objects go, the scheduler keeps its driver's, head's and workers' logs beside its attempts' (`driver.log`, `head.log`, `worker-<i>.log`, `worker-<group>-<i>.log`).
 
 The scheduler watches the Job, and deletes everything labelled with the run when it ends.
 

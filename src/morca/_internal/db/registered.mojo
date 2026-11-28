@@ -70,6 +70,8 @@ struct Registration(Copyable, Movable):
     var probe_every: Int
     var groups: String
     """`orca.pipelines.groups` (`morca._internal.groups`): JSON, or empty."""
+    var has_tasks: Bool
+    """Whether its binary's `describe` lists dista tasks."""
 
 
 def registrations(
@@ -136,7 +138,9 @@ def registrations(
             " concurrency_key, coalesce(concurrency_limit, 0)::bigint AS"
             " concurrency_limit, learn_from IS NOT DISTINCT FROM"
             " 'working_set' AS working_set, coalesce(probe_every, 1)::bigint"
-            " AS probe_every, coalesce(groups::text, '') AS groups FROM"
+            " AS probe_every, coalesce(groups::text, '') AS groups,"
+            " jsonb_array_length(coalesce(describe->'tasks', '[]')) > 0 AS"
+            " has_tasks FROM"
             " orca.pipelines WHERE binary_path IS"
             " NOT NULL AND retired IS NULL AND ($1 = '' OR name = $1) ORDER BY"
             " priority DESC, name"
@@ -199,6 +203,7 @@ def registrations(
                 r.bool("working_set"),
                 Int(r.int64("probe_every")),
                 r.text("groups"),
+                r.bool("has_tasks"),
             )
         )
     return out^
